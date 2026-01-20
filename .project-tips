@@ -1,0 +1,10 @@
+# sccs | Python CLI Tool (UV)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ Setup:     uv venv && venv+ && uv pip install -e ".[dev]"
+▸ Run:       sccs sync --dry-run
+▸ Status:    sccs status
+▸ Diff:      sccs diff <skill-name>
+▸ Config:    sccs config sync --dry-run
+▸ Test:      pytest -v
+▸ Format:    black sccs/ tests/ && isort sccs/ tests/
+▸ Types:     mypy sccs/
