@@ -14,8 +14,8 @@ from sccs.config import (
     DATETIME_FORMAT,
     DEFAULT_LOCAL_COMMANDS_PATH,
     DEFAULT_LOCAL_PATH,
-    DEFAULT_REPO_COMMANDS_PATH,
-    DEFAULT_REPO_PATH,
+    get_default_repo_commands_path,
+    get_default_repo_skills_path,
 )
 from sccs.skill import Skill, scan_skills_directory
 from sccs.state import SyncState
@@ -134,9 +134,9 @@ class SyncEngine:
             dry_run: If True, don't make any changes
         """
         self.local_path = local_path or DEFAULT_LOCAL_PATH
-        self.repo_path = repo_path or DEFAULT_REPO_PATH
+        self.repo_path = repo_path or get_default_repo_skills_path()
         self.local_commands_path = local_commands_path or DEFAULT_LOCAL_COMMANDS_PATH
-        self.repo_commands_path = repo_commands_path or DEFAULT_REPO_COMMANDS_PATH
+        self.repo_commands_path = repo_commands_path or get_default_repo_commands_path()
         self.state = state or SyncState.load()
         self.dry_run = dry_run
         self.local_skills: dict[str, Skill] = {}

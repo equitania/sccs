@@ -18,9 +18,10 @@ from sccs.config import (
     COMMIT_PREFIX,
     DEFAULT_LOCAL_COMMANDS_PATH,
     DEFAULT_LOCAL_PATH,
-    DEFAULT_REPO_COMMANDS_PATH,
-    DEFAULT_REPO_PATH,
     GIT_REMOTE,
+    clear_repo_root_cache,
+    get_default_repo_commands_path,
+    get_default_repo_skills_path,
     get_repo_root,
     get_sync_log_path,
 )
@@ -109,13 +110,14 @@ def sync(
     Detects changes in both directions and syncs accordingly.
     Conflicts (both sides changed) are resolved interactively.
     """
-    # Ensure configured
-    ensure_configured()
+    # Ensure configured - clear cache to pick up any new config
+    config = ensure_configured()
+    clear_repo_root_cache()
 
     local = local_path or DEFAULT_LOCAL_PATH
-    repo = repo_path or DEFAULT_REPO_PATH
+    repo = repo_path or get_default_repo_skills_path()
     local_cmds = local_commands_path or DEFAULT_LOCAL_COMMANDS_PATH
-    repo_cmds = repo_commands_path or DEFAULT_REPO_COMMANDS_PATH
+    repo_cmds = repo_commands_path or get_default_repo_commands_path()
 
     # Ensure repo directories exist
     repo.mkdir(parents=True, exist_ok=True)
@@ -294,13 +296,24 @@ def status(
     repo_commands_path: Optional[Path],
 ) -> None:
     """Show current sync status without making changes."""
-    # Ensure configured
-    ensure_configured()
+    # Ensure configured - clear cache to pick up any new config
+    config = ensure_configured()
+    clear_repo_root_cache()
 
     local = local_path or DEFAULT_LOCAL_PATH
-    repo = repo_path or DEFAULT_REPO_PATH
+    repo = repo_path or get_default_repo_skills_path()
     local_cmds = local_commands_path or DEFAULT_LOCAL_COMMANDS_PATH
-    repo_cmds = repo_commands_path or DEFAULT_REPO_COMMANDS_PATH
+    repo_cmds = repo_commands_path or get_default_repo_commands_path()
+
+    # Show user configuration
+    from sccs.user_config import CONFIG_FILE
+
+    logger.info(f"Config:   {CONFIG_FILE}")
+    if config.repo_path:
+        logger.info(f"Repo:     {config.repo_path}")
+    elif config.repo_url:
+        logger.info(f"Repo URL: {config.repo_url}")
+    console.print()
 
     logger.info(f"Skills:   {local} <-> {repo}")
     logger.info(f"Commands: {local_cmds} <-> {repo_cmds}")
@@ -363,11 +376,11 @@ def show_diff(
     """
     if command:
         local = local_commands_path or DEFAULT_LOCAL_COMMANDS_PATH
-        repo = repo_commands_path or DEFAULT_REPO_COMMANDS_PATH
+        repo = repo_commands_path or get_default_repo_commands_path()
         show_command_diff(name, local, repo, console)
     else:
         local = local_path or DEFAULT_LOCAL_PATH
-        repo = repo_path or DEFAULT_REPO_PATH
+        repo = repo_path or get_default_repo_skills_path()
         show_skill_diff(name, local, repo, console)
 
 
@@ -395,11 +408,12 @@ def init() -> None:
 
     Creates the necessary directory structure and initial state file.
     """
-    # Ensure configured
+    # Ensure configured - clear cache to pick up any new config
     ensure_configured()
+    clear_repo_root_cache()
 
-    skills_repo = DEFAULT_REPO_PATH
-    commands_repo = DEFAULT_REPO_COMMANDS_PATH
+    skills_repo = get_default_repo_skills_path()
+    commands_repo = get_default_repo_commands_path()
 
     if not skills_repo.exists():
         skills_repo.mkdir(parents=True)

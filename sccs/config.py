@@ -4,46 +4,96 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from sccs.user_config import get_config
-
-# Repository root - configurable via environment variable or auto-detected
+# Repository root - configurable via environment variable
 _REPO_ROOT_ENV = os.environ.get("SCCS_REPO")
+
+# Cache for repo root to avoid repeated lookups
+_cached_repo_root: Optional[Path] = None
 
 
 def _find_repo_root() -> Path:
     """Find the repository root by looking for .git directory.
 
-    Searches from current working directory upward.
-    Falls back to user config repo_path if not found.
+    Priority order:
+    1. SCCS_REPO environment variable
+    2. User config repo_path (from ~/.config/sccs/config.json)
+    3. Search from cwd upward for .git + .claude directory
+    4. Last resort: current working directory
+
+    Returns:
+        Path to repository root
     """
+    global _cached_repo_root
+    if _cached_repo_root is not None:
+        return _cached_repo_root
+
+    # 1. Environment variable has highest priority
     if _REPO_ROOT_ENV:
-        return Path(_REPO_ROOT_ENV)
+        _cached_repo_root = Path(_REPO_ROOT_ENV)
+        return _cached_repo_root
 
-    # Search from cwd upward for .git directory
-    current = Path.cwd()
-    while current != current.parent:
-        if (current / ".git").exists() and (current / ".claude").exists():
-            return current
-        current = current.parent
+    # 2. User config repo_path - import here to avoid circular import at module level
+    from sccs.user_config import get_config
 
-    # Try user config
     user_config = get_config()
+
+    # Try repo_path first
     if user_config.repo_path:
         repo_path = Path(user_config.repo_path).expanduser()
         if repo_path.exists():
-            return repo_path
+            _cached_repo_root = repo_path
+            return _cached_repo_root
 
-    # Last resort: use cwd
+    # Fallback: repo_url might be a local path (migration from old configs)
+    if user_config.repo_url and not user_config.repo_url.startswith(
+        ("http://", "https://", "git@", "ssh://")
+    ):
+        repo_path = Path(user_config.repo_url).expanduser()
+        if repo_path.exists():
+            _cached_repo_root = repo_path
+            return _cached_repo_root
+
+    # 3. Search from cwd upward for .git directory with .claude
+    current = Path.cwd()
+    while current != current.parent:
+        if (current / ".git").exists() and (current / ".claude").exists():
+            _cached_repo_root = current
+            return _cached_repo_root
+        current = current.parent
+
+    # 4. Last resort: use cwd (will likely fail later but provides clear error)
     return Path.cwd()
 
 
-# Default paths for skills
-DEFAULT_LOCAL_PATH = Path.home() / ".claude" / "skills"
-DEFAULT_REPO_PATH = _find_repo_root() / ".claude" / "skills"
+def clear_repo_root_cache() -> None:
+    """Clear the cached repo root.
 
-# Default paths for commands
+    Call this after configuration changes to force re-detection.
+    """
+    global _cached_repo_root
+    _cached_repo_root = None
+
+
+# Default LOCAL paths (static - always the same)
+DEFAULT_LOCAL_PATH = Path.home() / ".claude" / "skills"
 DEFAULT_LOCAL_COMMANDS_PATH = Path.home() / ".claude" / "commands"
-DEFAULT_REPO_COMMANDS_PATH = _find_repo_root() / ".claude" / "commands"
+
+
+def get_default_repo_skills_path() -> Path:
+    """Get the default repository skills path.
+
+    Uses lazy evaluation to ensure user config is checked.
+    """
+    return _find_repo_root() / ".claude" / "skills"
+
+
+def get_default_repo_commands_path() -> Path:
+    """Get the default repository commands path.
+
+    Uses lazy evaluation to ensure user config is checked.
+    """
+    return _find_repo_root() / ".claude" / "commands"
+
 
 # State and log files (relative to repo root)
 STATE_FILE_NAME = ".sync_state.json"
@@ -81,6 +131,8 @@ def get_sync_log_path() -> Path:
 
 def get_local_skills_path() -> Path:
     """Get the local skills path, respecting user config."""
+    from sccs.user_config import get_config
+
     user_config = get_config()
     if user_config.local_skills_path:
         return Path(user_config.local_skills_path).expanduser()
@@ -89,6 +141,8 @@ def get_local_skills_path() -> Path:
 
 def get_local_commands_path() -> Path:
     """Get the local commands path, respecting user config."""
+    from sccs.user_config import get_config
+
     user_config = get_config()
     if user_config.local_commands_path:
         return Path(user_config.local_commands_path).expanduser()
