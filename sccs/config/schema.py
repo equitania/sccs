@@ -126,6 +126,7 @@ class SccsConfig(BaseModel):
     )
     global_exclude: list[str] = Field(
         default_factory=lambda: [
+            # System files
             ".DS_Store",
             "*.swp",
             "*.swo",
@@ -133,12 +134,37 @@ class SccsConfig(BaseModel):
             ".git",
             "__pycache__",
             "*.pyc",
+            # Local/private files
             ".env",
             ".env.*",
             "*.local",
             "*.local.*",
+            # SECURITY: Sensitive files - NEVER sync these!
+            "*token*",
+            "*secret*",
+            "*credential*",
+            "*password*",
+            "*.pem",
+            "*.key",
+            "*.p12",
+            "*.pfx",
+            "*_rsa",
+            "*_ed25519",
+            "*_ecdsa",
+            "*_dsa",
+            "id_rsa*",
+            "id_ed25519*",
+            "known_hosts",
+            ".pypirc",
+            ".npmrc",
+            ".netrc",
+            "fish_variables",
+            "*.keychain*",
+            "*oauth*",
+            "*auth*.json",
+            "*.gpg",
         ],
-        description="Global exclude patterns",
+        description="Global exclude patterns (includes security-sensitive files)",
     )
     path_transforms: PathTransformConfig = Field(
         default_factory=PathTransformConfig, description="Path transformation settings"

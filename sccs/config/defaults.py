@@ -192,6 +192,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
     },
     "global_exclude": [
+        # System files
         ".DS_Store",
         "*.swp",
         "*.swo",
@@ -199,10 +200,35 @@ DEFAULT_CONFIG: dict[str, Any] = {
         ".git",
         "__pycache__",
         "*.pyc",
+        # Local/private files
         ".env",
         ".env.*",
         "*.local",
         "*.local.*",
+        # SECURITY: Sensitive files - NEVER sync these!
+        "*token*",
+        "*secret*",
+        "*credential*",
+        "*password*",
+        "*.pem",
+        "*.key",
+        "*.p12",
+        "*.pfx",
+        "*_rsa",
+        "*_ed25519",
+        "*_ecdsa",
+        "*_dsa",
+        "id_rsa*",
+        "id_ed25519*",
+        "known_hosts",
+        ".pypirc",
+        ".npmrc",
+        ".netrc",
+        "fish_variables",
+        "*.keychain*",
+        "*oauth*",
+        "*auth*.json",
+        "*.gpg",
     ],
     "path_transforms": {
         "placeholders": {
