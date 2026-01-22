@@ -1,5 +1,7 @@
 # SCCS - SkillsCommandsConfigsSync
 
+![SCCS Overview](sccs_gemini.jpg)
+
 Unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
 ## Features
