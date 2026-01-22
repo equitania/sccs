@@ -255,7 +255,9 @@ sccs sync --no-push          # Skip push (overrides auto_push=true)
 # Status and diff
 sccs status                  # Show status of all categories
 sccs status --category fish  # Status of specific category
-sccs diff <item> --category <cat>  # Show diff for item
+sccs diff                    # Show all diffs in all categories
+sccs diff -c claude_skills   # Show all diffs in category
+sccs diff my-skill -c claude_skills  # Show diff for specific item
 
 # History
 sccs log                     # Show sync history

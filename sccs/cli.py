@@ -163,11 +163,18 @@ def status(ctx: click.Context, category: Optional[str]) -> None:
 
 
 @cli.command()
-@click.argument("item_name")
-@click.option("-c", "--category", required=True, help="Category of the item")
+@click.argument("item_name", required=False)
+@click.option("-c", "--category", help="Category to show diffs for")
 @click.pass_context
-def diff(ctx: click.Context, item_name: str, category: str) -> None:
-    """Show diff for a specific item."""
+def diff(ctx: click.Context, item_name: Optional[str], category: Optional[str]) -> None:
+    """Show diff for items.
+
+    \b
+    Examples:
+      sccs diff -c claude_skills           Show all diffs in category
+      sccs diff my-skill -c claude_skills  Show diff for specific item
+      sccs diff                            Show all diffs in all categories
+    """
     console = ctx.obj["console"]
 
     try:
@@ -177,21 +184,56 @@ def diff(ctx: click.Context, item_name: str, category: str) -> None:
         sys.exit(1)
 
     engine = SyncEngine(config)
-    handler = engine.get_handler(category)
 
-    if handler is None:
-        console.print_error(f"Category '{category}' not found")
+    # Determine which categories to check
+    if category:
+        handler = engine.get_handler(category)
+        if handler is None:
+            console.print_error(f"Category '{category}' not found")
+            sys.exit(1)
+        categories_to_check = [(category, handler)]
+    else:
+        categories_to_check = []
+        for name in engine.get_enabled_categories():
+            handler = engine.get_handler(name)
+            if handler is not None:
+                categories_to_check.append((name, handler))
+
+    if not categories_to_check:
+        console.print_warning("No categories to check")
         sys.exit(1)
 
-    # Find the item
-    items = handler.scan_items()
-    item = next((i for i in items if i.name == item_name), None)
+    diff_count = 0
 
-    if item is None:
-        console.print_error(f"Item '{item_name}' not found in category '{category}'")
-        sys.exit(1)
+    for cat_name, handler in categories_to_check:
+        items = handler.scan_items()
 
-    show_diff(item, console=console._console)
+        # Filter to specific item if provided
+        if item_name:
+            items = [i for i in items if i.name == item_name]
+            if not items and category:
+                console.print_error(f"Item '{item_name}' not found in category '{category}'")
+                sys.exit(1)
+
+        # Show diffs for items that have changes
+        for item in items:
+            if item.local_path and item.repo_path:
+                # Check if there are actual differences
+                if item.local_path.exists() and item.repo_path.exists():
+                    local_content = item.local_path.read_text(encoding="utf-8") if item.local_path.is_file() else ""
+                    repo_content = item.repo_path.read_text(encoding="utf-8") if item.repo_path.is_file() else ""
+                    if local_content != repo_content:
+                        console.print(f"\n[bold cyan]{cat_name}[/bold cyan] → [yellow]{item.name}[/yellow]")
+                        show_diff(item, console=console._console)
+                        diff_count += 1
+                elif item.local_path.exists() or item.repo_path.exists():
+                    # One side exists, the other doesn't
+                    console.print(f"\n[bold cyan]{cat_name}[/bold cyan] → [yellow]{item.name}[/yellow]")
+                    show_diff(item, console=console._console)
+                    diff_count += 1
+
+    if diff_count == 0:
+        console.print_info("No differences found")
 
 
 @cli.command()
