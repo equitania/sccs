@@ -1,6 +1,7 @@
-"""Allow running sccs as a module: python -m sccs."""
+# SCCS - SkillsCommandsConfigsSync
+# Entry point for running as module: python -m sccs
 
-from sccs.cli import cli
+from sccs.cli import main
 
 if __name__ == "__main__":
-    cli()
+    main()

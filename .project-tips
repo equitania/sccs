@@ -1,10 +1,10 @@
-# sccs | Python CLI Tool (UV)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-▸ Setup:     uv venv && venv+ && uv pip install -e ".[dev]"
-▸ Run:       sccs sync --dry-run
-▸ Status:    sccs status
-▸ Diff:      sccs diff <skill-name>
-▸ Config:    sccs config sync --dry-run
-▸ Test:      pytest -v
-▸ Format:    black sccs/ tests/ && isort sccs/ tests/
-▸ Types:     mypy sccs/
+# sccs v2.0 | Claude Code Sync Tool (UV)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ Setup:      uv venv && venv+ && uv pip install -e ".[dev]"
+▸ Sync:       sccs sync --dry-run
+▸ Status:     sccs status
+▸ Categories: sccs categories --all
+▸ Enable:     sccs categories enable <name>
+▸ Config:     sccs config show
+▸ Test:       pytest --cov=sccs
+▸ Format:     black sccs/ tests/ && isort sccs/ tests/

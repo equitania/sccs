@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sccs"
+version = "2.0.0"
+description = "SkillsCommandsConfigsSync - Unified YAML-configured synchronization for Claude Code files"
+readme = "README.md"
+license = "AGPL-3.0"
+authors = [
+    { name = "Equitania Software GmbH", email = "info@equitania.de" }
+]
+maintainers = [
+    { name = "Equitania Software GmbH", email = "info@equitania.de" }
+]
+keywords = [
+    "claude",
+    "claude-code",
+    "skills",
+    "commands",
+    "sync",
+    "configuration",
+    "dotfiles"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Version Control",
+    "Topic :: Utilities",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "PyYAML>=6.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "types-PyYAML>=6.0.0",
+]
+
+[project.scripts]
+sccs = "sccs.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/equitania/sccs"
+Repository = "https://github.com/equitania/sccs"
+Documentation = "https://github.com/equitania/sccs#readme"
+Issues = "https://github.com/equitania/sccs/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sccs"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310", "py311", "py312", "py313"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

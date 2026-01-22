@@ -1,54 +1,35 @@
-"""SCCS - Skills, Commands, Configs Sync for Claude Code.
+# SCCS - SkillsCommandsConfigsSync
+# Unified YAML-configured synchronization for Claude Code files
+#
+# Version: 2.0.0
+# Date: 22.01.2026
 
-A bidirectional synchronization tool for Claude Code skills, commands,
-and configuration files between local (~/.claude/) and a Git repository.
-"""
-
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Equitania Software GmbH"
-__email__ = "info@equitania.de"
+
+# Lazy imports for better startup performance
+def __getattr__(name: str):
+    """Lazy import module attributes."""
+    if name == "SyncEngine":
+        from sccs.sync.engine import SyncEngine
+        return SyncEngine
+    elif name == "SccsConfig":
+        from sccs.config.schema import SccsConfig
+        return SccsConfig
+    elif name == "load_config":
+        from sccs.config.loader import load_config
+        return load_config
+    elif name == "Console":
+        from sccs.output.console import Console
+        return Console
+    raise AttributeError(f"module 'sccs' has no attribute '{name}'")
+
 
 __all__ = [
     "__version__",
-    "Command",
-    "Skill",
-    "SyncState",
-    "SkillState",
-    "CommandState",
+    "__author__",
     "SyncEngine",
-    "SyncAction",
-    "SyncResult",
-    "ActionType",
-    "ItemType",
-    "scan_skills_directory",
-    "scan_commands_directory",
+    "SccsConfig",
+    "load_config",
+    "Console",
 ]
-
-
-def __getattr__(name: str):
-    """Lazy import to avoid loading dependencies during setup."""
-    if name == "Command":
-        from sccs.command import Command
-
-        return Command
-    if name == "scan_commands_directory":
-        from sccs.command import scan_commands_directory
-
-        return scan_commands_directory
-    if name == "Skill":
-        from sccs.skill import Skill
-
-        return Skill
-    if name == "scan_skills_directory":
-        from sccs.skill import scan_skills_directory
-
-        return scan_skills_directory
-    if name in ("SyncState", "SkillState", "CommandState"):
-        from sccs import state
-
-        return getattr(state, name)
-    if name in ("SyncEngine", "SyncAction", "SyncResult", "ActionType", "ItemType"):
-        from sccs import sync_engine
-
-        return getattr(sync_engine, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
