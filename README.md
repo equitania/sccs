@@ -245,6 +245,13 @@ sccs sync --dry-run          # Preview without changes
 sccs sync --force local      # Force local version in conflicts
 sccs sync --force repo       # Force repo version in conflicts
 
+# Git operations (override config settings)
+sccs sync --commit           # Commit changes (overrides auto_commit=false)
+sccs sync --push             # Push after commit (overrides auto_push=false)
+sccs sync --commit --push    # Sync, commit and push
+sccs sync --no-commit        # Skip commit (overrides auto_commit=true)
+sccs sync --no-push          # Skip push (overrides auto_push=true)
+
 # Status and diff
 sccs status                  # Show status of all categories
 sccs status --category fish  # Status of specific category

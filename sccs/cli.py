@@ -7,15 +7,14 @@ from typing import Optional
 
 import click
 
+from sccs import __version__
 from sccs.config import (
     load_config,
-    save_config,
     ensure_config_exists,
     get_config_path,
     validate_config_file,
     generate_default_config,
     update_category_enabled,
-    SccsConfig,
 )
 from sccs.sync import SyncEngine
 from sccs.sync.state import StateManager
@@ -41,7 +40,8 @@ def set_console(console: Console) -> None:
     _console = console
 
 
-@click.group()
+@click.group(epilog="Use 'sccs <command> --help' for detailed options of each command.")
+@click.version_option(version=__version__, prog_name="sccs")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
 @click.option("--no-color", is_flag=True, help="Disable colored output")
 @click.pass_context
@@ -49,6 +49,14 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
     """SCCS - SkillsCommandsConfigsSync
 
     Bidirectional synchronization for Claude Code files.
+
+    \b
+    Quick examples:
+      sccs sync                  Sync all enabled categories
+      sccs sync --commit --push  Sync with git commit and push
+      sccs sync --dry-run        Preview changes only
+      sccs status                Show sync status
+      sccs config show           Show configuration
     """
     ctx.ensure_object(dict)
     console = Console(verbose=verbose, colored=not no_color)
@@ -61,15 +69,19 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.option("-c", "--category", help="Sync specific category only")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
 @click.option("-f", "--force", type=click.Choice(["local", "repo"]), help="Force sync direction")
-@click.option("--no-commit", is_flag=True, help="Skip git commit")
-@click.option("--no-push", is_flag=True, help="Skip git push")
+@click.option("--commit", "do_commit", is_flag=True, help="Commit changes (overrides auto_commit=false)")
+@click.option("--no-commit", is_flag=True, help="Skip commit (overrides auto_commit=true)")
+@click.option("--push", "do_push", is_flag=True, help="Push after commit (overrides auto_push=false)")
+@click.option("--no-push", is_flag=True, help="Skip push (overrides auto_push=true)")
 @click.pass_context
 def sync(
     ctx: click.Context,
     category: Optional[str],
     dry_run: bool,
     force: Optional[str],
+    do_commit: bool,
     no_commit: bool,
+    do_push: bool,
     no_push: bool,
 ) -> None:
     """Synchronize files between local and repository."""
@@ -97,21 +109,26 @@ def sync(
     console.print_sync_result(result)
 
     # Handle git operations
-    if not dry_run and result.synced_items > 0 and not no_commit:
+    if not dry_run and result.synced_items > 0:
         repo_path = Path(config.repository.path).expanduser()
 
-        if config.repository.auto_commit or not no_commit:
-            if has_uncommitted_changes(repo_path):
-                stage_all(repo_path)
-                commit_msg = f"{config.repository.commit_prefix} Sync {result.synced_items} items"
-                commit(commit_msg, repo_path)
-                console.print_success(f"Committed: {commit_msg}")
+        # Commit if: (auto_commit OR --commit) AND NOT --no-commit
+        should_commit = (config.repository.auto_commit or do_commit) and not no_commit
 
-                if config.repository.auto_push and not no_push:
-                    if push(repo_path, remote=config.repository.remote):
-                        console.print_success(f"Pushed to {config.repository.remote}")
-                    else:
-                        console.print_warning("Push failed")
+        if should_commit and has_uncommitted_changes(repo_path):
+            stage_all(repo_path)
+            commit_msg = f"{config.repository.commit_prefix} Sync {result.synced_items} items"
+            commit(commit_msg, repo_path)
+            console.print_success(f"Committed: {commit_msg}")
+
+            # Push if: (auto_push OR --push) AND NOT --no-push
+            should_push = (config.repository.auto_push or do_push) and not no_push
+
+            if should_push:
+                if push(repo_path, remote=config.repository.remote):
+                    console.print_success(f"Pushed to {config.repository.remote}")
+                else:
+                    console.print_warning("Push failed")
 
     if result.conflicts > 0:
         console.print_warning(f"{result.conflicts} conflicts need manual resolution")
