@@ -104,6 +104,7 @@ class ActionResult:
     action: SyncAction
     success: bool
     error: Optional[str] = None
+    backup_path: Optional[Path] = None
 
     @property
     def item_name(self) -> str:
@@ -154,8 +155,8 @@ def execute_action(action: SyncAction, *, dry_run: bool = False) -> ActionResult
         )
 
 
-def _execute_copy(action: SyncAction) -> ActionResult:
-    """Execute a copy action."""
+def _execute_copy(action: SyncAction, *, backup: bool = True) -> ActionResult:
+    """Execute a copy action with optional backup."""
     if action.source_path is None or action.dest_path is None:
         return ActionResult(
             action=action,
@@ -173,8 +174,20 @@ def _execute_copy(action: SyncAction) -> ActionResult:
     # Ensure destination directory exists
     ensure_dir(action.dest_path.parent)
 
-    # Perform copy
-    safe_copy(action.source_path, action.dest_path)
+    # Perform copy with backup
+    backup_path = safe_copy(
+        action.source_path,
+        action.dest_path,
+        backup=backup,
+        backup_category=action.item.category,
+    )
+
+    if backup_path:
+        return ActionResult(
+            action=action,
+            success=True,
+            backup_path=backup_path,
+        )
 
     return ActionResult(action=action, success=True)
 

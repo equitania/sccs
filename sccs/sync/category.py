@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 from sccs.config.schema import SyncCategory, SyncMode
 from sccs.sync.item import SyncItem, scan_items_for_category
@@ -53,6 +53,7 @@ class CategorySyncResult:
     skipped: int = 0
     conflicts: int = 0
     errors: int = 0
+    aborted: bool = False
     results: list[ActionResult] = field(default_factory=list)
     error_message: Optional[str] = None
 
@@ -167,6 +168,7 @@ class CategoryHandler:
         *,
         dry_run: bool = False,
         force_direction: Optional[str] = None,
+        conflict_resolver: Optional[Callable[[SyncAction, str], str]] = None,
     ) -> CategorySyncResult:
         """
         Synchronize this category.
@@ -174,6 +176,8 @@ class CategoryHandler:
         Args:
             dry_run: If True, don't perform actual operations.
             force_direction: Force sync direction ("local" or "repo").
+            conflict_resolver: Optional callback for interactive conflict resolution.
+                               Receives (action, category_name) and returns "local", "repo", "skip", or "abort".
 
         Returns:
             CategorySyncResult with details of what was done.
@@ -187,9 +191,22 @@ class CategoryHandler:
         )
 
         for action in actions:
-            # Handle force direction
-            if force_direction and action.action_type == ActionType.CONFLICT:
-                action = self._resolve_conflict(action, force_direction)
+            # Handle conflicts
+            if action.action_type == ActionType.CONFLICT:
+                if force_direction:
+                    action = self._resolve_conflict(action, force_direction)
+                elif conflict_resolver and not dry_run:
+                    resolution = conflict_resolver(action, self.name)
+                    if resolution == "abort":
+                        result.aborted = True
+                        result.success = False
+                        break
+                    elif resolution == "skip":
+                        result.skipped += 1
+                        continue
+                    elif resolution in ("local", "repo"):
+                        action = self._resolve_conflict(action, resolution)
+                    # If "diff", the resolver should handle showing diff and re-prompt
 
             # Skip non-actionable items
             if not action.needs_action:

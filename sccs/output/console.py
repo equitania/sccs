@@ -11,7 +11,7 @@ from rich.tree import Tree
 
 from sccs.sync.category import CategoryStatus, CategorySyncResult
 from sccs.sync.engine import SyncResult
-from sccs.sync.actions import ActionType
+from sccs.sync.actions import ActionType, SyncAction
 
 
 class Console:
@@ -260,6 +260,45 @@ class Console:
             return default
 
         return response in ("y", "yes", "j", "ja")
+
+    def resolve_conflict(self, action: SyncAction, category_name: str) -> str:
+        """
+        Interactive menu to resolve a conflict.
+
+        Args:
+            action: The conflicting action.
+            category_name: Category name for context.
+
+        Returns:
+            Resolution choice: "local", "repo", "diff", "skip", or "abort"
+        """
+        item_name = action.item.name
+
+        self._console.print(f"\n[bold red]Conflict detected:[/bold red] {category_name}/{item_name}")
+        self._console.print(f"  Both local and repository versions have changed.\n")
+
+        self._console.print("[bold]Options:[/bold]")
+        self._console.print("  [cyan]1[/cyan] - Keep [bold]local[/bold] version (overwrite repo)")
+        self._console.print("  [cyan]2[/cyan] - Keep [bold]repo[/bold] version (overwrite local)")
+        self._console.print("  [cyan]3[/cyan] - View [bold]diff[/bold] first")
+        self._console.print("  [cyan]4[/cyan] - [bold]Skip[/bold] this item")
+        self._console.print("  [cyan]5[/cyan] - [bold]Abort[/bold] sync")
+
+        while True:
+            choice = self._console.input("\nYour choice [1-5]: ").strip()
+
+            if choice == "1":
+                return "local"
+            elif choice == "2":
+                return "repo"
+            elif choice == "3":
+                return "diff"
+            elif choice == "4":
+                return "skip"
+            elif choice == "5":
+                return "abort"
+            else:
+                self._console.print("[yellow]Please enter 1, 2, 3, 4, or 5[/yellow]")
 
 
 def create_console(*, verbose: bool = False, colored: bool = True) -> Console:

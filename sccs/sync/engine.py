@@ -3,10 +3,11 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 from sccs.config.schema import SccsConfig
 from sccs.sync.category import CategoryHandler, CategoryStatus, CategorySyncResult
+from sccs.sync.actions import SyncAction
 from sccs.sync.state import StateManager
 
 
@@ -21,6 +22,7 @@ class SyncResult:
     synced_items: int = 0
     conflicts: int = 0
     errors: int = 0
+    aborted: bool = False
     category_results: dict[str, CategorySyncResult] = field(default_factory=dict)
 
     @property
@@ -114,6 +116,7 @@ class SyncEngine:
         category_name: Optional[str] = None,
         dry_run: bool = False,
         force_direction: Optional[str] = None,
+        conflict_resolver: Optional[Callable[[SyncAction, str], str]] = None,
     ) -> SyncResult:
         """
         Synchronize categories.
@@ -122,6 +125,7 @@ class SyncEngine:
             category_name: Optional specific category. If None, syncs all enabled.
             dry_run: If True, don't perform actual operations.
             force_direction: Force sync direction ("local" or "repo").
+            conflict_resolver: Optional callback for interactive conflict resolution.
 
         Returns:
             SyncResult with details of what was done.
@@ -145,6 +149,7 @@ class SyncEngine:
             cat_result = handler.sync(
                 dry_run=dry_run,
                 force_direction=force_direction,
+                conflict_resolver=conflict_resolver,
             )
 
             result.category_results[name] = cat_result
@@ -152,6 +157,11 @@ class SyncEngine:
             result.synced_items += cat_result.synced
             result.conflicts += cat_result.conflicts
             result.errors += cat_result.errors
+
+            if cat_result.aborted:
+                result.aborted = True
+                result.success = False
+                break
 
             if cat_result.success:
                 result.synced_categories += 1

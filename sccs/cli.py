@@ -18,6 +18,7 @@ from sccs.config import (
 )
 from sccs.sync import SyncEngine
 from sccs.sync.state import StateManager
+from sccs.sync.actions import SyncAction
 from sccs.output import Console, show_diff
 from sccs.git import commit, push, stage_all, has_uncommitted_changes
 
@@ -69,6 +70,7 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.option("-c", "--category", help="Sync specific category only")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
 @click.option("-f", "--force", type=click.Choice(["local", "repo"]), help="Force sync direction")
+@click.option("-i", "--interactive", is_flag=True, help="Interactive mode for conflict resolution")
 @click.option("--commit", "do_commit", is_flag=True, help="Commit changes (overrides auto_commit=false)")
 @click.option("--no-commit", is_flag=True, help="Skip commit (overrides auto_commit=true)")
 @click.option("--push", "do_push", is_flag=True, help="Push after commit (overrides auto_push=false)")
@@ -79,6 +81,7 @@ def sync(
     category: Optional[str],
     dry_run: bool,
     force: Optional[str],
+    interactive: bool,
     do_commit: bool,
     no_commit: bool,
     do_push: bool,
@@ -98,11 +101,25 @@ def sync(
     if dry_run:
         console.print_info("Dry run - no changes will be made")
 
+    # Create conflict resolver if interactive mode
+    conflict_resolver = None
+    if interactive and not dry_run and not force:
+        def conflict_resolver(action: SyncAction, category_name: str) -> str:
+            """Interactive conflict resolution callback."""
+            while True:
+                resolution = console.resolve_conflict(action, category_name)
+                if resolution == "diff":
+                    # Show diff and ask again
+                    show_diff(action.item, console=console._console)
+                    continue
+                return resolution
+
     # Perform sync
     result = engine.sync(
         category_name=category,
         dry_run=dry_run,
         force_direction=force,
+        conflict_resolver=conflict_resolver,
     )
 
     # Display results
@@ -130,9 +147,14 @@ def sync(
                 else:
                     console.print_warning("Push failed")
 
+    if result.aborted:
+        console.print_warning("Sync aborted by user")
+        sys.exit(1)
+
     if result.conflicts > 0:
         console.print_warning(f"{result.conflicts} conflicts need manual resolution")
-        console.print_info("Tip: Use 'sccs sync --force local' or 'sccs sync --force repo' to resolve")
+        console.print_info("Tip: Use 'sccs sync -i' for interactive conflict resolution")
+        console.print_info("     Or use '--force local' / '--force repo' to resolve all at once")
 
     if result.errors > 0 and result.conflicts == 0:
         console.print_info("Tip: Run 'sccs sync -v' for more details on errors")

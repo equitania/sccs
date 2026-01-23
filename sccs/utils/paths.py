@@ -5,6 +5,7 @@ import fnmatch
 import os
 import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
 
@@ -40,7 +41,51 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
-def safe_copy(source: Path, dest: Path, *, preserve_metadata: bool = True) -> None:
+def get_backup_dir() -> Path:
+    """Get the backup directory path."""
+    backup_dir = Path.home() / ".config" / "sccs" / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    return backup_dir
+
+
+def create_backup(path: Path, category: str = "unknown") -> Optional[Path]:
+    """
+    Create a backup of a file or directory before overwriting.
+
+    Args:
+        path: Path to backup.
+        category: Category name for organizing backups.
+
+    Returns:
+        Path to backup, or None if source doesn't exist.
+    """
+    if not path.exists():
+        return None
+
+    backup_dir = get_backup_dir() / category
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create timestamped backup name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_name = f"{path.name}.{timestamp}.bak"
+    backup_path = backup_dir / backup_name
+
+    if path.is_dir():
+        shutil.copytree(path, backup_path)
+    else:
+        shutil.copy2(path, backup_path)
+
+    return backup_path
+
+
+def safe_copy(
+    source: Path,
+    dest: Path,
+    *,
+    preserve_metadata: bool = True,
+    backup: bool = False,
+    backup_category: str = "unknown",
+) -> Optional[Path]:
     """
     Atomically copy file or directory.
 
@@ -51,6 +96,11 @@ def safe_copy(source: Path, dest: Path, *, preserve_metadata: bool = True) -> No
         source: Source path.
         dest: Destination path.
         preserve_metadata: Whether to preserve file metadata (default True).
+        backup: Whether to create backup before overwriting (default False).
+        backup_category: Category name for organizing backups.
+
+    Returns:
+        Path to backup file if created, None otherwise.
 
     Raises:
         FileNotFoundError: If source doesn't exist.
@@ -58,6 +108,11 @@ def safe_copy(source: Path, dest: Path, *, preserve_metadata: bool = True) -> No
     """
     if not source.exists():
         raise FileNotFoundError(f"Source does not exist: {source}")
+
+    # Create backup if destination exists and backup requested
+    backup_path = None
+    if backup and dest.exists():
+        backup_path = create_backup(dest, backup_category)
 
     # Ensure parent directory exists
     ensure_dir(dest.parent)
@@ -94,6 +149,8 @@ def safe_copy(source: Path, dest: Path, *, preserve_metadata: bool = True) -> No
             if temp_dest.exists():
                 temp_dest.unlink()
             raise
+
+    return backup_path
 
 
 def safe_delete(path: Path, *, missing_ok: bool = False) -> bool:
