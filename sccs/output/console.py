@@ -136,27 +136,33 @@ class Console:
         }
         return icons.get(action_type, "?")
 
-    def print_sync_result(self, result: SyncResult) -> None:
+    def print_sync_result(self, result: SyncResult, *, dry_run: bool = False) -> None:
         """
         Print sync result summary.
 
         Args:
             result: Sync result to display.
+            dry_run: Whether this was a dry run (changes wording).
         """
         self._console.print()
 
         # Per-category results
         for name, cat_result in result.category_results.items():
-            self._print_category_result(name, cat_result)
+            self._print_category_result(name, cat_result, dry_run=dry_run)
 
         # Overall summary
         self._console.print()
+
+        # Choose wording based on dry_run
+        sync_verb = "would sync" if dry_run else "synced"
+        status_text = "Dry run completed" if dry_run else "Sync completed"
+
         if result.success:
             self._console.print(
                 Panel(
-                    f"[green]Sync completed[/green]\n"
+                    f"[green]{status_text}[/green]\n"
                     f"Categories: {result.synced_categories}/{result.total_categories}\n"
-                    f"Items: {result.synced_items} synced, {result.conflicts} conflicts, {result.errors} errors",
+                    f"Items: {result.synced_items} {sync_verb}, {result.conflicts} conflicts, {result.errors} errors",
                     title="Summary",
                     border_style="green" if not result.has_issues else "yellow",
                 )
@@ -164,24 +170,26 @@ class Console:
         else:
             self._console.print(
                 Panel(
-                    f"[red]Sync completed with errors[/red]\n"
+                    f"[red]{status_text} with errors[/red]\n"
                     f"Categories: {result.synced_categories}/{result.total_categories}\n"
-                    f"Items: {result.synced_items} synced, {result.conflicts} conflicts, {result.errors} errors",
+                    f"Items: {result.synced_items} {sync_verb}, {result.conflicts} conflicts, {result.errors} errors",
                     title="Summary",
                     border_style="red",
                 )
             )
 
-    def _print_category_result(self, name: str, result: CategorySyncResult) -> None:
+    def _print_category_result(self, name: str, result: CategorySyncResult, *, dry_run: bool = False) -> None:
         """Print result for a single category."""
+        sync_verb = "would sync" if dry_run else "synced"
+
         if result.success and result.synced == 0 and result.conflicts == 0:
             self._console.print(f"[green]✓[/green] [bold]{name}[/bold] - no changes")
             return
 
         if result.success:
-            self._console.print(f"[green]✓[/green] [bold]{name}[/bold] - {result.synced} synced")
+            self._console.print(f"[green]✓[/green] [bold]{name}[/bold] - {result.synced} {sync_verb}")
         else:
-            self._console.print(f"[red]✗[/red] [bold]{name}[/bold] - {result.synced} synced, {result.errors} errors")
+            self._console.print(f"[red]✗[/red] [bold]{name}[/bold] - {result.synced} {sync_verb}, {result.errors} errors")
 
         # Show details if verbose or has issues
         if self.verbose or result.errors > 0 or result.conflicts > 0:

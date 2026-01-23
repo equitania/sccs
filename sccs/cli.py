@@ -106,7 +106,7 @@ def sync(
     )
 
     # Display results
-    console.print_sync_result(result)
+    console.print_sync_result(result, dry_run=dry_run)
 
     # Handle git operations
     if not dry_run and result.synced_items > 0:
