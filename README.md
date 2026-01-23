@@ -10,6 +10,8 @@ Unified YAML-configured bidirectional synchronization tool for Claude Code files
 - **Flexible Categories**: Sync Claude skills, commands, hooks, scripts, and more
 - **Optional Shell Configs**: Fish shell, Starship prompt, and custom configs
 - **Bidirectional Sync**: Full two-way synchronization with conflict detection
+- **Interactive Conflict Resolution**: Menu-driven conflict handling with `-i` flag
+- **Automatic Backups**: Creates timestamped backups before overwriting files
 - **Git Integration**: Auto-commit and push after sync operations
 - **Rich Console Output**: Beautiful terminal output with Rich
 - **Path Transformation**: Machine-independent configuration files
@@ -244,6 +246,7 @@ output:
 sccs sync                    # Sync all enabled categories
 sccs sync --category skills  # Sync specific category
 sccs sync --dry-run          # Preview without changes
+sccs sync -i                 # Interactive conflict resolution
 sccs sync --force local      # Force local version in conflicts
 sccs sync --force repo       # Force repo version in conflicts
 
@@ -334,7 +337,26 @@ Categories can contain different item types:
 
 ## Conflict Resolution
 
-When both local and repo have changes:
+When both local and repo have changes, SCCS offers multiple resolution strategies:
+
+### Interactive Mode (Recommended)
+
+Use `-i` flag for menu-driven conflict resolution:
+
+```bash
+sccs sync -i
+```
+
+The interactive menu offers:
+1. **Keep local** - Use local version, overwrite repo
+2. **Keep repo** - Use repo version, overwrite local
+3. **Show diff** - View differences before deciding
+4. **Skip** - Skip this item, continue with others
+5. **Abort** - Stop sync completely
+
+### Automatic Resolution
+
+Configure default resolution in `config.yaml`:
 
 ```yaml
 conflict_resolution:
@@ -349,6 +371,21 @@ Or use force flags:
 sccs sync --force local   # Local wins all conflicts
 sccs sync --force repo    # Repository wins all conflicts
 ```
+
+## Automatic Backups
+
+Before overwriting any file, SCCS creates a timestamped backup:
+
+```
+~/.config/sccs/backups/
+├── claude_skills/
+│   └── my-skill.20250123_143052.bak
+├── fish_config/
+│   └── config.fish.20250123_143052.bak
+└── ...
+```
+
+Backups are organized by category and include timestamps for easy recovery.
 
 ## Directory Structure
 
