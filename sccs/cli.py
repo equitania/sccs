@@ -132,6 +132,10 @@ def sync(
 
     if result.conflicts > 0:
         console.print_warning(f"{result.conflicts} conflicts need manual resolution")
+        console.print_info("Tip: Use 'sccs sync --force local' or 'sccs sync --force repo' to resolve")
+
+    if result.errors > 0 and result.conflicts == 0:
+        console.print_info("Tip: Run 'sccs sync -v' for more details on errors")
 
     sys.exit(0 if result.success else 1)
 

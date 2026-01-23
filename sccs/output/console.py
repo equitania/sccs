@@ -199,6 +199,11 @@ class Console:
                     self._console.print(f"    [green]✓[/green] {action.item.name}")
                 else:
                     self._console.print(f"    [red]✗[/red] {action.item.name}: {action_result.error}")
+                    # Add resolution hints for common errors
+                    if "Conflict" in (action_result.error or ""):
+                        self._console.print(f"        [dim]→ View diff: sccs diff {action.item.name} -c {name}[/dim]")
+                        self._console.print(f"        [dim]→ Keep local: sccs sync -c {name} --force local[/dim]")
+                        self._console.print(f"        [dim]→ Keep repo:  sccs sync -c {name} --force repo[/dim]")
 
     def print_categories_list(
         self,
