@@ -7,7 +7,7 @@ from typing import Optional
 
 from sccs.config.schema import SyncCategory, ItemType
 from sccs.utils.hashing import file_hash, directory_hash, get_mtime
-from sccs.utils.paths import find_files, find_directories, matches_any_pattern
+from sccs.utils.paths import find_files, find_directories, matches_any_pattern, expand_path
 
 
 @dataclass
@@ -103,7 +103,7 @@ def scan_items_for_category(
     """
     items: dict[str, SyncItem] = {}
 
-    local_path = Path(category.local_path)
+    local_path = expand_path(category.local_path)
     repo_path = repo_base / category.repo_path
 
     # Combine excludes
