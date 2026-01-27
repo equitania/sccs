@@ -147,7 +147,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "*.local.fish",
                 "conf.d/*local*.fish",
                 "conf.d/*secret*.fish",
+                "*.macos.fish",
             ],
+        },
+        # Fish Shell macOS Config (conf.d/*.macos.fish)
+        "fish_config_macos": {
+            "enabled": True,
+            "description": "Fish Shell macOS-specific Configuration",
+            "local_path": "~/.config/fish/conf.d",
+            "repo_path": ".config/fish/conf.d",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "item_pattern": "*.macos.fish",
+            "include": ["*.macos.fish"],
+            "exclude": [],
+            "platforms": ["macos"],
         },
         # Fish Functions (separate category)
         "fish_functions": {
@@ -159,7 +173,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "item_type": "file",
             "item_pattern": "*.fish",
             "include": ["*.fish"],
-            "exclude": ["_*.fish", "*.local.fish"],
+            "exclude": ["_*.fish", "*.local.fish", "macos/*"],
+        },
+        # Fish Functions macOS (functions/macos/*.fish)
+        "fish_functions_macos": {
+            "enabled": True,
+            "description": "Fish Shell macOS-specific Functions",
+            "local_path": "~/.config/fish/functions/macos",
+            "repo_path": ".config/fish/functions/macos",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "item_pattern": "*.fish",
+            "include": ["*.fish"],
+            "exclude": [],
+            "platforms": ["macos"],
         },
         # Starship Prompt
         "starship_config": {

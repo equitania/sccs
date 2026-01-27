@@ -68,9 +68,12 @@ class Console:
 
     def _print_category_status(self, name: str, status: CategoryStatus) -> None:
         """Print status for a single category."""
-        # Category header
+        # Category header with optional platform info
         enabled_marker = "[green]●[/green]" if status.enabled else "[dim]○[/dim]"
-        self._console.print(f"\n{enabled_marker} [bold]{name}[/bold]")
+        platform_info = ""
+        if status.platforms:
+            platform_info = f" [dim]({', '.join(status.platforms)})[/dim]"
+        self._console.print(f"\n{enabled_marker} [bold]{name}[/bold]{platform_info}")
 
         if not status.enabled:
             self._console.print("  [dim]Disabled[/dim]")
@@ -207,7 +210,7 @@ class Console:
 
     def print_categories_list(
         self,
-        categories: dict[str, bool],
+        categories: dict[str, dict],
         *,
         show_all: bool = False,
     ) -> None:
@@ -215,20 +218,25 @@ class Console:
         Print list of categories.
 
         Args:
-            categories: Dict of category name to enabled status.
+            categories: Dict of category name to info dict with keys:
+                        enabled (bool), description (str), platforms (Optional[list[str]]).
             show_all: Show all categories including disabled.
         """
         table = Table(show_header=True, header_style="bold")
         table.add_column("Category")
         table.add_column("Status")
+        table.add_column("Platforms", style="dim")
         table.add_column("Description", style="dim")
 
-        for name, enabled in sorted(categories.items()):
+        for name, info in sorted(categories.items()):
+            enabled = info.get("enabled", False)
             if not show_all and not enabled:
                 continue
 
             status = "[green]enabled[/green]" if enabled else "[dim]disabled[/dim]"
-            table.add_row(name, status, "")
+            platforms = ", ".join(info.get("platforms") or []) or "all"
+            description = info.get("description", "")
+            table.add_row(name, status, platforms, description)
 
         self._console.print(table)
 
@@ -270,7 +278,7 @@ class Console:
             category_name: Category name for context.
 
         Returns:
-            Resolution choice: "local", "repo", "diff", "skip", or "abort"
+            Resolution choice: "local", "repo", "diff", "merge", "editor", "skip", or "abort"
         """
         item_name = action.item.name
 
@@ -281,11 +289,13 @@ class Console:
         self._console.print("  [cyan]1[/cyan] - Keep [bold]local[/bold] version (overwrite repo)")
         self._console.print("  [cyan]2[/cyan] - Keep [bold]repo[/bold] version (overwrite local)")
         self._console.print("  [cyan]3[/cyan] - View [bold]diff[/bold] first")
-        self._console.print("  [cyan]4[/cyan] - [bold]Skip[/bold] this item")
-        self._console.print("  [cyan]5[/cyan] - [bold]Abort[/bold] sync")
+        self._console.print("  [cyan]4[/cyan] - [bold]Interactive merge[/bold] (hunk-by-hunk)")
+        self._console.print("  [cyan]5[/cyan] - Open in [bold]external editor[/bold]")
+        self._console.print("  [cyan]6[/cyan] - [bold]Skip[/bold] this item")
+        self._console.print("  [cyan]7[/cyan] - [bold]Abort[/bold] sync")
 
         while True:
-            choice = self._console.input("\nYour choice [1-5]: ").strip()
+            choice = self._console.input("\nYour choice [1-7]: ").strip()
 
             if choice == "1":
                 return "local"
@@ -294,11 +304,15 @@ class Console:
             elif choice == "3":
                 return "diff"
             elif choice == "4":
-                return "skip"
+                return "merge"
             elif choice == "5":
+                return "editor"
+            elif choice == "6":
+                return "skip"
+            elif choice == "7":
                 return "abort"
             else:
-                self._console.print("[yellow]Please enter 1, 2, 3, 4, or 5[/yellow]")
+                self._console.print("[yellow]Please enter 1, 2, 3, 4, or 5, 6, or 7[/yellow]")
 
 
 def create_console(*, verbose: bool = False, colored: bool = True) -> Console:

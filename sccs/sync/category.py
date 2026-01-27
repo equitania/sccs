@@ -30,6 +30,7 @@ class CategoryStatus:
     errors: int = 0
     items: list[SyncItem] = field(default_factory=list)
     actions: list[SyncAction] = field(default_factory=list)
+    platforms: Optional[list[str]] = None
 
     @property
     def has_changes(self) -> bool:
@@ -147,6 +148,7 @@ class CategoryHandler:
             total_items=len(items),
             items=items,
             actions=actions,
+            platforms=self.category.platforms,
         )
 
         for action in actions:
@@ -203,6 +205,11 @@ class CategoryHandler:
                         break
                     elif resolution == "skip":
                         result.skipped += 1
+                        continue
+                    elif resolution == "merged":
+                        # Files already written by merge handler, just update state
+                        self._update_state_for_action(action)
+                        result.synced += 1
                         continue
                     elif resolution in ("local", "repo"):
                         action = self._resolve_conflict(action, resolution)

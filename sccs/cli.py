@@ -20,6 +20,7 @@ from sccs.sync import SyncEngine
 from sccs.sync.state import StateManager
 from sccs.sync.actions import SyncAction
 from sccs.output import Console, show_diff
+from sccs.output.merge import interactive_merge, edit_in_editor
 from sccs.git import commit, push, stage_all, has_uncommitted_changes
 
 
@@ -112,6 +113,34 @@ def sync(
                     # Show diff and ask again
                     show_diff(action.item, console=console._console)
                     continue
+                elif resolution == "merge":
+                    # Interactive hunk-by-hunk merge
+                    merge_result = interactive_merge(action, console._console)
+                    if merge_result.aborted:
+                        continue  # Re-show menu
+                    return "merged"
+                elif resolution == "editor":
+                    # Open in external editor
+                    item = action.item
+                    if item.local_path and item.local_path.exists():
+                        content = item.local_path.read_text(encoding="utf-8")
+                        suffix = item.local_path.suffix or ".txt"
+                        edited = edit_in_editor(content, suffix=suffix)
+                        if edited is not None:
+                            from sccs.utils.paths import atomic_write, create_backup
+                            create_backup(item.local_path, category="editor")
+                            atomic_write(item.local_path, edited)
+                            if item.repo_path:
+                                create_backup(item.repo_path, category="editor")
+                                atomic_write(item.repo_path, edited)
+                            console.print_success(f"Editor changes saved for {item.name}")
+                            return "merged"
+                        else:
+                            console.print_warning("Editor returned no changes")
+                            continue
+                    else:
+                        console.print_error("No local file to edit")
+                        continue
                 return resolution
 
     # Perform sync
@@ -435,7 +464,12 @@ def categories_list(ctx: click.Context, show_all: bool) -> None:
         sys.exit(1)
 
     categories_dict = {
-        name: cat.enabled for name, cat in config.sync_categories.items()
+        name: {
+            "enabled": cat.enabled,
+            "description": cat.description,
+            "platforms": cat.platforms,
+        }
+        for name, cat in config.sync_categories.items()
     }
 
     console.print_categories_list(categories_dict, show_all=show_all)

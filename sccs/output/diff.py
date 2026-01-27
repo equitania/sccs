@@ -216,23 +216,32 @@ def show_conflict(
     console.print("[bold]Resolution options:[/bold]")
     console.print("  [yellow]l[/yellow] - Use local version (overwrite repo)")
     console.print("  [cyan]r[/cyan] - Use repo version (overwrite local)")
+    console.print("  [green]m[/green] - Interactive merge (hunk-by-hunk)")
+    console.print("  [magenta]e[/magenta] - Open in external editor")
+    console.print("  [blue]d[/blue] - Show diff again")
     console.print("  [dim]s[/dim] - Skip this item")
     console.print("  [dim]q[/dim] - Quit/Cancel")
     console.print()
 
     while True:
-        choice = console.input("[bold]Choose [[yellow]l[/yellow]/[cyan]r[/cyan]/s/q]:[/bold] ").strip().lower()
+        choice = console.input("[bold]Choose [l/r/m/e/d/s/q]:[/bold] ").strip().lower()
 
         if choice in ("l", "local"):
             return "local"
         elif choice in ("r", "repo"):
             return "repo"
+        elif choice in ("m", "merge"):
+            return "merge"
+        elif choice in ("e", "editor", "edit"):
+            return "editor"
+        elif choice in ("d", "diff"):
+            return "diff"
         elif choice in ("s", "skip"):
             return "skip"
         elif choice in ("q", "quit", "cancel"):
             return None
         else:
-            console.print("[red]Invalid choice. Please enter l, r, s, or q.[/red]")
+            console.print("[red]Invalid choice. Please enter l, r, m, e, d, s, or q.[/red]")
 
 
 def format_diff_summary(result: DiffResult) -> str:

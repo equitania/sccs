@@ -9,6 +9,7 @@ from sccs.config.schema import SccsConfig
 from sccs.sync.category import CategoryHandler, CategoryStatus, CategorySyncResult
 from sccs.sync.actions import SyncAction
 from sccs.sync.state import StateManager
+from sccs.utils.platform import is_platform_match
 
 
 @dataclass
@@ -79,8 +80,12 @@ class SyncEngine:
         return handler
 
     def get_enabled_categories(self) -> list[str]:
-        """Get list of enabled category names."""
-        return list(self.config.get_enabled_categories().keys())
+        """Get list of enabled category names, filtered by current platform."""
+        return [
+            name
+            for name, cat in self.config.get_enabled_categories().items()
+            if is_platform_match(cat.platforms)
+        ]
 
     def get_all_categories(self) -> list[str]:
         """Get list of all category names."""

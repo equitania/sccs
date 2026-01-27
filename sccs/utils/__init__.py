@@ -11,6 +11,10 @@ from sccs.utils.paths import (
     matches_pattern,
     matches_any_pattern,
 )
+from sccs.utils.platform import (
+    get_current_platform,
+    is_platform_match,
+)
 from sccs.utils.hashing import (
     content_hash,
     file_hash,
@@ -19,6 +23,9 @@ from sccs.utils.hashing import (
 )
 
 __all__ = [
+    # Platform
+    "get_current_platform",
+    "is_platform_match",
     # Paths
     "expand_path",
     "safe_copy",

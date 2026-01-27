@@ -65,6 +65,10 @@ class SyncCategory(BaseModel):
     conflict_resolution: Optional[ConflictResolution] = Field(
         default=None, description="Category-specific conflict resolution"
     )
+    platforms: Optional[list[str]] = Field(
+        default=None,
+        description="Platform filter: macos, linux, windows. None = all platforms.",
+    )
 
     @field_validator("local_path", "repo_path")
     @classmethod

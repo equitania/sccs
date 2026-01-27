@@ -3,6 +3,7 @@
 
 from sccs.output.console import Console, create_console
 from sccs.output.diff import show_diff, show_conflict, DiffResult
+from sccs.output.merge import interactive_merge, MergeResult
 
 __all__ = [
     "Console",
@@ -10,4 +11,6 @@ __all__ = [
     "show_diff",
     "show_conflict",
     "DiffResult",
+    "interactive_merge",
+    "MergeResult",
 ]
