@@ -137,6 +137,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "item_type": "mixed",
             "include": [
                 "config.fish",
+                "README.md",
                 "functions/*.fish",
                 "conf.d/*.fish",
                 "completions/*.fish",
