@@ -1,11 +1,11 @@
 # SCCS Sync Module
 # Core synchronization engine and components
 
-from sccs.sync.item import SyncItem, scan_items_for_category
 from sccs.sync.actions import ActionType, SyncAction, execute_action
-from sccs.sync.state import SyncState, StateManager
 from sccs.sync.category import CategoryHandler, CategoryStatus
 from sccs.sync.engine import SyncEngine, SyncResult
+from sccs.sync.item import SyncItem, scan_items_for_category
+from sccs.sync.state import StateManager, SyncState
 
 __all__ = [
     # Item

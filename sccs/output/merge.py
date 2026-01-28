@@ -3,8 +3,8 @@
 
 import difflib
 import os
-import tempfile
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -164,11 +164,13 @@ def show_hunk(
 
     diff_text = "\n".join(diff_lines)
 
-    console.print(Panel(
-        Syntax(diff_text, "diff", theme="monokai"),
-        title=title,
-        border_style="yellow",
-    ))
+    console.print(
+        Panel(
+            Syntax(diff_text, "diff", theme="monokai"),
+            title=title,
+            border_style="yellow",
+        )
+    )
 
 
 def prompt_hunk_resolution(console: RichConsole) -> str:
@@ -287,10 +289,12 @@ def _show_file_metadata(
     if item.local_path and item.local_path.exists():
         local_ts = item.local_path.stat().st_mtime
         from datetime import datetime
+
         local_mtime = datetime.fromtimestamp(local_ts).strftime("%Y-%m-%d %H:%M:%S")
     if item.repo_path and item.repo_path.exists():
         repo_ts = item.repo_path.stat().st_mtime
         from datetime import datetime
+
         repo_mtime = datetime.fromtimestamp(repo_ts).strftime("%Y-%m-%d %H:%M:%S")
     table.add_row("Modified", local_mtime, repo_mtime)
 
@@ -409,11 +413,13 @@ def interactive_merge(
     result.merged_content = "".join(merged_lines)
 
     # Show preview
-    console.print(Panel(
-        Syntax(result.merged_content, syntax, theme="monokai", line_numbers=True),
-        title="Merge Result Preview",
-        border_style="green",
-    ))
+    console.print(
+        Panel(
+            Syntax(result.merged_content, syntax, theme="monokai", line_numbers=True),
+            title="Merge Result Preview",
+            border_style="green",
+        )
+    )
 
     # Confirm
     confirm = console.input("\n[bold]Accept merge result? [Y/n]: [/bold]").strip().lower()

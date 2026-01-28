@@ -83,7 +83,7 @@ def save_config(config: SccsConfig, config_path: Optional[Path] = None) -> Path:
 
     # Convert to dict and write as YAML
     # Use mode='json' to serialize Enums as their string values
-    data = config.model_dump(exclude_none=True, mode='json')
+    data = config.model_dump(exclude_none=True, mode="json")
 
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)

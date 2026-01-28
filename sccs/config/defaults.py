@@ -5,13 +5,13 @@ from typing import Any
 
 import yaml
 
-
 DEFAULT_CONFIG: dict[str, Any] = {
     "repository": {
         "path": "~/gitbase/sccs-sync",
         "remote": "origin",
         "auto_commit": False,
         "auto_push": False,
+        "auto_pull": False,
         "commit_prefix": "[SYNC]",
     },
     "sync_categories": {
@@ -126,6 +126,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "item_type": "file",
             "include": ["*.json", "*.yaml", "*.yml"],
             "exclude": ["*.local.*", "credentials.*"],
+        },
+        # Claude Statusline
+        "claude_statusline": {
+            "enabled": True,
+            "description": "Claude Code Statusline Script",
+            "local_path": "~/.claude",
+            "repo_path": ".claude/statusline",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "item_pattern": "statusline.*",
+            "include": ["statusline.sh", "statusline.py", "statusline.fish"],
+            "exclude": [],
         },
         # Fish Shell Configuration
         "fish_config": {

@@ -3,17 +3,17 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 from sccs.config.schema import SyncCategory, SyncMode
-from sccs.sync.item import SyncItem, scan_items_for_category
 from sccs.sync.actions import (
+    ActionResult,
     ActionType,
     SyncAction,
-    ActionResult,
     determine_action,
     execute_action,
 )
+from sccs.sync.item import SyncItem, scan_items_for_category
 from sccs.sync.state import StateManager
 
 

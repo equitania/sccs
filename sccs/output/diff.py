@@ -11,8 +11,8 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
-from sccs.sync.item import SyncItem
 from sccs.sync.actions import SyncAction
+from sccs.sync.item import SyncItem
 
 
 @dataclass
@@ -136,22 +136,24 @@ def show_diff(
 
     if not result.local_exists:
         result.has_diff = True
-        console.print(Panel(
-            f"[cyan]Only in repo:[/cyan] {item.name}\n\n"
-            f"{result.repo_content or '[Empty]'}",
-            title=f"Diff: {item.name}",
-            border_style="cyan",
-        ))
+        console.print(
+            Panel(
+                f"[cyan]Only in repo:[/cyan] {item.name}\n\n" f"{result.repo_content or '[Empty]'}",
+                title=f"Diff: {item.name}",
+                border_style="cyan",
+            )
+        )
         return result
 
     if not result.repo_exists:
         result.has_diff = True
-        console.print(Panel(
-            f"[yellow]Only in local:[/yellow] {item.name}\n\n"
-            f"{result.local_content or '[Empty]'}",
-            title=f"Diff: {item.name}",
-            border_style="yellow",
-        ))
+        console.print(
+            Panel(
+                f"[yellow]Only in local:[/yellow] {item.name}\n\n" f"{result.local_content or '[Empty]'}",
+                title=f"Diff: {item.name}",
+                border_style="yellow",
+            )
+        )
         return result
 
     # Generate diff
@@ -170,11 +172,13 @@ def show_diff(
     # Display diff with syntax highlighting
     diff_text = "\n".join(result.diff_lines)
 
-    console.print(Panel(
-        Syntax(diff_text, "diff", theme="monokai", line_numbers=True),
-        title=f"Diff: {item.name}",
-        border_style="yellow",
-    ))
+    console.print(
+        Panel(
+            Syntax(diff_text, "diff", theme="monokai", line_numbers=True),
+            title=f"Diff: {item.name}",
+            border_style="yellow",
+        )
+    )
 
     return result
 
@@ -200,13 +204,15 @@ def show_conflict(
     item = action.item
 
     console.print()
-    console.print(Panel(
-        f"[red bold]Conflict:[/red bold] {item.name}\n"
-        f"Both local and repository have changes.\n\n"
-        f"[bold]Reason:[/bold] {action.reason}",
-        title="Conflict Detected",
-        border_style="red",
-    ))
+    console.print(
+        Panel(
+            f"[red bold]Conflict:[/red bold] {item.name}\n"
+            f"Both local and repository have changes.\n\n"
+            f"[bold]Reason:[/bold] {action.reason}",
+            title="Conflict Detected",
+            border_style="red",
+        )
+    )
 
     # Show diff
     show_diff(item, console=console)

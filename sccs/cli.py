@@ -9,20 +9,19 @@ import click
 
 from sccs import __version__
 from sccs.config import (
-    load_config,
     ensure_config_exists,
-    get_config_path,
-    validate_config_file,
     generate_default_config,
+    get_config_path,
+    load_config,
     update_category_enabled,
+    validate_config_file,
 )
-from sccs.sync import SyncEngine
-from sccs.sync.state import StateManager
-from sccs.sync.actions import SyncAction
+from sccs.git import commit, get_remote_status, has_uncommitted_changes, pull, push, stage_all
 from sccs.output import Console, show_diff
-from sccs.output.merge import interactive_merge, edit_in_editor
-from sccs.git import commit, push, stage_all, has_uncommitted_changes
-
+from sccs.output.merge import edit_in_editor, interactive_merge
+from sccs.sync import SyncEngine
+from sccs.sync.actions import SyncAction
+from sccs.sync.state import StateManager
 
 # Global console instance
 _console: Optional[Console] = None
@@ -76,6 +75,8 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.option("--no-commit", is_flag=True, help="Skip commit (overrides auto_commit=true)")
 @click.option("--push", "do_push", is_flag=True, help="Push after commit (overrides auto_push=false)")
 @click.option("--no-push", is_flag=True, help="Skip push (overrides auto_push=true)")
+@click.option("--pull", "do_pull", is_flag=True, help="Pull remote changes before sync")
+@click.option("--no-pull-check", is_flag=True, help="Skip remote status check before sync")
 @click.pass_context
 def sync(
     ctx: click.Context,
@@ -87,6 +88,8 @@ def sync(
     no_commit: bool,
     do_push: bool,
     no_push: bool,
+    do_pull: bool,
+    no_pull_check: bool,
 ) -> None:
     """Synchronize files between local and repository."""
     console = ctx.obj["console"]
@@ -97,6 +100,44 @@ def sync(
         console.print_error(str(e))
         sys.exit(1)
 
+    repo_path = Path(config.repository.path).expanduser()
+
+    # Check remote status before sync (unless skipped or dry-run)
+    if not dry_run and not no_pull_check:
+        remote_status = get_remote_status(repo_path)
+
+        if "error" in remote_status:
+            # Non-fatal: just warn and continue
+            console.print_warning(f"Could not check remote status: {remote_status['error']}")
+        elif remote_status.get("diverged"):
+            # Diverged: require manual intervention
+            ahead = remote_status.get("ahead", 0)
+            behind = remote_status.get("behind", 0)
+            console.print_error(f"Repository is diverged: {ahead} commit(s) ahead, {behind} commit(s) behind remote")
+            console.print_info("Please merge or rebase manually before syncing")
+            sys.exit(1)
+        elif remote_status.get("behind", 0) > 0:
+            behind = remote_status["behind"]
+            console.print_warning(f"Repository is {behind} commit(s) behind remote")
+
+            # Determine if we should auto-pull
+            should_pull = do_pull or config.repository.auto_pull
+
+            if should_pull:
+                console.print_info("Pulling remote changes...")
+                if pull(repo_path):
+                    console.print_success("Pull successful")
+                else:
+                    console.print_error("Pull failed")
+                    sys.exit(1)
+            else:
+                console.print_info("Use '--pull' flag or set 'auto_pull: true' in config")
+                console.print_info("Or use '--no-pull-check' to skip this check")
+                sys.exit(1)
+        elif remote_status.get("up_to_date"):
+            if ctx.obj.get("verbose"):
+                console.print_info("Repository is up to date with remote")
+
     engine = SyncEngine(config)
 
     if dry_run:
@@ -105,6 +146,7 @@ def sync(
     # Create conflict resolver if interactive mode
     conflict_resolver = None
     if interactive and not dry_run and not force:
+
         def conflict_resolver(action: SyncAction, category_name: str) -> str:
             """Interactive conflict resolution callback."""
             while True:
@@ -128,6 +170,7 @@ def sync(
                         edited = edit_in_editor(content, suffix=suffix)
                         if edited is not None:
                             from sccs.utils.paths import atomic_write, create_backup
+
                             create_backup(item.local_path, category="editor")
                             atomic_write(item.local_path, edited)
                             if item.repo_path:
@@ -156,8 +199,6 @@ def sync(
 
     # Handle git operations
     if not dry_run and result.synced_items > 0:
-        repo_path = Path(config.repository.path).expanduser()
-
         # Commit if: (auto_commit OR --commit) AND NOT --no-commit
         should_commit = (config.repository.auto_commit or do_commit) and not no_commit
 

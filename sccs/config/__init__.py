@@ -1,25 +1,25 @@
 # SCCS Configuration Module
 # Handles YAML-based configuration loading, validation, and defaults
 
-from sccs.config.schema import (
-    SccsConfig,
-    RepositoryConfig,
-    SyncCategory,
-    OutputConfig,
-    PathTransformConfig,
-    SyncMode,
-    ItemType,
-    ConflictResolution,
-)
+from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
 from sccs.config.loader import (
+    ensure_config_exists,
+    get_config_path,
     load_config,
     save_config,
-    get_config_path,
-    ensure_config_exists,
-    validate_config_file,
     update_category_enabled,
+    validate_config_file,
 )
-from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
+from sccs.config.schema import (
+    ConflictResolution,
+    ItemType,
+    OutputConfig,
+    PathTransformConfig,
+    RepositoryConfig,
+    SccsConfig,
+    SyncCategory,
+    SyncMode,
+)
 
 __all__ = [
     # Schema

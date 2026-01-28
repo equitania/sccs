@@ -353,3 +353,83 @@ def clone_repo(
         return True
     except GitError:
         return False
+
+
+def fetch(path: Optional[Path] = None) -> bool:
+    """
+    Fetch remote changes without merging.
+
+    Args:
+        path: Repository path.
+
+    Returns:
+        True if successful.
+    """
+    try:
+        _run_git("fetch", cwd=path)
+        return True
+    except GitError:
+        return False
+
+
+def get_remote_status(path: Optional[Path] = None) -> dict:
+    """
+    Check if local branch is behind/ahead of remote.
+
+    Args:
+        path: Repository path.
+
+    Returns:
+        dict with keys: ahead, behind, diverged, up_to_date, error (if any)
+    """
+    try:
+        # Fetch first to get latest remote state
+        fetch(path)
+
+        # Get current branch
+        branch = get_current_branch(path)
+        if not branch:
+            return {"error": "No branch or detached HEAD"}
+
+        # Check ahead/behind
+        result = _run_git("rev-list", "--left-right", "--count", f"HEAD...origin/{branch}", cwd=path)
+        parts = result.stdout.strip().split()
+        if len(parts) != 2:
+            return {"error": "Unexpected rev-list output"}
+
+        ahead, behind = int(parts[0]), int(parts[1])
+
+        return {
+            "ahead": ahead,
+            "behind": behind,
+            "diverged": ahead > 0 and behind > 0,
+            "up_to_date": ahead == 0 and behind == 0,
+        }
+    except GitError as e:
+        return {"error": str(e)}
+
+
+def pull(
+    path: Optional[Path] = None,
+    *,
+    rebase: bool = False,
+) -> bool:
+    """
+    Pull changes from remote.
+
+    Args:
+        path: Repository path.
+        rebase: Use rebase instead of merge.
+
+    Returns:
+        True if successful.
+    """
+    args = ["pull"]
+    if rebase:
+        args.append("--rebase")
+
+    try:
+        _run_git(*args, cwd=path)
+        return True
+    except GitError:
+        return False

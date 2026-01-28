@@ -2,8 +2,8 @@
 # Rich console output and diff display
 
 from sccs.output.console import Console, create_console
-from sccs.output.diff import show_diff, show_conflict, DiffResult
-from sccs.output.merge import interactive_merge, MergeResult
+from sccs.output.diff import DiffResult, show_conflict, show_diff
+from sccs.output.merge import MergeResult, interactive_merge
 
 __all__ = [
     "Console",

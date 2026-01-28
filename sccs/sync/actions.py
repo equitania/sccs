@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from sccs.sync.item import SyncItem
-from sccs.utils.paths import safe_copy, safe_delete, ensure_dir
+from sccs.utils.paths import ensure_dir, safe_copy, safe_delete
 
 
 class ActionType(str, Enum):

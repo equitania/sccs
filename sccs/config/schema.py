@@ -40,6 +40,7 @@ class RepositoryConfig(BaseModel):
     remote: str = Field(default="origin", description="Git remote name for push")
     auto_commit: bool = Field(default=False, description="Auto-commit after sync")
     auto_push: bool = Field(default=False, description="Auto-push after commit")
+    auto_pull: bool = Field(default=False, description="Auto-pull before sync if behind remote")
     commit_prefix: str = Field(default="[SYNC]", description="Commit message prefix")
 
     @field_validator("path")
@@ -58,7 +59,9 @@ class SyncCategory(BaseModel):
     repo_path: str = Field(description="Repository path to sync to")
     sync_mode: SyncMode = Field(default=SyncMode.BIDIRECTIONAL, description="Sync direction mode")
     item_type: ItemType = Field(default=ItemType.FILE, description="Type of items")
-    item_marker: Optional[str] = Field(default=None, description="File that marks a valid directory item (e.g., SKILL.md)")
+    item_marker: Optional[str] = Field(
+        default=None, description="File that marks a valid directory item (e.g., SKILL.md)"
+    )
     item_pattern: Optional[str] = Field(default=None, description="Glob pattern for file items (e.g., *.md)")
     include: list[str] = Field(default_factory=lambda: ["*"], description="Include patterns")
     exclude: list[str] = Field(default_factory=list, description="Exclude patterns")
@@ -125,9 +128,7 @@ class SccsConfig(BaseModel):
     """Root configuration model for SCCS."""
 
     repository: RepositoryConfig = Field(description="Repository settings")
-    sync_categories: dict[str, SyncCategory] = Field(
-        default_factory=dict, description="Sync category definitions"
-    )
+    sync_categories: dict[str, SyncCategory] = Field(default_factory=dict, description="Sync category definitions")
     global_exclude: list[str] = Field(
         default_factory=lambda: [
             # System files

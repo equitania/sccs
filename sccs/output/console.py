@@ -9,9 +9,9 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
+from sccs.sync.actions import ActionType, SyncAction
 from sccs.sync.category import CategoryStatus, CategorySyncResult
 from sccs.sync.engine import SyncResult
-from sccs.sync.actions import ActionType, SyncAction
 
 
 class Console:
@@ -192,7 +192,9 @@ class Console:
         if result.success:
             self._console.print(f"[green]✓[/green] [bold]{name}[/bold] - {result.synced} {sync_verb}")
         else:
-            self._console.print(f"[red]✗[/red] [bold]{name}[/bold] - {result.synced} {sync_verb}, {result.errors} errors")
+            self._console.print(
+                f"[red]✗[/red] [bold]{name}[/bold] - {result.synced} {sync_verb}, {result.errors} errors"
+            )
 
         # Show details if verbose or has issues
         if self.verbose or result.errors > 0 or result.conflicts > 0:

@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from sccs.config.schema import SyncCategory, ItemType
-from sccs.utils.hashing import file_hash, directory_hash, get_mtime
-from sccs.utils.paths import find_files, find_directories, matches_any_pattern, expand_path
+from sccs.config.schema import ItemType, SyncCategory
+from sccs.utils.hashing import directory_hash, file_hash, get_mtime
+from sccs.utils.paths import expand_path, find_directories, find_files, matches_any_pattern
 
 
 @dataclass

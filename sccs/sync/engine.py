@@ -3,11 +3,11 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 from sccs.config.schema import SccsConfig
-from sccs.sync.category import CategoryHandler, CategoryStatus, CategorySyncResult
 from sccs.sync.actions import SyncAction
+from sccs.sync.category import CategoryHandler, CategoryStatus, CategorySyncResult
 from sccs.sync.state import StateManager
 from sccs.utils.platform import is_platform_match
 
@@ -81,11 +81,7 @@ class SyncEngine:
 
     def get_enabled_categories(self) -> list[str]:
         """Get list of enabled category names, filtered by current platform."""
-        return [
-            name
-            for name, cat in self.config.get_enabled_categories().items()
-            if is_platform_match(cat.platforms)
-        ]
+        return [name for name, cat in self.config.get_enabled_categories().items() if is_platform_match(cat.platforms)]
 
     def get_all_categories(self) -> list[str]:
         """Get list of all category names."""
