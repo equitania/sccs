@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from sccs.config.schema import SccsConfig, SyncCategory, ItemType
-from sccs.sync.item import SyncItem, scan_items_for_category
+from sccs.config.schema import ItemType, SccsConfig, SyncCategory
 from sccs.sync.actions import ActionType, SyncAction, determine_action, execute_action
-from sccs.sync.state import SyncState, StateManager, ItemState
 from sccs.sync.engine import SyncEngine
+from sccs.sync.item import SyncItem, scan_items_for_category
+from sccs.sync.state import ItemState, StateManager, SyncState
 
 
 class TestSyncItem:

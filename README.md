@@ -236,6 +236,7 @@ output:
 | `item_pattern` | string | No | Glob pattern for file items (e.g., `*.md`) |
 | `include` | list | No | Patterns to include (default: `["*"]`) |
 | `exclude` | list | No | Patterns to exclude (default: `[]`) |
+| `platforms` | list | No | Platform filter: `["macos"]`, `["linux"]`, `null` = all |
 
 ## CLI Commands
 
@@ -301,14 +302,54 @@ sccs categories disable fish # Disable a category
 | `claude_scripts` | `~/.claude/scripts/` | Utility scripts |
 | `claude_plugins` | `~/.claude/plugins/` | Plugin configurations |
 | `claude_mcp` | `~/.claude/mcp/` | MCP server configs |
+| `claude_statusline` | `~/.claude/statusline.*` | Statusline script |
 
 ### Shell Categories (enabled by default)
 
-| Category | Path | Description |
-|----------|------|-------------|
-| `fish_config` | `~/.config/fish/` | Fish shell configuration |
-| `fish_functions` | `~/.config/fish/functions/` | Fish custom functions |
-| `starship_config` | `~/.config/starship.toml` | Starship prompt |
+| Category | Path | Platform | Description |
+|----------|------|----------|-------------|
+| `fish_config` | `~/.config/fish/` | all | Fish shell configuration |
+| `fish_config_macos` | `~/.config/fish/conf.d/*.macos.fish` | macOS | macOS-specific conf.d |
+| `fish_functions` | `~/.config/fish/functions/` | all | Fish custom functions |
+| `fish_functions_macos` | `~/.config/fish/functions/macos/` | macOS | macOS-specific functions |
+| `starship_config` | `~/.config/starship.toml` | all | Starship prompt |
+
+### Synced Skills
+
+All 19 skills synchronized as directories with `SKILL.md` marker:
+
+| Skill | Description |
+|-------|-------------|
+| `astro` | Astro.js v5 development |
+| `claude-workbench` | Rust TUI project |
+| `eq-chatbot-core` | Python LLM library |
+| `fastreport-api` | ASP.NET Core report API |
+| `fastreport-odoo` | FastReport YAML for Odoo |
+| `it-guy-content` | it-guy.ai website content |
+| `myodoo-docker` | Server infrastructure |
+| `odoo-common` | Central Odoo config |
+| `odoo-mcp` | MCP-Odoo integration |
+| `odoo-website-themes` | Odoo website themes |
+| `odoo16` | Odoo v16 development |
+| `odoo18` | Odoo v18 development |
+| `odoo19` | Odoo v19 development |
+| `ownerp-demodata` | Odoo demo data generator |
+| `project-docs` | Bilingual documentation |
+| `project-tips` | Fish shell quick reference |
+| `sccs` | SCCS project itself |
+| `v18-chatbot` | Odoo 18 chatbot module |
+| `vscode-server` | Docker VSCode Server |
+
+### Synced Fish Files
+
+**Fish Functions (cross-platform)**:
+`backup`, `bass`, `dclean`, `dlogs`, `docker-platform`, `docker-platforms`, `dstop`, `extract`, `fisher`, `gadd`, `gchg`, `gfix`, `gps`, `mkcd`, `nvm`, `tips`, `uvclean`, `uvpublish`, `uvsetup`
+
+**Fish Functions (macOS only)** — `fish_functions_macos`:
+`odoo-db`, `odoo-debug`, `odoo-env`, `odoo-install`, `odoo-logs`, `odoo-run`, `odoo-scaffold`, `odoo-shell`, `odoo-start`, `odoo-stop`, `odoo-test`, `odoo-update`, `odoo16`, `odoo17`, `odoo18`, `odoo19`
+
+**Fish conf.d (macOS only)** — `fish_config_macos`:
+`10-path.macos.fish`, `30-aliases-system.macos.fish`, `35-aliases-tools.macos.fish`, `36-aliases-odoo.macos.fish`
 
 ### Optional Categories (disabled by default)
 
@@ -318,6 +359,30 @@ sccs categories disable fish # Disable a category
 | `claude_todos` | `~/.claude/todos/` | Persistent TODO lists |
 | `git_config` | `~/.gitconfig` | Git configuration |
 | `project_templates` | Custom | Project templates |
+
+## Platform-Awareness
+
+SCCS supports platform-specific categories that only sync on matching operating systems.
+
+### How it works
+
+- The `platforms` field in a category config accepts a list: `["macos"]`, `["linux"]`, or `["macos", "linux"]`
+- Platform detection uses `platform.system()`: `Darwin` maps to `macos`, `Linux` maps to `linux`
+- Categories with `platforms: null` (default) sync on **all** platforms
+- Categories with `platforms: ["macos"]` are **skipped** on Linux and vice versa
+
+### Example
+
+```yaml
+fish_config_macos:
+  enabled: true
+  platforms: ["macos"]          # Only syncs on macOS
+  local_path: ~/.config/fish/conf.d
+  repo_path: .config/fish/conf.d
+  item_pattern: "*.macos.fish"
+```
+
+This allows the same repository to serve both macOS and Linux machines — platform-specific files are stored in the repo but only synchronized on the matching OS.
 
 ## Sync Modes
 

@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from sccs.config.schema import SccsConfig, SyncCategory, SyncMode, ItemType
-from sccs.config.loader import load_config, save_config, validate_config_file
 from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
+from sccs.config.loader import load_config, save_config, validate_config_file
+from sccs.config.schema import ItemType, SccsConfig, SyncCategory, SyncMode
 
 
 class TestSccsConfig:

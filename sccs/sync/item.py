@@ -195,10 +195,16 @@ def _scan_file_items(
     """Scan for file items in both locations."""
     items: dict[str, SyncItem] = {}
 
+    # Enable recursive scanning when include patterns contain subdirectory paths
+    needs_recursive = any("/" in p for p in include)
+
     # Scan local
     if local_path.exists() and local_path.is_dir():
-        for file_path in find_files(local_path, pattern=pattern, include=include, exclude=exclude, recursive=False):
-            name = file_path.name
+        for file_path in find_files(
+            local_path, pattern=pattern, include=include, exclude=exclude, recursive=needs_recursive
+        ):
+            rel_path = file_path.relative_to(local_path)
+            name = str(rel_path)
             if name not in items:
                 items[name] = SyncItem(
                     name=name,
@@ -209,8 +215,11 @@ def _scan_file_items(
 
     # Scan repo
     if repo_path.exists() and repo_path.is_dir():
-        for file_path in find_files(repo_path, pattern=pattern, include=include, exclude=exclude, recursive=False):
-            name = file_path.name
+        for file_path in find_files(
+            repo_path, pattern=pattern, include=include, exclude=exclude, recursive=needs_recursive
+        ):
+            rel_path = file_path.relative_to(repo_path)
+            name = str(rel_path)
             if name not in items:
                 items[name] = SyncItem(
                     name=name,

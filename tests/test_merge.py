@@ -9,9 +9,9 @@ import pytest
 from sccs.output.merge import (
     DiffHunk,
     MergeResult,
-    split_into_hunks,
     _detect_syntax,
     edit_in_editor,
+    split_into_hunks,
 )
 
 
@@ -78,8 +78,10 @@ class TestDiffHunkProperties:
             tag="insert",
             local_lines=["new\n"],
             repo_lines=[],
-            local_start=0, local_end=1,
-            repo_start=0, repo_end=0,
+            local_start=0,
+            local_end=1,
+            repo_start=0,
+            repo_end=0,
         )
         assert hunk.is_addition is True
         assert hunk.is_deletion is False
@@ -91,8 +93,10 @@ class TestDiffHunkProperties:
             tag="delete",
             local_lines=[],
             repo_lines=["old\n"],
-            local_start=0, local_end=0,
-            repo_start=0, repo_end=1,
+            local_start=0,
+            local_end=0,
+            repo_start=0,
+            repo_end=1,
         )
         assert hunk.is_deletion is True
         assert hunk.is_addition is False
@@ -103,8 +107,10 @@ class TestDiffHunkProperties:
             tag="replace",
             local_lines=["new\n"],
             repo_lines=["old\n"],
-            local_start=0, local_end=1,
-            repo_start=0, repo_end=1,
+            local_start=0,
+            local_end=1,
+            repo_start=0,
+            repo_end=1,
         )
         assert hunk.is_modification is True
         assert hunk.is_change is True
@@ -114,8 +120,10 @@ class TestDiffHunkProperties:
             tag="equal",
             local_lines=["same\n"],
             repo_lines=["same\n"],
-            local_start=0, local_end=1,
-            repo_start=0, repo_end=1,
+            local_start=0,
+            local_end=1,
+            repo_start=0,
+            repo_end=1,
         )
         assert hunk.is_equal is True
         assert hunk.is_change is False
