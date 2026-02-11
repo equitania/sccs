@@ -23,6 +23,7 @@ class SyncResult:
     synced_items: int = 0
     conflicts: int = 0
     errors: int = 0
+    settings_ensured: int = 0
     aborted: bool = False
     category_results: dict[str, CategorySyncResult] = field(default_factory=dict)
 
@@ -158,6 +159,9 @@ class SyncEngine:
             result.synced_items += cat_result.synced
             result.conflicts += cat_result.conflicts
             result.errors += cat_result.errors
+
+            if cat_result.settings_result and cat_result.settings_result.file_modified:
+                result.settings_ensured += 1
 
             if cat_result.aborted:
                 result.aborted = True

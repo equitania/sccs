@@ -1,6 +1,7 @@
 # SCCS Console Output
 # Rich-based console output for user-friendly display
 
+from pathlib import Path
 from typing import Optional
 
 from rich.console import Console as RichConsole
@@ -12,6 +13,7 @@ from rich.tree import Tree
 from sccs.sync.actions import ActionType, SyncAction
 from sccs.sync.category import CategoryStatus, CategorySyncResult
 from sccs.sync.engine import SyncResult
+from sccs.sync.settings import SettingsEnsureResult
 
 
 class Console:
@@ -209,6 +211,29 @@ class Console:
                         self._console.print(f"        [dim]→ View diff: sccs diff {action.item.name} -c {name}[/dim]")
                         self._console.print(f"        [dim]→ Keep local: sccs sync -c {name} --force local[/dim]")
                         self._console.print(f"        [dim]→ Keep repo:  sccs sync -c {name} --force repo[/dim]")
+
+        # Print settings ensure result if present
+        if result.settings_result is not None:
+            self._print_settings_ensure_result(result.settings_result, dry_run=dry_run)
+
+    def _print_settings_ensure_result(self, result: SettingsEnsureResult, *, dry_run: bool = False) -> None:
+        """Print settings ensure result details."""
+        target = Path(result.target_file).name
+
+        if result.error:
+            self._console.print(f"    [red]✗[/red] {target}: {result.error}")
+            return
+
+        verb_add = "would add" if dry_run else "added"
+        verb_create = "would create" if dry_run else "created"
+
+        for key in result.keys_added:
+            suffix = f" ({verb_create})" if result.file_created else ""
+            self._console.print(f"    [green]✓[/green] {target}: {verb_add} [{key}]{suffix}")
+
+        if self.verbose:
+            for key in result.keys_skipped:
+                self._console.print(f"    [dim]○[/dim] {target}: skipped [{key}] (already exists)")
 
     def print_categories_list(
         self,

@@ -138,6 +138,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "item_pattern": "statusline.*",
             "include": ["statusline.sh", "statusline.py", "statusline.fish"],
             "exclude": [],
+            "settings_ensure": {
+                "target_file": "~/.claude/settings.json",
+                "entries": {
+                    "statusLine": {
+                        "type": "command",
+                        "command": "~/.claude/statusline.sh",
+                    }
+                },
+                "create_if_missing": True,
+                "backup_before_modify": True,
+            },
         },
         # Fish Shell Configuration
         "fish_config": {

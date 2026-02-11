@@ -17,6 +17,7 @@ from sccs.config.schema import (
     PathTransformConfig,
     RepositoryConfig,
     SccsConfig,
+    SettingsEnsure,
     SyncCategory,
     SyncMode,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "SccsConfig",
     "RepositoryConfig",
     "SyncCategory",
+    "SettingsEnsure",
     "OutputConfig",
     "PathTransformConfig",
     "SyncMode",

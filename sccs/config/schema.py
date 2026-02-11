@@ -3,7 +3,7 @@
 
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -50,6 +50,24 @@ class RepositoryConfig(BaseModel):
         return str(Path(v).expanduser())
 
 
+class SettingsEnsure(BaseModel):
+    """Configuration for ensuring JSON settings entries exist after sync."""
+
+    target_file: str = Field(description="Path to target JSON settings file (supports ~)")
+    entries: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Key-value pairs to ensure exist. Missing keys are added, existing keys are never overwritten.",
+    )
+    create_if_missing: bool = Field(default=True, description="Create the target file if it doesn't exist")
+    backup_before_modify: bool = Field(default=True, description="Create backup before modifying")
+
+    @field_validator("target_file")
+    @classmethod
+    def expand_target_path(cls, v: str) -> str:
+        """Expand ~ in target file path."""
+        return str(Path(v).expanduser())
+
+
 class SyncCategory(BaseModel):
     """Configuration for a single sync category."""
 
@@ -71,6 +89,10 @@ class SyncCategory(BaseModel):
     platforms: Optional[list[str]] = Field(
         default=None,
         description="Platform filter: macos, linux, windows. None = all platforms.",
+    )
+    settings_ensure: Optional[SettingsEnsure] = Field(
+        default=None,
+        description="Optional JSON settings entries to ensure after sync.",
     )
 
     @field_validator("local_path", "repo_path")

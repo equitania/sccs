@@ -1,9 +1,11 @@
 # SCCS Category Handler
 # Handles synchronization for a single category
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from sccs.config.schema import SyncCategory, SyncMode
 from sccs.sync.actions import (
@@ -15,6 +17,9 @@ from sccs.sync.actions import (
 )
 from sccs.sync.item import SyncItem, scan_items_for_category
 from sccs.sync.state import StateManager
+
+if TYPE_CHECKING:
+    from sccs.sync.settings import SettingsEnsureResult
 
 
 @dataclass
@@ -57,6 +62,7 @@ class CategorySyncResult:
     aborted: bool = False
     results: list[ActionResult] = field(default_factory=list)
     error_message: Optional[str] = None
+    settings_result: Optional["SettingsEnsureResult"] = None
 
 
 class CategoryHandler:
@@ -237,6 +243,16 @@ class CategoryHandler:
             else:
                 result.errors += 1
                 result.success = False
+
+        # Run settings ensure hook if configured
+        if self.category.settings_ensure is not None:
+            from sccs.sync.settings import ensure_settings
+
+            result.settings_result = ensure_settings(
+                self.category.settings_ensure,
+                dry_run=dry_run,
+                category_name=self.name,
+            )
 
         return result
 
