@@ -2,7 +2,6 @@
 # Platform-aware category filtering for cross-platform sync
 
 import platform
-from typing import Optional
 
 # Platform name mapping: system name -> SCCS platform name
 _PLATFORM_MAP: dict[str, str] = {
@@ -23,7 +22,7 @@ def get_current_platform() -> str:
     return _PLATFORM_MAP.get(system, system.lower())
 
 
-def is_platform_match(platforms: Optional[list[str]]) -> bool:
+def is_platform_match(platforms: list[str] | None) -> bool:
     """
     Check if the current platform matches the given platform filter.
 

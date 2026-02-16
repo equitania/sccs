@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.0.0
+**Version**: 2.5.0
 
 ### Key Features
 
@@ -58,8 +58,8 @@ pytest tests/test_config.py  # Single test file
 ### Code Quality
 
 ```bash
-black sccs/ tests/        # Format code
-isort sccs/ tests/        # Sort imports
+ruff check sccs/ tests/   # Lint code
+ruff format sccs/ tests/  # Format code
 mypy sccs/                # Type checking
 ```
 

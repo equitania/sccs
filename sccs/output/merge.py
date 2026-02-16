@@ -5,15 +5,13 @@ import difflib
 import os
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console as RichConsole
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
-from rich.text import Text
 
 from sccs.sync.actions import SyncAction
 from sccs.utils.paths import atomic_write, create_backup
@@ -207,7 +205,7 @@ def prompt_hunk_resolution(console: RichConsole) -> str:
             console.print("[red]Invalid choice. Please enter l, r, b, e, or s.[/red]")
 
 
-def edit_in_editor(content: str, suffix: str = ".txt") -> Optional[str]:
+def edit_in_editor(content: str, suffix: str = ".txt") -> str | None:
     """
     Open content in external editor for manual editing.
 
@@ -218,41 +216,48 @@ def edit_in_editor(content: str, suffix: str = ".txt") -> Optional[str]:
     Returns:
         Edited content, or None if editor failed or content unchanged.
     """
+    import shutil
+
     editor = os.environ.get("EDITOR", os.environ.get("VISUAL", ""))
     if not editor:
         # Try common editors
         for candidate in ["nano", "vim", "vi"]:
-            try:
-                subprocess.run(["which", candidate], capture_output=True, check=True)
+            if shutil.which(candidate):
                 editor = candidate
                 break
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                continue
 
-    if not editor:
+    if not editor or not shutil.which(editor):
         return None
 
+    temp_path = None
     try:
-        fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix="sccs_merge_")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=suffix,
+            prefix="sccs_merge_",
+            encoding="utf-8",
+            delete=False,
+        ) as f:
             f.write(content)
+            temp_path = f.name
 
         result = subprocess.run([editor, temp_path])
 
         if result.returncode != 0:
             return None
 
-        with open(temp_path, "r", encoding="utf-8") as f:
+        with open(temp_path, encoding="utf-8") as f:
             edited = f.read()
 
         return edited
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return None
     finally:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 def _show_file_metadata(

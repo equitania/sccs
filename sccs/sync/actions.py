@@ -4,7 +4,6 @@
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from sccs.sync.item import SyncItem
 from sccs.utils.paths import ensure_dir, safe_copy, safe_delete
@@ -49,10 +48,10 @@ class SyncAction:
 
     item: SyncItem
     action_type: ActionType
-    source_path: Optional[Path] = None
-    dest_path: Optional[Path] = None
+    source_path: Path | None = None
+    dest_path: Path | None = None
     reason: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def is_copy(self) -> bool:
@@ -103,8 +102,8 @@ class ActionResult:
 
     action: SyncAction
     success: bool
-    error: Optional[str] = None
-    backup_path: Optional[Path] = None
+    error: str | None = None
+    backup_path: Path | None = None
 
     @property
     def item_name(self) -> str:
@@ -225,7 +224,7 @@ def _execute_delete(action: SyncAction) -> ActionResult:
 
 def determine_action(
     item: SyncItem,
-    last_hash: Optional[str],
+    last_hash: str | None,
     sync_mode: str,
 ) -> SyncAction:
     """

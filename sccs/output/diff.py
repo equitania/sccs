@@ -4,12 +4,10 @@
 import difflib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console as RichConsole
 from rich.panel import Panel
 from rich.syntax import Syntax
-from rich.text import Text
 
 from sccs.sync.actions import SyncAction
 from sccs.sync.item import SyncItem
@@ -23,17 +21,17 @@ class DiffResult:
     has_diff: bool
     local_exists: bool
     repo_exists: bool
-    local_content: Optional[str] = None
-    repo_content: Optional[str] = None
-    diff_lines: list[str] = None
-    error: Optional[str] = None
+    local_content: str | None = None
+    repo_content: str | None = None
+    diff_lines: list[str] | None = None
+    error: str | None = None
 
     def __post_init__(self):
         if self.diff_lines is None:
             self.diff_lines = []
 
 
-def read_content(path: Path) -> Optional[str]:
+def read_content(path: Path) -> str | None:
     """
     Read content from a file.
 
@@ -64,8 +62,8 @@ def read_content(path: Path) -> Optional[str]:
 
 
 def generate_diff(
-    local_content: Optional[str],
-    repo_content: Optional[str],
+    local_content: str | None,
+    repo_content: str | None,
     *,
     context_lines: int = 3,
 ) -> list[str]:
@@ -98,7 +96,7 @@ def generate_diff(
 def show_diff(
     item: SyncItem,
     *,
-    console: Optional[RichConsole] = None,
+    console: RichConsole | None = None,
     context_lines: int = 3,
 ) -> DiffResult:
     """
@@ -138,7 +136,7 @@ def show_diff(
         result.has_diff = True
         console.print(
             Panel(
-                f"[cyan]Only in repo:[/cyan] {item.name}\n\n" f"{result.repo_content or '[Empty]'}",
+                f"[cyan]Only in repo:[/cyan] {item.name}\n\n{result.repo_content or '[Empty]'}",
                 title=f"Diff: {item.name}",
                 border_style="cyan",
             )
@@ -149,7 +147,7 @@ def show_diff(
         result.has_diff = True
         console.print(
             Panel(
-                f"[yellow]Only in local:[/yellow] {item.name}\n\n" f"{result.local_content or '[Empty]'}",
+                f"[yellow]Only in local:[/yellow] {item.name}\n\n{result.local_content or '[Empty]'}",
                 title=f"Diff: {item.name}",
                 border_style="yellow",
             )
@@ -186,8 +184,8 @@ def show_diff(
 def show_conflict(
     action: SyncAction,
     *,
-    console: Optional[RichConsole] = None,
-) -> Optional[str]:
+    console: RichConsole | None = None,
+) -> str | None:
     """
     Show conflict details and prompt for resolution.
 
@@ -273,8 +271,9 @@ def format_diff_summary(result: DiffResult) -> str:
         return "Only in local"
 
     # Count additions and deletions
-    additions = sum(1 for line in result.diff_lines if line.startswith("+") and not line.startswith("+++"))
-    deletions = sum(1 for line in result.diff_lines if line.startswith("-") and not line.startswith("---"))
+    lines = result.diff_lines or []
+    additions = sum(1 for line in lines if line.startswith("+") and not line.startswith("+++"))
+    deletions = sum(1 for line in lines if line.startswith("-") and not line.startswith("---"))
 
     parts = []
     if additions > 0:

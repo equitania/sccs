@@ -7,10 +7,9 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
 
 
-def expand_path(path: Union[str, Path]) -> Path:
+def expand_path(path: str | Path) -> Path:
     """
     Expand ~ and environment variables in path.
 
@@ -48,7 +47,7 @@ def get_backup_dir() -> Path:
     return backup_dir
 
 
-def create_backup(path: Path, category: str = "unknown") -> Optional[Path]:
+def create_backup(path: Path, category: str = "unknown") -> Path | None:
     """
     Create a backup of a file or directory before overwriting.
 
@@ -85,7 +84,7 @@ def safe_copy(
     preserve_metadata: bool = True,
     backup: bool = False,
     backup_category: str = "unknown",
-) -> Optional[Path]:
+) -> Path | None:
     """
     Atomically copy file or directory.
 
@@ -130,7 +129,7 @@ def safe_copy(
             if dest.exists():
                 shutil.rmtree(dest)
             temp_dest.rename(dest)
-        except Exception:
+        except (FileExistsError, PermissionError, OSError):
             # Cleanup on failure
             if temp_dest.exists():
                 shutil.rmtree(temp_dest)
@@ -144,7 +143,7 @@ def safe_copy(
                 shutil.copy(source, temp_dest)
             # Atomic rename
             temp_dest.rename(dest)
-        except Exception:
+        except (FileExistsError, PermissionError, OSError):
             # Cleanup on failure
             if temp_dest.exists():
                 temp_dest.unlink()
@@ -179,7 +178,7 @@ def safe_delete(path: Path, *, missing_ok: bool = False) -> bool:
     return True
 
 
-def atomic_write(path: Path, content: Union[str, bytes], *, encoding: str = "utf-8") -> None:
+def atomic_write(path: Path, content: str | bytes, *, encoding: str = "utf-8") -> None:
     """
     Atomically write content to file.
 
@@ -212,7 +211,7 @@ def atomic_write(path: Path, content: Union[str, bytes], *, encoding: str = "utf
         raise
 
 
-def get_relative_path(path: Path, base: Path) -> Optional[Path]:
+def get_relative_path(path: Path, base: Path) -> Path | None:
     """
     Get path relative to base, or None if not relative.
 
@@ -229,7 +228,7 @@ def get_relative_path(path: Path, base: Path) -> Optional[Path]:
         return None
 
 
-def matches_pattern(path: Union[str, Path], pattern: str) -> bool:
+def matches_pattern(path: str | Path, pattern: str) -> bool:
     """
     Check if path matches a glob pattern.
 
@@ -265,7 +264,7 @@ def matches_pattern(path: Union[str, Path], pattern: str) -> bool:
     return fnmatch.fnmatch(path_str, pattern)
 
 
-def matches_any_pattern(path: Union[str, Path], patterns: list[str]) -> bool:
+def matches_any_pattern(path: str | Path, patterns: list[str]) -> bool:
     """
     Check if path matches any of the given patterns.
 
@@ -282,9 +281,9 @@ def matches_any_pattern(path: Union[str, Path], patterns: list[str]) -> bool:
 def find_files(
     directory: Path,
     *,
-    pattern: Optional[str] = None,
-    include: Optional[list[str]] = None,
-    exclude: Optional[list[str]] = None,
+    pattern: str | None = None,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
     recursive: bool = True,
 ) -> list[Path]:
     """
@@ -340,9 +339,9 @@ def find_files(
 def find_directories(
     directory: Path,
     *,
-    marker: Optional[str] = None,
-    include: Optional[list[str]] = None,
-    exclude: Optional[list[str]] = None,
+    marker: str | None = None,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
 ) -> list[Path]:
     """
     Find directories, optionally with a marker file.

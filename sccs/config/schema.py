@@ -3,7 +3,7 @@
 
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -77,20 +77,18 @@ class SyncCategory(BaseModel):
     repo_path: str = Field(description="Repository path to sync to")
     sync_mode: SyncMode = Field(default=SyncMode.BIDIRECTIONAL, description="Sync direction mode")
     item_type: ItemType = Field(default=ItemType.FILE, description="Type of items")
-    item_marker: Optional[str] = Field(
-        default=None, description="File that marks a valid directory item (e.g., SKILL.md)"
-    )
-    item_pattern: Optional[str] = Field(default=None, description="Glob pattern for file items (e.g., *.md)")
+    item_marker: str | None = Field(default=None, description="File that marks a valid directory item (e.g., SKILL.md)")
+    item_pattern: str | None = Field(default=None, description="Glob pattern for file items (e.g., *.md)")
     include: list[str] = Field(default_factory=lambda: ["*"], description="Include patterns")
     exclude: list[str] = Field(default_factory=list, description="Exclude patterns")
-    conflict_resolution: Optional[ConflictResolution] = Field(
+    conflict_resolution: ConflictResolution | None = Field(
         default=None, description="Category-specific conflict resolution"
     )
-    platforms: Optional[list[str]] = Field(
+    platforms: list[str] | None = Field(
         default=None,
         description="Platform filter: macos, linux, windows. None = all platforms.",
     )
-    settings_ensure: Optional[SettingsEnsure] = Field(
+    settings_ensure: SettingsEnsure | None = Field(
         default=None,
         description="Optional JSON settings entries to ensure after sync.",
     )
@@ -134,12 +132,12 @@ class OutputConfig(BaseModel):
 
     verbose: bool = Field(default=False, description="Enable verbose output")
     colored: bool = Field(default=True, description="Enable colored output")
-    log_file: Optional[str] = Field(default=None, description="Path to log file")
-    sync_history: Optional[str] = Field(default=None, description="Path to sync history file")
+    log_file: str | None = Field(default=None, description="Path to log file")
+    sync_history: str | None = Field(default=None, description="Path to sync history file")
 
     @field_validator("log_file", "sync_history")
     @classmethod
-    def expand_optional_paths(cls, v: Optional[str]) -> Optional[str]:
+    def expand_optional_paths(cls, v: str | None) -> str | None:
         """Expand ~ in optional paths."""
         if v is None:
             return None
@@ -205,7 +203,7 @@ class SccsConfig(BaseModel):
         """Return only enabled categories."""
         return {name: cat for name, cat in self.sync_categories.items() if cat.enabled}
 
-    def get_category(self, name: str) -> Optional[SyncCategory]:
+    def get_category(self, name: str) -> SyncCategory | None:
         """Get a category by name."""
         return self.sync_categories.get(name)
 

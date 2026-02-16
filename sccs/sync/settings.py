@@ -4,7 +4,6 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from sccs.config.schema import SettingsEnsure
 from sccs.utils.paths import atomic_write, create_backup, ensure_dir
@@ -19,8 +18,8 @@ class SettingsEnsureResult:
     keys_skipped: list[str] = field(default_factory=list)
     file_created: bool = False
     file_modified: bool = False
-    backup_path: Optional[Path] = None
-    error: Optional[str] = None
+    backup_path: Path | None = None
+    error: str | None = None
 
     @property
     def success(self) -> bool:
@@ -80,7 +79,7 @@ def ensure_settings(
         result.file_created = True
 
     # Determine which keys to add vs skip
-    for key, value in config.entries.items():
+    for key, _value in config.entries.items():
         if key in existing:
             result.keys_skipped.append(key)
         else:

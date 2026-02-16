@@ -3,10 +3,9 @@
 
 import hashlib
 from pathlib import Path
-from typing import Optional, Union
 
 
-def content_hash(content: Union[str, bytes], *, algorithm: str = "sha256") -> str:
+def content_hash(content: str | bytes, *, algorithm: str = "sha256") -> str:
     """
     Calculate hash of content.
 
@@ -25,7 +24,7 @@ def content_hash(content: Union[str, bytes], *, algorithm: str = "sha256") -> st
     return hasher.hexdigest()
 
 
-def file_hash(path: Path, *, algorithm: str = "sha256", chunk_size: int = 8192) -> Optional[str]:
+def file_hash(path: Path, *, algorithm: str = "sha256", chunk_size: int = 8192) -> str | None:
     """
     Calculate hash of file content.
 
@@ -54,8 +53,8 @@ def directory_hash(
     *,
     algorithm: str = "sha256",
     include_names: bool = True,
-    exclude_patterns: Optional[list[str]] = None,
-) -> Optional[str]:
+    exclude_patterns: list[str] | None = None,
+) -> str | None:
     """
     Calculate hash of directory contents.
 
@@ -144,7 +143,7 @@ def quick_compare(path1: Path, path2: Path) -> bool:
     return False
 
 
-def get_mtime(path: Path) -> Optional[float]:
+def get_mtime(path: Path) -> float | None:
     """
     Get modification time of file or directory.
 

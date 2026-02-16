@@ -1,10 +1,7 @@
 # SCCS Merge Tests
 # Tests for interactive merge functionality
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from sccs.output.merge import (
     DiffHunk,

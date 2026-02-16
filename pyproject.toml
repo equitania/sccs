@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sccs"
-version = "2.4.0"
+version = "2.5.0"
 description = "SkillsCommandsConfigsSync - Unified YAML-configured synchronization for Claude Code files"
 readme = "README.md"
 license = "AGPL-3.0"
@@ -39,20 +39,20 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "click>=8.1.0",
-    "rich>=13.0.0",
-    "PyYAML>=6.0",
-    "pydantic>=2.0.0",
+    "click>=8.1.0,<9.0.0",
+    "rich>=13.0.0,<15.0.0",
+    "PyYAML>=6.0,<7.0.0",
+    "pydantic>=2.0.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "mypy>=1.0.0",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.8.0",
+    "mypy>=1.8.0",
     "types-PyYAML>=6.0.0",
+    "pre-commit>=3.5.0",
 ]
 
 [project.scripts]
@@ -67,13 +67,32 @@ Issues = "https://github.com/equitania/sccs/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["sccs"]
 
-[tool.black]
+[tool.ruff]
 line-length = 120
-target-version = ["py310", "py311", "py312", "py313"]
+target-version = "py310"
 
-[tool.isort]
-profile = "black"
-line_length = 120
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E203", "E266", "SIM102", "SIM105", "SIM108"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sccs"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.coverage.run]
+source = ["sccs"]
+omit = ["tests/*", "sccs/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 40
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]
 
 [tool.mypy]
 python_version = "3.10"

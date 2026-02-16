@@ -1,9 +1,12 @@
 # SCCS Git Operations
 # Git command execution and repository management
 
+import re
 import subprocess
 from pathlib import Path
-from typing import Optional
+
+# Pattern for validating git author format: "Name <email>"
+_GIT_AUTHOR_PATTERN = re.compile(r"^[^<>]+\s<[^@\s]+@[^@\s]+>$")
 
 
 class GitError(Exception):
@@ -18,7 +21,7 @@ class GitError(Exception):
 
 def _run_git(
     *args: str,
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
     check: bool = True,
     capture_output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
@@ -53,11 +56,11 @@ def _run_git(
                 stderr=result.stderr.strip() if result.stderr else "",
             )
         return result
-    except FileNotFoundError:
-        raise GitError("git command not found. Is git installed?")
+    except FileNotFoundError as err:
+        raise GitError("git command not found. Is git installed?") from err
 
 
-def get_repo_root(path: Optional[Path] = None) -> Optional[Path]:
+def get_repo_root(path: Path | None = None) -> Path | None:
     """
     Get the root directory of a git repository.
 
@@ -74,7 +77,7 @@ def get_repo_root(path: Optional[Path] = None) -> Optional[Path]:
         return None
 
 
-def is_git_repo(path: Optional[Path] = None) -> bool:
+def is_git_repo(path: Path | None = None) -> bool:
     """
     Check if path is within a git repository.
 
@@ -87,7 +90,7 @@ def is_git_repo(path: Optional[Path] = None) -> bool:
     return get_repo_root(path) is not None
 
 
-def git_status(path: Optional[Path] = None, *, porcelain: bool = True) -> str:
+def git_status(path: Path | None = None, *, porcelain: bool = True) -> str:
     """
     Get git status output.
 
@@ -105,7 +108,7 @@ def git_status(path: Optional[Path] = None, *, porcelain: bool = True) -> str:
     return result.stdout
 
 
-def has_uncommitted_changes(path: Optional[Path] = None) -> bool:
+def has_uncommitted_changes(path: Path | None = None) -> bool:
     """
     Check if repository has uncommitted changes.
 
@@ -119,7 +122,7 @@ def has_uncommitted_changes(path: Optional[Path] = None) -> bool:
     return len(status.strip()) > 0
 
 
-def get_current_branch(path: Optional[Path] = None) -> Optional[str]:
+def get_current_branch(path: Path | None = None) -> str | None:
     """
     Get current branch name.
 
@@ -139,7 +142,7 @@ def get_current_branch(path: Optional[Path] = None) -> Optional[str]:
 
 def stage_files(
     files: list[Path],
-    path: Optional[Path] = None,
+    path: Path | None = None,
 ) -> bool:
     """
     Stage files for commit.
@@ -164,7 +167,7 @@ def stage_files(
         return False
 
 
-def stage_all(path: Optional[Path] = None) -> bool:
+def stage_all(path: Path | None = None) -> bool:
     """
     Stage all changes.
 
@@ -183,10 +186,10 @@ def stage_all(path: Optional[Path] = None) -> bool:
 
 def commit(
     message: str,
-    path: Optional[Path] = None,
+    path: Path | None = None,
     *,
-    author: Optional[str] = None,
-) -> Optional[str]:
+    author: str | None = None,
+) -> str | None:
     """
     Create a commit.
 
@@ -201,6 +204,8 @@ def commit(
     args = ["commit", "-m", message]
 
     if author:
+        if not _GIT_AUTHOR_PATTERN.match(author):
+            raise GitError(f"Invalid author format: {author!r}. Expected: 'Name <email>'")
         args.extend(["--author", author])
 
     try:
@@ -213,10 +218,10 @@ def commit(
 
 
 def push(
-    path: Optional[Path] = None,
+    path: Path | None = None,
     *,
     remote: str = "origin",
-    branch: Optional[str] = None,
+    branch: str | None = None,
     set_upstream: bool = False,
 ) -> bool:
     """
@@ -249,7 +254,7 @@ def push(
 
 
 def get_changed_files(
-    path: Optional[Path] = None,
+    path: Path | None = None,
     *,
     staged: bool = False,
     unstaged: bool = False,
@@ -323,8 +328,8 @@ def clone_repo(
     url: str,
     dest: Path,
     *,
-    branch: Optional[str] = None,
-    depth: Optional[int] = None,
+    branch: str | None = None,
+    depth: int | None = None,
 ) -> bool:
     """
     Clone a repository.
@@ -355,7 +360,7 @@ def clone_repo(
         return False
 
 
-def fetch(path: Optional[Path] = None) -> bool:
+def fetch(path: Path | None = None) -> bool:
     """
     Fetch remote changes without merging.
 
@@ -372,7 +377,7 @@ def fetch(path: Optional[Path] = None) -> bool:
         return False
 
 
-def get_remote_status(path: Optional[Path] = None) -> dict:
+def get_remote_status(path: Path | None = None) -> dict:
     """
     Check if local branch is behind/ahead of remote.
 
@@ -410,7 +415,7 @@ def get_remote_status(path: Optional[Path] = None) -> dict:
 
 
 def pull(
-    path: Optional[Path] = None,
+    path: Path | None = None,
     *,
     rebase: bool = False,
 ) -> bool:

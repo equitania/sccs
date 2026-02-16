@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING
 
-from sccs.config.schema import SyncCategory, SyncMode
+from sccs.config.schema import SyncCategory
 from sccs.sync.actions import (
     ActionResult,
     ActionType,
@@ -35,7 +36,7 @@ class CategoryStatus:
     errors: int = 0
     items: list[SyncItem] = field(default_factory=list)
     actions: list[SyncAction] = field(default_factory=list)
-    platforms: Optional[list[str]] = None
+    platforms: list[str] | None = None
 
     @property
     def has_changes(self) -> bool:
@@ -61,8 +62,8 @@ class CategorySyncResult:
     errors: int = 0
     aborted: bool = False
     results: list[ActionResult] = field(default_factory=list)
-    error_message: Optional[str] = None
-    settings_result: Optional["SettingsEnsureResult"] = None
+    error_message: str | None = None
+    settings_result: SettingsEnsureResult | None = None
 
 
 class CategoryHandler:
@@ -78,7 +79,7 @@ class CategoryHandler:
         category: SyncCategory,
         repo_base: Path,
         state_manager: StateManager,
-        global_exclude: Optional[list[str]] = None,
+        global_exclude: list[str] | None = None,
     ):
         """
         Initialize category handler.
@@ -95,8 +96,8 @@ class CategoryHandler:
         self.repo_base = repo_base
         self.state_manager = state_manager
         self.global_exclude = global_exclude or []
-        self._items: Optional[list[SyncItem]] = None
-        self._actions: Optional[list[SyncAction]] = None
+        self._items: list[SyncItem] | None = None
+        self._actions: list[SyncAction] | None = None
 
     @property
     def local_path(self) -> Path:
@@ -175,8 +176,8 @@ class CategoryHandler:
         self,
         *,
         dry_run: bool = False,
-        force_direction: Optional[str] = None,
-        conflict_resolver: Optional[Callable[[SyncAction, str], str]] = None,
+        force_direction: str | None = None,
+        conflict_resolver: Callable[[SyncAction, str], str] | None = None,
     ) -> CategorySyncResult:
         """
         Synchronize this category.

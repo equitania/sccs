@@ -3,7 +3,6 @@
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -24,7 +23,7 @@ from sccs.sync.actions import SyncAction
 from sccs.sync.state import StateManager
 
 # Global console instance
-_console: Optional[Console] = None
+_console: Console | None = None
 
 
 def get_console() -> Console:
@@ -80,9 +79,9 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.pass_context
 def sync(
     ctx: click.Context,
-    category: Optional[str],
+    category: str | None,
     dry_run: bool,
-    force: Optional[str],
+    force: str | None,
     interactive: bool,
     do_commit: bool,
     no_commit: bool,
@@ -184,7 +183,7 @@ def sync(
                     else:
                         console.print_error("No local file to edit")
                         continue
-                return resolution
+                return resolution  # type: ignore[no-any-return]
 
     # Perform sync
     result = engine.sync(
@@ -235,7 +234,7 @@ def sync(
 @cli.command()
 @click.option("-c", "--category", help="Show status for specific category only")
 @click.pass_context
-def status(ctx: click.Context, category: Optional[str]) -> None:
+def status(ctx: click.Context, category: str | None) -> None:
     """Show synchronization status."""
     console = ctx.obj["console"]
 
@@ -262,7 +261,7 @@ def status(ctx: click.Context, category: Optional[str]) -> None:
 @click.argument("item_name", required=False)
 @click.option("-c", "--category", help="Category to show diffs for")
 @click.pass_context
-def diff(ctx: click.Context, item_name: Optional[str], category: Optional[str]) -> None:
+def diff(ctx: click.Context, item_name: str | None, category: str | None) -> None:
     """Show diff for items.
 
     \b
@@ -356,7 +355,7 @@ def log(ctx: click.Context, last: int) -> None:
         reverse=True,
     )[:last]
 
-    console.print(f"\n[bold]Recent items:[/bold]")
+    console.print("\n[bold]Recent items:[/bold]")
     for item in sorted_items:
         action = item.last_action or "unknown"
         console.print(f"  {item.category}:{item.name} - {action} ({item.last_synced})")
@@ -449,6 +448,7 @@ def config_init(ctx: click.Context, force: bool) -> None:
 def config_edit(ctx: click.Context) -> None:
     """Open configuration in editor."""
     import os
+    import shutil
     import subprocess
 
     config_path = get_config_path()
@@ -459,6 +459,11 @@ def config_edit(ctx: click.Context) -> None:
         ensure_config_exists()
 
     editor = os.environ.get("EDITOR", "nano")
+
+    if not shutil.which(editor):
+        console.print_error(f"Editor not found: {editor}")
+        console.print_info(f"Set EDITOR environment variable or open manually: {config_path}")
+        return
 
     try:
         subprocess.run([editor, str(config_path)], check=True)

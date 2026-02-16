@@ -1,9 +1,6 @@
 # SCCS Platform Detection Tests
 
-import platform
 from unittest.mock import patch
-
-import pytest
 
 from sccs.utils.platform import get_current_platform, is_platform_match
 

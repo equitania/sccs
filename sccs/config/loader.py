@@ -3,7 +3,6 @@
 
 import os
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from pydantic import ValidationError
@@ -33,7 +32,7 @@ def ensure_config_dir() -> Path:
     return config_dir
 
 
-def load_config(config_path: Optional[Path] = None) -> SccsConfig:
+def load_config(config_path: Path | None = None) -> SccsConfig:
     """
     Load configuration from YAML file.
 
@@ -65,7 +64,7 @@ def load_config(config_path: Optional[Path] = None) -> SccsConfig:
     return SccsConfig.model_validate(merged)
 
 
-def save_config(config: SccsConfig, config_path: Optional[Path] = None) -> Path:
+def save_config(config: SccsConfig, config_path: Path | None = None) -> Path:
     """
     Save configuration to YAML file.
 
@@ -120,7 +119,7 @@ def load_or_create_config() -> tuple[SccsConfig, bool]:
     return config, was_created
 
 
-def validate_config_file(config_path: Optional[Path] = None) -> tuple[bool, list[str]]:
+def validate_config_file(config_path: Path | None = None) -> tuple[bool, list[str]]:
     """
     Validate a configuration file without loading it into the system.
 
@@ -151,7 +150,7 @@ def validate_config_file(config_path: Optional[Path] = None) -> tuple[bool, list
         SccsConfig.model_validate(data)
     except ValidationError as e:
         for error in e.errors():
-            loc = " -> ".join(str(l) for l in error["loc"])
+            loc = " -> ".join(str(part) for part in error["loc"])
             errors.append(f"{loc}: {error['msg']}")
         return False, errors
 
@@ -195,7 +194,7 @@ def _merge_with_defaults(data: dict) -> dict:
     return result
 
 
-def update_category_enabled(category_name: str, enabled: bool, config_path: Optional[Path] = None) -> SccsConfig:
+def update_category_enabled(category_name: str, enabled: bool, config_path: Path | None = None) -> SccsConfig:
     """
     Update a category's enabled state and save.
 

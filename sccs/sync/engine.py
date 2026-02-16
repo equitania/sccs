@@ -1,9 +1,9 @@
 # SCCS Sync Engine
 # Main synchronization engine coordinating all categories
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
 
 from sccs.config.schema import SccsConfig
 from sccs.sync.actions import SyncAction
@@ -40,7 +40,7 @@ class SyncEngine:
     Coordinates sync across all enabled categories.
     """
 
-    def __init__(self, config: SccsConfig, state_manager: Optional[StateManager] = None):
+    def __init__(self, config: SccsConfig, state_manager: StateManager | None = None):
         """
         Initialize sync engine.
 
@@ -53,7 +53,7 @@ class SyncEngine:
         self.state_manager = state_manager or StateManager()
         self._handlers: dict[str, CategoryHandler] = {}
 
-    def get_handler(self, category_name: str) -> Optional[CategoryHandler]:
+    def get_handler(self, category_name: str) -> CategoryHandler | None:
         """
         Get handler for a category.
 
@@ -88,7 +88,7 @@ class SyncEngine:
         """Get list of all category names."""
         return list(self.config.sync_categories.keys())
 
-    def get_status(self, category_name: Optional[str] = None) -> dict[str, CategoryStatus]:
+    def get_status(self, category_name: str | None = None) -> dict[str, CategoryStatus]:
         """
         Get status for categories.
 
@@ -115,10 +115,10 @@ class SyncEngine:
     def sync(
         self,
         *,
-        category_name: Optional[str] = None,
+        category_name: str | None = None,
         dry_run: bool = False,
-        force_direction: Optional[str] = None,
-        conflict_resolver: Optional[Callable[[SyncAction, str], str]] = None,
+        force_direction: str | None = None,
+        conflict_resolver: Callable[[SyncAction, str], str] | None = None,
     ) -> SyncResult:
         """
         Synchronize categories.
@@ -179,7 +179,7 @@ class SyncEngine:
         self,
         *,
         dry_run: bool = False,
-        force_direction: Optional[str] = None,
+        force_direction: str | None = None,
     ) -> SyncResult:
         """
         Synchronize all enabled categories.
@@ -198,7 +198,7 @@ class SyncEngine:
         category_name: str,
         *,
         dry_run: bool = False,
-        force_direction: Optional[str] = None,
+        force_direction: str | None = None,
     ) -> CategorySyncResult:
         """
         Synchronize a specific category.
@@ -239,7 +239,7 @@ class SyncEngine:
 
         return handler.get_status()
 
-    def reset_state(self, category_name: Optional[str] = None) -> None:
+    def reset_state(self, category_name: str | None = None) -> None:
         """
         Reset sync state.
 

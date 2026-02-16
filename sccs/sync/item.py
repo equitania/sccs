@@ -1,13 +1,12 @@
 # SCCS Sync Item
 # Generic item representation for files and directories
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from sccs.config.schema import ItemType, SyncCategory
 from sccs.utils.hashing import directory_hash, file_hash, get_mtime
-from sccs.utils.paths import expand_path, find_directories, find_files, matches_any_pattern
+from sccs.utils.paths import expand_path, find_directories, find_files
 
 
 @dataclass
@@ -21,10 +20,10 @@ class SyncItem:
     name: str
     category: str
     item_type: ItemType
-    local_path: Optional[Path] = None
-    repo_path: Optional[Path] = None
-    content_hash: Optional[str] = None
-    mtime: Optional[float] = None
+    local_path: Path | None = None
+    repo_path: Path | None = None
+    content_hash: str | None = None
+    mtime: float | None = None
 
     @property
     def exists_local(self) -> bool:
@@ -46,7 +45,7 @@ class SyncItem:
         """Check if item exists in either location."""
         return self.exists_local or self.exists_repo
 
-    def get_hash(self, source: str = "local") -> Optional[str]:
+    def get_hash(self, source: str = "local") -> str | None:
         """
         Get content hash for item from specified source.
 
@@ -65,7 +64,7 @@ class SyncItem:
         else:
             return directory_hash(path)
 
-    def get_mtime(self, source: str = "local") -> Optional[float]:
+    def get_mtime(self, source: str = "local") -> float | None:
         """
         Get modification time from specified source.
 
@@ -86,7 +85,7 @@ def scan_items_for_category(
     category: SyncCategory,
     local_base: Path,
     repo_base: Path,
-    global_exclude: Optional[list[str]] = None,
+    global_exclude: list[str] | None = None,
 ) -> list[SyncItem]:
     """
     Scan and discover items for a sync category.
@@ -188,7 +187,7 @@ def _scan_file_items(
     category_name: str,
     local_path: Path,
     repo_path: Path,
-    pattern: Optional[str],
+    pattern: str | None,
     include: list[str],
     exclude: list[str],
 ) -> dict[str, SyncItem]:
@@ -242,7 +241,7 @@ def _scan_directory_items(
     category_name: str,
     local_path: Path,
     repo_path: Path,
-    marker: Optional[str],
+    marker: str | None,
     include: list[str],
     exclude: list[str],
 ) -> dict[str, SyncItem]:

@@ -2,13 +2,10 @@
 # Rich-based console output for user-friendly display
 
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console as RichConsole
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
-from rich.tree import Tree
 
 from sccs.sync.actions import ActionType, SyncAction
 from sccs.sync.category import CategoryStatus, CategorySyncResult
@@ -271,7 +268,7 @@ class Console:
         """Print configuration summary."""
         self._console.print(
             Panel(
-                f"Config: {config_path}\n" f"Categories: {categories_count}",
+                f"Config: {config_path}\nCategories: {categories_count}",
                 title="SCCS Configuration",
                 border_style="blue",
             )
@@ -310,7 +307,7 @@ class Console:
         item_name = action.item.name
 
         self._console.print(f"\n[bold red]Conflict detected:[/bold red] {category_name}/{item_name}")
-        self._console.print(f"  Both local and repository versions have changed.\n")
+        self._console.print("  Both local and repository versions have changed.\n")
 
         self._console.print("[bold]Options:[/bold]")
         self._console.print("  [cyan]1[/cyan] - Keep [bold]local[/bold] version (overwrite repo)")

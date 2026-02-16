@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -16,11 +16,11 @@ class ItemState:
 
     name: str
     category: str
-    content_hash: Optional[str] = None
-    local_mtime: Optional[float] = None
-    repo_mtime: Optional[float] = None
-    last_synced: Optional[str] = None  # ISO format datetime
-    last_action: Optional[str] = None
+    content_hash: str | None = None
+    local_mtime: float | None = None
+    repo_mtime: float | None = None
+    last_synced: str | None = None  # ISO format datetime
+    last_action: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -49,10 +49,10 @@ class SyncState:
     """
 
     version: str = "2.0"
-    last_sync: Optional[str] = None  # ISO format datetime
+    last_sync: str | None = None  # ISO format datetime
     items: dict[str, ItemState] = field(default_factory=dict)
 
-    def get_item(self, category: str, name: str) -> Optional[ItemState]:
+    def get_item(self, category: str, name: str) -> ItemState | None:
         """Get state for an item."""
         key = f"{category}:{name}"
         return self.items.get(key)
@@ -61,10 +61,10 @@ class SyncState:
         self,
         category: str,
         name: str,
-        content_hash: Optional[str] = None,
-        local_mtime: Optional[float] = None,
-        repo_mtime: Optional[float] = None,
-        action: Optional[str] = None,
+        content_hash: str | None = None,
+        local_mtime: float | None = None,
+        repo_mtime: float | None = None,
+        action: str | None = None,
     ) -> ItemState:
         """Set or update state for an item."""
         key = f"{category}:{name}"
@@ -122,7 +122,7 @@ class StateManager:
     Handles loading, saving, and updating sync state.
     """
 
-    def __init__(self, state_path: Optional[Path] = None):
+    def __init__(self, state_path: Path | None = None):
         """
         Initialize state manager.
 
@@ -132,7 +132,7 @@ class StateManager:
         if state_path is None:
             state_path = Path.home() / ".config" / "sccs" / ".sync_state.yaml"
         self.state_path = state_path
-        self._state: Optional[SyncState] = None
+        self._state: SyncState | None = None
 
     @property
     def state(self) -> SyncState:
@@ -179,10 +179,10 @@ class StateManager:
         self,
         category: str,
         name: str,
-        content_hash: Optional[str] = None,
-        local_mtime: Optional[float] = None,
-        repo_mtime: Optional[float] = None,
-        action: Optional[str] = None,
+        content_hash: str | None = None,
+        local_mtime: float | None = None,
+        repo_mtime: float | None = None,
+        action: str | None = None,
     ) -> ItemState:
         """Update state for an item and save."""
         item_state = self.state.set_item(
@@ -203,7 +203,7 @@ class StateManager:
             self.save()
         return result
 
-    def get_item_hash(self, category: str, name: str) -> Optional[str]:
+    def get_item_hash(self, category: str, name: str) -> str | None:
         """Get last known hash for an item."""
         item = self.state.get_item(category, name)
         return item.content_hash if item else None
