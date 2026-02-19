@@ -51,12 +51,23 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
     Bidirectional synchronization for Claude Code files.
 
     \b
-    Quick examples:
-      sccs sync                  Sync all enabled categories
-      sccs sync --commit --push  Sync with git commit and push
-      sccs sync --dry-run        Preview changes only
-      sccs status                Show sync status
-      sccs config show           Show configuration
+    Workflows:
+      Publisher (share your configs):
+        sccs sync --commit --push    Sync, commit and push to remote
+        sccs sync --dry-run          Preview what would change
+        sccs sync -c skills --push   Push only skills category
+
+    \b
+      Subscriber (receive shared configs):
+        sccs sync --pull             Pull latest and sync to local
+        sccs sync --force repo       Overwrite local with repo version
+        sccs sync -c skills --pull   Pull only skills category
+
+    \b
+    Quick start:
+        sccs config init             Create configuration
+        sccs status                  Show what's changed
+        sccs categories list --all   List all available categories
     """
     ctx.ensure_object(dict)
     console = Console(verbose=verbose, colored=not no_color)
@@ -90,7 +101,29 @@ def sync(
     do_pull: bool,
     no_pull_check: bool,
 ) -> None:
-    """Synchronize files between local and repository."""
+    """Synchronize files between local and repository.
+
+    \b
+    Compares local files (e.g. ~/.claude/skills) with the repo copy
+    and syncs changes in the configured direction.
+
+    \b
+    Publish local changes:
+        sccs sync --commit --push    Sync all, then commit and push
+        sccs sync -c skills --push   Sync and push specific category
+        sccs sync --dry-run          Preview changes before syncing
+
+    \b
+    Receive repo changes:
+        sccs sync --pull             Pull remote first, then sync
+        sccs sync --force repo       Force repo version to local
+
+    \b
+    Conflict handling:
+        sccs sync -i                 Interactive conflict resolution
+        sccs sync --force local      Keep local version on conflicts
+        sccs sync --force repo       Keep repo version on conflicts
+    """
     console = ctx.obj["console"]
 
     try:
@@ -235,7 +268,17 @@ def sync(
 @click.option("-c", "--category", help="Show status for specific category only")
 @click.pass_context
 def status(ctx: click.Context, category: str | None) -> None:
-    """Show synchronization status."""
+    """Show synchronization status.
+
+    \b
+    Displays which items have changed since last sync,
+    including new, modified, and deleted items per category.
+
+    \b
+    Examples:
+        sccs status                  All enabled categories
+        sccs status -c skills        Only skills category
+    """
     console = ctx.obj["console"]
 
     try:
@@ -335,7 +378,16 @@ def diff(ctx: click.Context, item_name: str | None, category: str | None) -> Non
 @click.option("--last", type=int, default=10, help="Number of entries to show")
 @click.pass_context
 def log(ctx: click.Context, last: int) -> None:
-    """Show sync history."""
+    """Show sync history.
+
+    \b
+    Displays recently synced items with timestamps and actions.
+
+    \b
+    Examples:
+        sccs log                     Show last 10 entries
+        sccs log --last 20           Show last 20 entries
+    """
     console = ctx.obj["console"]
 
     state_manager = StateManager()
@@ -364,7 +416,18 @@ def log(ctx: click.Context, last: int) -> None:
 # Config subcommands
 @cli.group()
 def config() -> None:
-    """Configuration management commands."""
+    """Configuration management commands.
+
+    \b
+    Config file: ~/.config/sccs/config.yaml
+
+    \b
+    Key settings:
+        repository.path          Path to your sync repository
+        repository.auto_commit   Auto-commit after sync (default: false)
+        repository.auto_push     Auto-push after commit (default: false)
+        repository.auto_pull     Auto-pull before sync (default: false)
+    """
     pass
 
 
@@ -492,7 +555,18 @@ def config_validate(ctx: click.Context) -> None:
 # Categories subcommands
 @cli.group()
 def categories() -> None:
-    """Category management commands."""
+    """Category management commands.
+
+    \b
+    Categories control what gets synced (skills, commands, hooks, etc.).
+    Enable only what you need.
+
+    \b
+    Examples:
+        sccs categories list         List enabled categories
+        sccs categories list --all   List all (incl. disabled)
+        sccs categories enable fish  Enable fish shell config sync
+    """
     pass
 
 
