@@ -241,6 +241,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "include": ["*"],
             "exclude": [".git", "node_modules", "__pycache__"],
         },
+        # Claude Memory Bridge (disabled by default - enable explicitly)
+        "claude_memory": {
+            "enabled": False,
+            "description": "Claude Code <-> Claude.ai Memory Bridge",
+            "local_path": "~/.claude/memory",
+            "repo_path": ".claude/memory",
+            "sync_mode": "bidirectional",
+            "item_type": "directory",
+            "item_marker": "MEMORY.md",
+            "conflict_resolution": "newest",
+            "include": ["*"],
+            "exclude": ["_archive/*", "*.tmp"],
+        },
+    },
+    "memory_config": {
+        "auto_expire": False,
+        "max_context_chars": 8000,
+        "min_priority": 1,
+        "max_age_days": None,
     },
     "global_exclude": [
         # System files

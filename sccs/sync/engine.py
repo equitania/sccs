@@ -168,6 +168,19 @@ class SyncEngine:
                 result.success = False
                 break
 
+            # Auto-expire memory items after sync if configured
+            if name == "claude_memory" and self.config.memory_config.auto_expire:
+                from sccs.memory.manager import MemoryManager
+
+                local_path = category.local_path if (category := self.config.get_category(name)) else None
+                if local_path:
+                    from pathlib import Path as _Path
+
+                    expired = MemoryManager(_Path(local_path)).expire_items()
+                    if expired:
+                        # Store count in result for display (non-critical)
+                        result.settings_ensured += len(expired)
+
             if cat_result.success:
                 result.synced_categories += 1
             else:

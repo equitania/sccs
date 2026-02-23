@@ -144,11 +144,23 @@ class OutputConfig(BaseModel):
         return str(Path(v).expanduser())
 
 
+class MemoryConfig(BaseModel):
+    """Memory Bridge configuration (optional, for claude_memory category)."""
+
+    auto_expire: bool = Field(default=False, description="Auto-archive expired items during sync")
+    max_context_chars: int = Field(default=8000, description="Max characters for SessionStart context block")
+    min_priority: int = Field(default=1, description="Minimum priority for items loaded in SessionStart hook")
+    max_age_days: int | None = Field(
+        default=None, description="Max age in days for items loaded in hook (None = no limit)"
+    )
+
+
 class SccsConfig(BaseModel):
     """Root configuration model for SCCS."""
 
     repository: RepositoryConfig = Field(description="Repository settings")
     sync_categories: dict[str, SyncCategory] = Field(default_factory=dict, description="Sync category definitions")
+    memory_config: MemoryConfig = Field(default_factory=MemoryConfig, description="Memory Bridge settings")
     global_exclude: list[str] = Field(
         default_factory=lambda: [
             # System files

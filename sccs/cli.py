@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from sccs import __version__
+from sccs.cli_memory import memory_group
 from sccs.config import (
     ensure_config_exists,
     generate_default_config,
@@ -629,6 +630,9 @@ def categories_disable(ctx: click.Context, category_name: str) -> None:
     except FileNotFoundError as e:
         console.print_error(str(e))
         sys.exit(1)
+
+
+cli.add_command(memory_group)
 
 
 def main() -> None:

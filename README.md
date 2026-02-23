@@ -12,7 +12,7 @@
 
 SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für Claude Code Dateien und optionale Shell-Konfigurationen. Es hält Skills, Commands, Hooks, Scripts und Shell-Configs zwischen einer lokalen Installation und einem Git-Repository synchron.
 
-**Version:** 2.5.0 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.7.0 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Funktionen
 
@@ -24,6 +24,9 @@ SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für 
 - **Git-Integration** — Auto-Commit und Push nach Synchronisierung
 - **Plattform-Filter** — Kategorien nur auf macOS, Linux oder beidem synchronisieren
 - **Rich-Ausgabe** — Formatierte Terminal-Ausgabe mit Rich
+- **Memory Bridge** — Persistenter Kontext zwischen Claude Code und Claude.ai via Git-Sync
+- **Memory-CLI** — Vollständige CRUD-Verwaltung mit `sccs memory`
+- **Auto-Expire** — Zeitgesteuerte Archivierung abgelaufener Memory-Items
 
 ### Installation
 
@@ -124,6 +127,163 @@ global_exclude:
   - "__pycache__"
 ```
 
+### Memory Bridge
+
+#### Konzept
+
+Claude Code (Terminal) und Claude.ai (Web) teilen keinen gemeinsamen Speicher. Der Memory Bridge löst dies file-basiert:
+
+```
+local: ~/.claude/memory/<slug>/MEMORY.md
+↕ SCCS-Sync (bidirektional, via Git)
+repo: .claude/memory/<slug>/MEMORY.md
+→ Claude.ai:    sccs memory export  →  als <memory>...</memory> Block einfügen
+→ Claude Code:  SessionStart-Hook lädt Memory automatisch als Context
+```
+
+#### Memory Item Format
+
+Jedes Memory Item ist eine Datei `MEMORY.md` mit YAML-Frontmatter und Markdown-Body:
+
+```markdown
+---
+id: "project-odoo18-arch"
+title: "Odoo 18 Architecture Decisions"
+category: decision   # project|decision|learning|pattern|preference|reference|context
+project: v18
+tags: [odoo, architecture]
+priority: 4          # 1 (niedrig) – 5 (kritisch)
+created: "2026-02-23T10:00:00"
+updated: "2026-02-23T14:30:00"
+expires: null        # ISO datetime oder null
+version: 1
+---
+
+# Odoo 18 Architecture Decisions
+
+Inhalt in Markdown.
+```
+
+#### Konfiguration
+
+Zwei neue Blöcke in `~/.config/sccs/config.yaml`:
+
+```yaml
+# 1. Memory-Kategorie (standardmäßig deaktiviert)
+sync_categories:
+  claude_memory:
+    enabled: false           # Explizit aktivieren: sccs categories enable claude_memory
+    description: "Claude Code <-> Claude.ai Memory Bridge"
+    local_path: ~/.claude/memory
+    repo_path: .claude/memory
+    sync_mode: bidirectional
+    item_type: directory
+    item_marker: MEMORY.md
+    conflict_resolution: newest   # Neuestes updated-Timestamp gewinnt
+    exclude: ["_archive/*", "*.tmp"]
+
+# 2. Memory-Einstellungen
+memory_config:
+  auto_expire: false           # Abgelaufene Items bei sccs sync archivieren
+  max_context_chars: 8000      # Maximale Zeichen für SessionStart-Hook
+  min_priority: 1              # Mindest-Priorität für Hook-Export
+  max_age_days: null           # Maximales Alter (Tage), null = unbegrenzt
+```
+
+#### Lokale Einrichtung
+
+```bash
+# 1. Kategorie aktivieren
+sccs categories enable claude_memory
+
+# 2. Hook installieren (wird mit sccs sync -c claude_hooks synchronisiert)
+#    Alternativ: hook direkt unter ~/.claude/hooks/load-memory.py ablegen
+
+# 3. Hook in ~/.claude/settings.json eintragen (manuell!)
+```
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/load-memory.py"}]
+      }
+    ]
+  }
+}
+```
+
+```bash
+# 4. Optional: Anthropic API für Cloud-Sync (Files API)
+uv pip install "sccs[memory]"
+export ANTHROPIC_API_KEY="..."
+
+# 5. Ersten Sync durchführen
+sccs sync -c claude_memory
+```
+
+> **Wichtig**: Das private Repository für Memory-Sync verwenden, da Memory-Items persönliche Entscheidungen und Kontextinformationen enthalten können.
+
+#### Memory CLI-Befehle
+
+```bash
+# Memory-Items verwalten
+sccs memory add "Titel" [--content "..."] [--from-stdin] [--from-file pfad] \
+                        [--tag TAG] [--project P] [--priority 1-5] [--expires DATUM]
+sccs memory list        [--project P] [--tag T] [--expired] [--min-priority N]
+sccs memory show <slug> [--raw]
+sccs memory edit <slug>
+sccs memory update <slug> [--extend "..."] [--tag T] [--priority N] [--bump-version]
+sccs memory delete <slug> [--force]   # Soft-Delete: verschiebt nach _archive/
+
+# Suche und Export
+sccs memory search "query" [--project P]
+sccs memory export  [--format claude_block|markdown|json] \
+                    [--project P] [--tag T] [--out DATEI] [--api]
+sccs memory import conversation.json [--preview]
+
+# Verwaltung
+sccs memory expire        # Abgelaufene Items archivieren
+sccs memory stats         # Statistiken anzeigen
+```
+
+#### Sync-Richtung und Konfliktauflösung
+
+| Aspekt | Verhalten |
+|--------|-----------|
+| Sync-Modus | `bidirectional`: lokal ↔ Repository (Standard) |
+| Konfliktauflösung | `conflict_resolution: newest`: Das Item mit dem neueren `updated`-Timestamp gewinnt automatisch |
+| Soft-Delete | `sccs memory delete` verschiebt nach `_archive/<slug>/` — kein Datenverlust |
+| Auto-Expire | Items mit vergangener `expires`-Zeit werden bei `sccs sync` archiviert wenn `auto_expire: true` |
+| Prioritätsfilter | SessionStart-Hook respektiert `min_priority` aus `memory_config` |
+| Zeichenlimit | Hook kürzt Context bei `max_context_chars` (Standard: 8000) |
+
+#### Export-Workflows für Claude.ai
+
+```bash
+# Als <memory>...</memory> Block für System-Prompt in Claude.ai
+sccs memory export
+sccs memory export --project v18 --format claude_block
+
+# Als JSON (strukturiert)
+sccs memory export --format json --out ~/Desktop/memory.json
+
+# Über Anthropic Files API hochladen (erfordert sccs[memory] + ANTHROPIC_API_KEY)
+sccs memory export --api
+
+# Claude.ai Konversations-Export importieren
+sccs memory import ~/Downloads/conversation.json
+sccs memory import ~/Downloads/conversation.json --preview  # Vorschau ohne Speichern
+```
+
+#### Sicherheitshinweise
+
+- **Privates Repository**: `claude_memory` nur mit privatem Git-Repo nutzen
+- **API-Key**: `ANTHROPIC_API_KEY` ausschließlich als Umgebungsvariable, nie in Dateien
+- **Globale Ausschlüsse**: Bestehende `global_exclude`-Pattern schützen automatisch vor versehentlichem Sync sensibler Dateinamen (`*token*`, `*secret*`, `*credential*`)
+- **`--api` ist immer explizit**: Anthropic Files API-Upload niemals automatisch
+
 ### Kategorien-Referenz
 
 | Feld | Typ | Pflicht | Beschreibung |
@@ -186,6 +346,12 @@ sccs categories disable fish     # Kategorie deaktivieren
 | `claude_plugins` | `~/.claude/plugins/` | Plugin-Konfigurationen |
 | `claude_mcp` | `~/.claude/mcp/` | MCP-Server-Konfigurationen |
 | `claude_statusline` | `~/.claude/statusline.*` | Statusline-Skript |
+
+#### Claude Code (standardmäßig deaktiviert)
+
+| Kategorie | Pfad | Beschreibung |
+|-----------|------|-------------|
+| `claude_memory` | `~/.claude/memory/` | Memory Bridge Items (claude_memory aktivieren) |
 
 #### Shell (standardmäßig aktiv)
 
@@ -255,6 +421,7 @@ Erkennung: `Darwin` → `macos`, `Linux` → `linux`. Kategorien mit `platforms:
 ```
 sccs/
 ├── cli.py                # Click CLI mit Befehlsgruppen
+├── cli_memory.py         # Memory Command Group
 ├── config/               # Konfigurationsmanagement
 │   ├── schema.py         #   Pydantic-Modelle
 │   ├── loader.py         #   YAML-Laden/Speichern
@@ -268,6 +435,13 @@ sccs/
 │   └── settings.py       #   JSON-Settings-Ensure
 ├── git/                  # Git-Operationen
 │   └── operations.py     #   Commit, Push, Pull, Status
+├── memory/               # Memory Bridge Modul
+│   ├── __init__.py       #   Modul-Exports
+│   ├── item.py           #   MemoryItem (Frontmatter + Markdown)
+│   ├── manager.py        #   CRUD-Layer für ~/.claude/memory/
+│   ├── filter.py         #   Filter und Sortierung
+│   ├── bridge.py         #   Import/Export Claude.ai
+│   └── api.py            #   Optionaler Anthropic Files API Layer
 ├── output/               # Terminal-Ausgabe
 │   ├── console.py        #   Rich-Console
 │   ├── diff.py           #   Diff-Anzeige
@@ -304,7 +478,7 @@ AGPL-3.0 — Equitania Software GmbH
 
 SCCS is a YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations. It keeps skills, commands, hooks, scripts, and shell configs in sync between a local installation and a Git repository.
 
-**Version:** 2.5.0 · **License:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.7.0 · **License:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Features
 
@@ -316,6 +490,9 @@ SCCS is a YAML-configured bidirectional synchronization tool for Claude Code fil
 - **Git Integration** — Auto-commit and push after sync operations
 - **Platform Filtering** — Sync categories only on macOS, Linux, or both
 - **Rich Console Output** — Formatted terminal output with Rich
+- **Memory Bridge** — Persistent context between Claude Code and Claude.ai via Git sync
+- **Memory CLI** — Full CRUD management with `sccs memory`
+- **Auto-Expire** — Time-based archiving of expired memory items
 
 ### Installation
 
@@ -416,6 +593,163 @@ global_exclude:
   - "__pycache__"
 ```
 
+### Memory Bridge
+
+#### Concept
+
+Claude Code (terminal) and Claude.ai (web) share no common memory. The Memory Bridge solves this file-based:
+
+```
+local: ~/.claude/memory/<slug>/MEMORY.md
+↕ SCCS sync (bidirectional, via Git)
+repo: .claude/memory/<slug>/MEMORY.md
+→ Claude.ai:    sccs memory export  →  paste as <memory>...</memory> block
+→ Claude Code:  SessionStart hook loads memory automatically as context
+```
+
+#### Memory Item Format
+
+Each memory item is a `MEMORY.md` file with YAML frontmatter and Markdown body:
+
+```markdown
+---
+id: "project-odoo18-arch"
+title: "Odoo 18 Architecture Decisions"
+category: decision   # project|decision|learning|pattern|preference|reference|context
+project: v18
+tags: [odoo, architecture]
+priority: 4          # 1 (low) – 5 (critical)
+created: "2026-02-23T10:00:00"
+updated: "2026-02-23T14:30:00"
+expires: null        # ISO datetime or null
+version: 1
+---
+
+# Odoo 18 Architecture Decisions
+
+Content in Markdown.
+```
+
+#### Configuration
+
+Two new blocks in `~/.config/sccs/config.yaml`:
+
+```yaml
+# 1. Memory category (disabled by default)
+sync_categories:
+  claude_memory:
+    enabled: false           # Enable explicitly: sccs categories enable claude_memory
+    description: "Claude Code <-> Claude.ai Memory Bridge"
+    local_path: ~/.claude/memory
+    repo_path: .claude/memory
+    sync_mode: bidirectional
+    item_type: directory
+    item_marker: MEMORY.md
+    conflict_resolution: newest   # Item with newer updated timestamp wins
+    exclude: ["_archive/*", "*.tmp"]
+
+# 2. Memory settings
+memory_config:
+  auto_expire: false           # Archive expired items on sccs sync
+  max_context_chars: 8000      # Maximum characters for SessionStart hook
+  min_priority: 1              # Minimum priority for hook export
+  max_age_days: null           # Maximum age (days), null = unlimited
+```
+
+#### Local Setup
+
+```bash
+# 1. Enable the category
+sccs categories enable claude_memory
+
+# 2. Install the hook (synced via sccs sync -c claude_hooks)
+#    Alternative: place hook directly at ~/.claude/hooks/load-memory.py
+
+# 3. Register hook in ~/.claude/settings.json (manual step!)
+```
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/load-memory.py"}]
+      }
+    ]
+  }
+}
+```
+
+```bash
+# 4. Optional: Anthropic API for cloud sync (Files API)
+uv pip install "sccs[memory]"
+export ANTHROPIC_API_KEY="..."
+
+# 5. Run first sync
+sccs sync -c claude_memory
+```
+
+> **Important**: Use a private repository for memory sync, as memory items may contain personal decisions and context information.
+
+#### Memory CLI Commands
+
+```bash
+# Manage memory items
+sccs memory add "Title" [--content "..."] [--from-stdin] [--from-file path] \
+                        [--tag TAG] [--project P] [--priority 1-5] [--expires DATE]
+sccs memory list        [--project P] [--tag T] [--expired] [--min-priority N]
+sccs memory show <slug> [--raw]
+sccs memory edit <slug>
+sccs memory update <slug> [--extend "..."] [--tag T] [--priority N] [--bump-version]
+sccs memory delete <slug> [--force]   # Soft-delete: moves to _archive/
+
+# Search and export
+sccs memory search "query" [--project P]
+sccs memory export  [--format claude_block|markdown|json] \
+                    [--project P] [--tag T] [--out FILE] [--api]
+sccs memory import conversation.json [--preview]
+
+# Management
+sccs memory expire        # Archive expired items
+sccs memory stats         # Show statistics
+```
+
+#### Sync Direction and Conflict Resolution
+
+| Aspect | Behavior |
+|--------|----------|
+| Sync mode | `bidirectional`: local ↔ repository (default) |
+| Conflict resolution | `conflict_resolution: newest`: item with newer `updated` timestamp wins automatically |
+| Soft-delete | `sccs memory delete` moves to `_archive/<slug>/` — no data loss |
+| Auto-expire | Items with a past `expires` time are archived on `sccs sync` when `auto_expire: true` |
+| Priority filter | SessionStart hook respects `min_priority` from `memory_config` |
+| Character limit | Hook truncates context at `max_context_chars` (default: 8000) |
+
+#### Export Workflows for Claude.ai
+
+```bash
+# As <memory>...</memory> block for system prompt in Claude.ai
+sccs memory export
+sccs memory export --project v18 --format claude_block
+
+# As JSON (structured)
+sccs memory export --format json --out ~/Desktop/memory.json
+
+# Upload via Anthropic Files API (requires sccs[memory] + ANTHROPIC_API_KEY)
+sccs memory export --api
+
+# Import Claude.ai conversation export
+sccs memory import ~/Downloads/conversation.json
+sccs memory import ~/Downloads/conversation.json --preview  # Preview without saving
+```
+
+#### Security Notes
+
+- **Private repository**: Only use `claude_memory` with a private Git repo
+- **API key**: Store `ANTHROPIC_API_KEY` as environment variable only, never in files
+- **Global excludes**: Existing `global_exclude` patterns automatically protect against accidental sync of sensitive filenames (`*token*`, `*secret*`, `*credential*`)
+- **`--api` is always explicit**: Anthropic Files API upload is never automatic
+
 ### Category Field Reference
 
 | Field | Type | Required | Description |
@@ -478,6 +812,12 @@ sccs categories disable fish     # Disable category
 | `claude_plugins` | `~/.claude/plugins/` | Plugin configurations |
 | `claude_mcp` | `~/.claude/mcp/` | MCP server configs |
 | `claude_statusline` | `~/.claude/statusline.*` | Statusline script |
+
+#### Claude Code (disabled by default)
+
+| Category | Path | Description |
+|----------|------|-------------|
+| `claude_memory` | `~/.claude/memory/` | Memory Bridge items (enable claude_memory to use) |
 
 #### Shell (enabled by default)
 
@@ -547,6 +887,7 @@ Detection: `Darwin` → `macos`, `Linux` → `linux`. Categories with `platforms
 ```
 sccs/
 ├── cli.py                # Click CLI with command groups
+├── cli_memory.py         # Memory Command Group
 ├── config/               # Configuration management
 │   ├── schema.py         #   Pydantic models
 │   ├── loader.py         #   YAML loading/saving
@@ -560,6 +901,13 @@ sccs/
 │   └── settings.py       #   JSON settings ensure
 ├── git/                  # Git operations
 │   └── operations.py     #   Commit, push, pull, status
+├── memory/               # Memory Bridge module
+│   ├── __init__.py       #   Module exports
+│   ├── item.py           #   MemoryItem (frontmatter + Markdown)
+│   ├── manager.py        #   CRUD layer for ~/.claude/memory/
+│   ├── filter.py         #   Filtering and sorting
+│   ├── bridge.py         #   Claude.ai import/export
+│   └── api.py            #   Optional Anthropic Files API layer
 ├── output/               # Terminal output
 │   ├── console.py        #   Rich console
 │   ├── diff.py           #   Diff display
