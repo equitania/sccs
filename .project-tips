@@ -1,19 +1,17 @@
-# sccs v2.0 | Claude Code Sync Tool (UV)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# sccs v2.8.0 | Claude Code Sync Tool (UV)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Setup:      uv venv && venv+ && uv pip install -e ".[dev]"
 ▸ Sync:       sccs sync --dry-run
 ▸ Sync+Git:   sccs sync --commit --push
+▸ Sync+Docs:  sccs sync --docs --commit --push
 ▸ Status:     sccs status
-▸ Diff:       sccs diff -c claude_skills
-▸ Categories: sccs categories --all
-▸ Enable:     sccs categories enable <name>
-▸ Config:     sccs config show
+▸ Docs:       sccs docs generate --dry-run
+▸ Categories: sccs categories list --all
 ▸ Test:       pytest --cov=sccs
-▸ Format:     black sccs/ tests/ && isort sccs/ tests/
+▸ Lint:       ruff check sccs/ tests/ && ruff format --check sccs/ tests/
 
 # PyPI Publishing
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Build:      uv build
 ▸ TestPyPI:   uv publish --publish-url https://test.pypi.org/legacy/
 ▸ PyPI:       uv publish
-▸ Check:      pip install sccs --upgrade  # verify installation

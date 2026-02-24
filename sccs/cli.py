@@ -87,6 +87,7 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.option("--no-push", is_flag=True, help="Skip push (overrides auto_push=true)")
 @click.option("--pull", "do_pull", is_flag=True, help="Pull remote changes before sync")
 @click.option("--no-pull-check", is_flag=True, help="Skip remote status check before sync")
+@click.option("--docs", "do_docs", is_flag=True, help="Regenerate hub README after sync")
 @click.pass_context
 def sync(
     ctx: click.Context,
@@ -100,6 +101,7 @@ def sync(
     no_push: bool,
     do_pull: bool,
     no_pull_check: bool,
+    do_docs: bool,
 ) -> None:
     """Synchronize files between local and repository.
 
@@ -228,6 +230,17 @@ def sync(
 
     # Display results
     console.print_sync_result(result, dry_run=dry_run)
+
+    # Generate hub README if requested
+    if do_docs and not dry_run and result.synced_items > 0:
+        from sccs.docs.generator import DocsGenerator
+
+        docs_gen = DocsGenerator(config)
+        docs_result = docs_gen.generate()
+        if docs_result.success:
+            console.print_success(f"Hub README updated ({docs_result.readmes_found} docs linked)")
+        else:
+            console.print_warning(f"Hub README generation failed: {docs_result.error}")
 
     # Handle git operations
     if not dry_run and result.synced_items > 0:
@@ -629,6 +642,82 @@ def categories_disable(ctx: click.Context, category_name: str) -> None:
     except FileNotFoundError as e:
         console.print_error(str(e))
         sys.exit(1)
+
+
+@cli.group("docs")
+def docs_group() -> None:
+    """Documentation generation commands.
+
+    \b
+    Generate a hub README for the sync repository that links
+    to all category READMEs and shows repository structure.
+
+    \b
+    Examples:
+        sccs docs generate             Generate hub README
+        sccs docs generate --dry-run   Preview without writing
+    """
+    pass
+
+
+@docs_group.command("generate")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview without writing")
+@click.option("--commit", "do_commit", is_flag=True, help="Commit after generation")
+@click.option("--push", "do_push", is_flag=True, help="Push after commit")
+@click.pass_context
+def docs_generate(ctx: click.Context, dry_run: bool, do_commit: bool, do_push: bool) -> None:
+    """Generate hub README for the sync repository.
+
+    \b
+    Scans all category paths for README files and generates
+    a navigation hub at the repository root.
+
+    \b
+    Examples:
+        sccs docs generate              Write README.md to repo root
+        sccs docs generate --dry-run    Preview the generated content
+        sccs docs generate --commit     Generate and commit
+    """
+    console = ctx.obj["console"]
+
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        console.print_error(str(e))
+        sys.exit(1)
+
+    from sccs.docs.generator import DocsGenerator
+
+    gen = DocsGenerator(config)
+
+    if dry_run:
+        content = gen.render_readme()
+        console.print(content)
+        return
+
+    result = gen.generate()
+
+    if not result.success:
+        console.print_error(f"Generation failed: {result.error}")
+        sys.exit(1)
+
+    console.print_success(f"Hub README generated: {result.readme_path}")
+    console.print_info(f"  {result.readmes_found} documentation links, {result.categories_total} categories")
+
+    # Git operations
+    if do_commit:
+        repo_path = Path(config.repository.path).expanduser()
+        if has_uncommitted_changes(repo_path):
+            stage_all(repo_path)
+            commit_msg = f"{config.repository.commit_prefix} Update hub README"
+            commit(commit_msg, repo_path)
+            console.print_success(f"Committed: {commit_msg}")
+
+            if do_push:
+                if push(repo_path, remote=config.repository.remote):
+                    console.print_success(f"Pushed to {config.repository.remote}")
+                else:
+                    console.print_warning("Push failed")
 
 
 def main() -> None:

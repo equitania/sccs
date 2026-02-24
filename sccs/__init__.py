@@ -1,10 +1,10 @@
 # SCCS - SkillsCommandsConfigsSync
 # Unified YAML-configured synchronization for Claude Code files
 #
-# Version: 2.7.0
-# Date: 23.02.2026
+# Version: 2.8.0
+# Date: 24.02.2026
 
-__version__ = "2.7.0"
+__version__ = "2.8.0"
 __author__ = "Equitania Software GmbH"
 
 
@@ -27,6 +27,10 @@ def __getattr__(name: str):
         from sccs.output.console import Console
 
         return Console
+    elif name == "DocsGenerator":
+        from sccs.docs.generator import DocsGenerator
+
+        return DocsGenerator
     raise AttributeError(f"module 'sccs' has no attribute '{name}'")
 
 
@@ -37,4 +41,5 @@ __all__ = [
     "SccsConfig",
     "load_config",
     "Console",
+    "DocsGenerator",
 ]
