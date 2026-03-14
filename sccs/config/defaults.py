@@ -116,6 +116,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "include": ["*.json", "*.md"],
             "exclude": ["*.session.*"],
         },
+        # Claude Project Memories (disabled by default - may contain sensitive info)
+        "claude_memories": {
+            "enabled": False,
+            "description": "Claude Code Project Memories (feedback, project, user, reference)",
+            "local_path": "~/.claude/projects",
+            "repo_path": ".claude/projects",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "include": ["*/memory/*.md"],
+            "exclude": [
+                "*.jsonl",
+                "*/session-memory/*",
+                "*.json",
+            ],
+        },
         # Claude MCP Configs
         "claude_mcp": {
             "enabled": True,
@@ -338,7 +353,7 @@ def get_minimal_config(repo_path: str = "~/gitbase/sccs-sync") -> dict[str, Any]
     config["repository"] = {**config["repository"], "path": repo_path}
 
     # Disable optional categories
-    for category in ["claude_plans", "claude_todos", "git_config", "project_templates"]:
+    for category in ["claude_plans", "claude_todos", "claude_memories", "git_config", "project_templates"]:
         if category in config["sync_categories"]:
             config["sync_categories"][category]["enabled"] = False
 
