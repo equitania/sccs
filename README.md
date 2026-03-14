@@ -12,7 +12,7 @@
 
 SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für Claude Code Dateien und optionale Shell-Konfigurationen. Es hält Skills, Commands, Hooks, Scripts und Shell-Configs zwischen einer lokalen Installation und einem Git-Repository synchron.
 
-**Version:** 2.7.0 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.10.0 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Funktionen
 
@@ -23,6 +23,8 @@ SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für 
 - **Automatische Backups** — Zeitgestempelte Sicherungen vor Überschreiben
 - **Git-Integration** — Auto-Commit und Push nach Synchronisierung
 - **Plattform-Filter** — Kategorien nur auf macOS, Linux oder beidem synchronisieren
+- **Smart Conflict Resolution** — `--force newer` löst Konflikte per Dateizeit (mtime)
+- **Project Memories Sync** — Claude's persistente Projekt-Memories synchronisieren
 - **Rich-Ausgabe** — Formatierte Terminal-Ausgabe mit Rich
 - **Memory Bridge** — Persistenter Kontext zwischen Claude Code und Claude.ai via Git-Sync
 - **Memory-CLI** — Vollständige CRUD-Verwaltung mit `sccs memory`
@@ -310,6 +312,7 @@ sccs sync -n                     # Vorschau (Dry-Run)
 sccs sync -i                     # Interaktive Konfliktauflösung
 sccs sync --force local          # Lokale Version erzwingen
 sccs sync --force repo           # Repo-Version erzwingen
+sccs sync --force newer          # Neuere Datei erzwingen (mtime)
 sccs sync --commit --push        # Mit Git-Commit und Push
 sccs sync --pull                 # Vorher Remote-Änderungen ziehen
 
@@ -351,6 +354,7 @@ sccs categories disable fish     # Kategorie deaktivieren
 
 | Kategorie | Pfad | Beschreibung |
 |-----------|------|-------------|
+| `claude_memories` | `~/.claude/projects/*/memory/` | Persistente Projekt-Memories (feedback, project, user, reference) |
 | `claude_memory` | `~/.claude/memory/` | Memory Bridge Items (claude_memory aktivieren) |
 
 #### Shell (standardmäßig aktiv)
@@ -387,6 +391,7 @@ Optionen im interaktiven Menü:
 ```bash
 sccs sync --force local          # Lokal gewinnt immer
 sccs sync --force repo           # Repository gewinnt immer
+sccs sync --force newer          # Neuere Datei gewinnt (per mtime)
 ```
 
 ### Automatische Backups
@@ -478,7 +483,7 @@ AGPL-3.0 — Equitania Software GmbH
 
 SCCS is a YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations. It keeps skills, commands, hooks, scripts, and shell configs in sync between a local installation and a Git repository.
 
-**Version:** 2.7.0 · **License:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.10.0 · **License:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Features
 
@@ -489,6 +494,8 @@ SCCS is a YAML-configured bidirectional synchronization tool for Claude Code fil
 - **Automatic Backups** — Timestamped backups before overwriting files
 - **Git Integration** — Auto-commit and push after sync operations
 - **Platform Filtering** — Sync categories only on macOS, Linux, or both
+- **Smart Conflict Resolution** — `--force newer` resolves conflicts by file modification time
+- **Project Memories Sync** — Sync Claude's persistent project memories across machines
 - **Rich Console Output** — Formatted terminal output with Rich
 - **Memory Bridge** — Persistent context between Claude Code and Claude.ai via Git sync
 - **Memory CLI** — Full CRUD management with `sccs memory`
@@ -776,6 +783,7 @@ sccs sync -n                     # Preview (dry-run)
 sccs sync -i                     # Interactive conflict resolution
 sccs sync --force local          # Force local version
 sccs sync --force repo           # Force repo version
+sccs sync --force newer          # Force newer file (by mtime)
 sccs sync --commit --push        # With git commit and push
 sccs sync --pull                 # Pull remote changes first
 
@@ -817,6 +825,7 @@ sccs categories disable fish     # Disable category
 
 | Category | Path | Description |
 |----------|------|-------------|
+| `claude_memories` | `~/.claude/projects/*/memory/` | Persistent project memories (feedback, project, user, reference) |
 | `claude_memory` | `~/.claude/memory/` | Memory Bridge items (enable claude_memory to use) |
 
 #### Shell (enabled by default)
@@ -853,6 +862,7 @@ Interactive menu options:
 ```bash
 sccs sync --force local          # Local wins all conflicts
 sccs sync --force repo           # Repository wins all conflicts
+sccs sync --force newer          # Newer file wins (by mtime)
 ```
 
 ### Automatic Backups
