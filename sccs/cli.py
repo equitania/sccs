@@ -79,7 +79,11 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @cli.command()
 @click.option("-c", "--category", help="Sync specific category only")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("-f", "--force", type=click.Choice(["local", "repo"]), help="Force sync direction")
+@click.option(
+    "-f", "--force",
+    type=click.Choice(["local", "repo", "newer"]),
+    help="Force direction: local, repo, or newer (by mtime)",
+)
 @click.option("-i", "--interactive", is_flag=True, help="Interactive mode for conflict resolution")
 @click.option("--commit", "do_commit", is_flag=True, help="Commit changes (overrides auto_commit=false)")
 @click.option("--no-commit", is_flag=True, help="Skip commit (overrides auto_commit=true)")
@@ -125,6 +129,7 @@ def sync(
         sccs sync -i                 Interactive conflict resolution
         sccs sync --force local      Keep local version on conflicts
         sccs sync --force repo       Keep repo version on conflicts
+        sccs sync --force newer      Keep newer version (by mtime)
     """
     console = ctx.obj["console"]
 

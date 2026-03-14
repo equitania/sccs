@@ -159,24 +159,44 @@ class Console:
         sync_verb = "would sync" if dry_run else "synced"
         status_text = "Dry run completed" if dry_run else "Sync completed"
 
-        if result.success:
+        # Build summary parts
+        summary_parts = [f"{result.synced_items} {sync_verb}"]
+        if result.conflicts > 0:
+            summary_parts.append(f"{result.conflicts} conflicts")
+        if result.errors > 0:
+            summary_parts.append(f"{result.errors} errors")
+        items_line = f"Items: {', '.join(summary_parts)}"
+
+        if result.errors > 0:
+            # Real errors → red
             self._console.print(
                 Panel(
-                    f"[green]{status_text}[/green]\n"
+                    f"[red]{status_text} with errors[/red]\n"
                     f"Categories: {result.synced_categories}/{result.total_categories}\n"
-                    f"Items: {result.synced_items} {sync_verb}, {result.conflicts} conflicts, {result.errors} errors",
+                    f"{items_line}",
                     title="Summary",
-                    border_style="green" if not result.has_issues else "yellow",
+                    border_style="red",
+                )
+            )
+        elif result.conflicts > 0:
+            # Conflicts only (no errors) → yellow, not a failure
+            self._console.print(
+                Panel(
+                    f"[yellow]{status_text} with conflicts[/yellow]\n"
+                    f"Categories: {result.synced_categories}/{result.total_categories}\n"
+                    f"{items_line}",
+                    title="Summary",
+                    border_style="yellow",
                 )
             )
         else:
             self._console.print(
                 Panel(
-                    f"[red]{status_text} with errors[/red]\n"
+                    f"[green]{status_text}[/green]\n"
                     f"Categories: {result.synced_categories}/{result.total_categories}\n"
-                    f"Items: {result.synced_items} {sync_verb}, {result.conflicts} conflicts, {result.errors} errors",
+                    f"{items_line}",
                     title="Summary",
-                    border_style="red",
+                    border_style="green",
                 )
             )
 
@@ -188,26 +208,40 @@ class Console:
             self._console.print(f"[green]✓[/green] [bold]{name}[/bold] - no changes")
             return
 
-        if result.success:
-            self._console.print(f"[green]✓[/green] [bold]{name}[/bold] - {result.synced} {sync_verb}")
+        # Build status parts
+        parts = []
+        if result.synced > 0:
+            parts.append(f"{result.synced} {sync_verb}")
+        if result.conflicts > 0:
+            parts.append(f"{result.conflicts} conflicts")
+        if result.errors > 0:
+            parts.append(f"{result.errors} errors")
+        status_text = ", ".join(parts) if parts else "no changes"
+
+        if result.errors > 0:
+            self._console.print(f"[red]✗[/red] [bold]{name}[/bold] - {status_text}")
+        elif result.conflicts > 0:
+            self._console.print(f"[yellow]![/yellow] [bold]{name}[/bold] - {status_text}")
         else:
-            self._console.print(
-                f"[red]✗[/red] [bold]{name}[/bold] - {result.synced} {sync_verb}, {result.errors} errors"
-            )
+            self._console.print(f"[green]✓[/green] [bold]{name}[/bold] - {status_text}")
 
         # Show details if verbose or has issues
         if self.verbose or result.errors > 0 or result.conflicts > 0:
+            # Show successful results
             for action_result in result.results:
                 action = action_result.action
                 if action_result.success:
                     self._console.print(f"    [green]✓[/green] {action.item.name}")
                 else:
                     self._console.print(f"    [red]✗[/red] {action.item.name}: {action_result.error}")
-                    # Add resolution hints for common errors
-                    if "Conflict" in (action_result.error or ""):
-                        self._console.print(f"        [dim]→ View diff: sccs diff {action.item.name} -c {name}[/dim]")
-                        self._console.print(f"        [dim]→ Keep local: sccs sync -c {name} --force local[/dim]")
-                        self._console.print(f"        [dim]→ Keep repo:  sccs sync -c {name} --force repo[/dim]")
+
+            # Show conflicts separately with resolution hints
+            if result.conflicts > 0:
+                self._console.print(f"    [yellow]Conflicts ({result.conflicts}):[/yellow]")
+                self._console.print(f"        [dim]→ Resolve all: sccs sync -c {name} --force newer[/dim]")
+                self._console.print(f"        [dim]→ Keep local:  sccs sync -c {name} --force local[/dim]")
+                self._console.print(f"        [dim]→ Keep repo:   sccs sync -c {name} --force repo[/dim]")
+                self._console.print(f"        [dim]→ Interactive:  sccs sync -c {name} -i[/dim]")
 
         # Print settings ensure result if present
         if result.settings_result is not None:

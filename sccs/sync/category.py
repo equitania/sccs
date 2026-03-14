@@ -222,14 +222,17 @@ class CategoryHandler:
                         action = self._resolve_conflict(action, resolution)
                     # If "diff", the resolver should handle showing diff and re-prompt
 
+                # Still unresolved → count as conflict, don't send to execute_action
+                if action.action_type == ActionType.CONFLICT:
+                    result.conflicts += 1
+                    continue
+
             # Skip non-actionable items
             if not action.needs_action:
                 if action.action_type == ActionType.UNCHANGED:
                     pass  # Normal
                 elif action.action_type == ActionType.SKIP:
                     result.skipped += 1
-                elif action.action_type == ActionType.CONFLICT:
-                    result.conflicts += 1
                 continue
 
             # Execute action
@@ -258,8 +261,15 @@ class CategoryHandler:
         return result
 
     def _resolve_conflict(self, action: SyncAction, force_direction: str) -> SyncAction:
-        """Resolve a conflict by forcing a direction."""
-        if force_direction == "local":
+        """Resolve a conflict by forcing a direction.
+
+        Args:
+            action: The conflicting action.
+            force_direction: "local", "repo", or "newer" (prefer newer by mtime).
+        """
+        if force_direction == "newer":
+            return self._resolve_by_mtime(action)
+        elif force_direction == "local":
             return SyncAction(
                 item=action.item,
                 action_type=ActionType.COPY_TO_REPO,
@@ -274,6 +284,36 @@ class CategoryHandler:
                 source_path=action.item.repo_path,
                 dest_path=action.item.local_path,
                 reason="Conflict resolved: force repo",
+            )
+
+    def _resolve_by_mtime(self, action: SyncAction) -> SyncAction:
+        """Resolve a conflict by preferring the newer file (by mtime)."""
+        item = action.item
+        local_mtime = item.get_mtime("local")
+        repo_mtime = item.get_mtime("repo")
+
+        if local_mtime is not None and repo_mtime is not None:
+            prefer_local = local_mtime >= repo_mtime
+        elif local_mtime is not None:
+            prefer_local = True
+        else:
+            prefer_local = False
+
+        if prefer_local:
+            return SyncAction(
+                item=item,
+                action_type=ActionType.COPY_TO_REPO,
+                source_path=item.local_path,
+                dest_path=item.repo_path,
+                reason=f"Conflict resolved: local is newer ({local_mtime} >= {repo_mtime})",
+            )
+        else:
+            return SyncAction(
+                item=item,
+                action_type=ActionType.COPY_TO_LOCAL,
+                source_path=item.repo_path,
+                dest_path=item.local_path,
+                reason=f"Conflict resolved: repo is newer ({repo_mtime} > {local_mtime})",
             )
 
     def _update_state_for_action(self, action: SyncAction) -> None:
