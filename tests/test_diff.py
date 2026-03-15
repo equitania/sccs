@@ -1,6 +1,8 @@
 # Tests for sccs.output.diff
 # Diff generation and display
 
+import io
+
 from rich.console import Console as RichConsole
 
 from sccs.config.schema import ItemType
@@ -115,7 +117,7 @@ class TestShowDiff:
 
     def test_diff_with_changes(self, tmp_path):
         item = self._make_item(tmp_path, "local version", "repo version")
-        console = RichConsole(file=open("/dev/null", "w"), no_color=True)
+        console = RichConsole(file=io.StringIO(), no_color=True)
         result = show_diff(item, console=console)
         assert result.has_diff is True
         assert result.local_exists is True
@@ -123,27 +125,27 @@ class TestShowDiff:
 
     def test_diff_no_changes(self, tmp_path):
         item = self._make_item(tmp_path, "same", "same")
-        console = RichConsole(file=open("/dev/null", "w"), no_color=True)
+        console = RichConsole(file=io.StringIO(), no_color=True)
         result = show_diff(item, console=console)
         assert result.has_diff is False
 
     def test_diff_only_local(self, tmp_path):
         item = self._make_item(tmp_path, "local only", None)
-        console = RichConsole(file=open("/dev/null", "w"), no_color=True)
+        console = RichConsole(file=io.StringIO(), no_color=True)
         result = show_diff(item, console=console)
         assert result.has_diff is True
         assert result.repo_exists is False
 
     def test_diff_only_repo(self, tmp_path):
         item = self._make_item(tmp_path, None, "repo only")
-        console = RichConsole(file=open("/dev/null", "w"), no_color=True)
+        console = RichConsole(file=io.StringIO(), no_color=True)
         result = show_diff(item, console=console)
         assert result.has_diff is True
         assert result.local_exists is False
 
     def test_diff_neither_exists(self, tmp_path):
         item = self._make_item(tmp_path, None, None)
-        console = RichConsole(file=open("/dev/null", "w"), no_color=True)
+        console = RichConsole(file=io.StringIO(), no_color=True)
         result = show_diff(item, console=console)
         assert result.has_diff is False
         assert result.error is not None
