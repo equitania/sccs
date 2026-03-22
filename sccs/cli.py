@@ -80,7 +80,8 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.option("-c", "--category", help="Sync specific category only")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
 @click.option(
-    "-f", "--force",
+    "-f",
+    "--force",
     type=click.Choice(["local", "repo", "newer"]),
     help="Force direction: local, repo, or newer (by mtime)",
 )

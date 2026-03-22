@@ -91,9 +91,7 @@ class TestForceNewer:
 
     def test_force_newer_prefers_local_when_newer(self, tmp_path):
         """When local is newer, --force newer should copy local to repo."""
-        handler, local_file, repo_file = _setup_conflict(
-            tmp_path, "new local version", "old repo version"
-        )
+        handler, local_file, repo_file = _setup_conflict(tmp_path, "new local version", "old repo version")
 
         # Make repo file older
         old_time = time.time() - 3600
@@ -106,9 +104,7 @@ class TestForceNewer:
 
     def test_force_newer_prefers_repo_when_newer(self, tmp_path):
         """When repo is newer, --force newer should copy repo to local."""
-        handler, local_file, repo_file = _setup_conflict(
-            tmp_path, "old local version", "new repo version"
-        )
+        handler, local_file, repo_file = _setup_conflict(tmp_path, "old local version", "new repo version")
 
         # Make local file older
         old_time = time.time() - 3600
@@ -121,9 +117,7 @@ class TestForceNewer:
 
     def test_force_newer_same_mtime_prefers_local(self, tmp_path):
         """When mtimes are equal, --force newer should prefer local (>=)."""
-        handler, local_file, repo_file = _setup_conflict(
-            tmp_path, "local content", "repo content"
-        )
+        handler, local_file, repo_file = _setup_conflict(tmp_path, "local content", "repo content")
 
         # Set same mtime
         now = time.time()

@@ -71,6 +71,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "include": ["*.sh", "*.py", "*.js", "hook.json", "hooks.json"],
             "exclude": ["*.local.*", "_*.sh"],
         },
+        # Claude Agents (Sub-Agent Definitions)
+        "claude_agents": {
+            "enabled": True,
+            "description": "Claude Code Agent Definitions - sub-agent routing with model selection",
+            "local_path": "~/.claude/agents",
+            "repo_path": ".claude/agents",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "item_pattern": "*.md",
+            "include": ["*.md"],
+            "exclude": ["_*.md", "*.local.md", "*.tmp"],
+        },
         # Claude Scripts
         "claude_scripts": {
             "enabled": True,
@@ -164,6 +176,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "create_if_missing": True,
                 "backup_before_modify": True,
             },
+        },
+        # Claude Settings (disabled by default - contains machine-specific paths)
+        "claude_settings": {
+            "enabled": False,
+            "description": "Claude Code Settings (permissions, hooks config, plugins)",
+            "local_path": "~/.claude",
+            "repo_path": ".claude/settings",
+            "sync_mode": "local_to_repo",
+            "item_type": "file",
+            "include": ["settings.json"],
+            "exclude": ["settings.json.backup", "settings.json.bak"],
         },
         # Fish Shell Configuration
         "fish_config": {
@@ -353,7 +376,14 @@ def get_minimal_config(repo_path: str = "~/gitbase/sccs-sync") -> dict[str, Any]
     config["repository"] = {**config["repository"], "path": repo_path}
 
     # Disable optional categories
-    for category in ["claude_plans", "claude_todos", "claude_memories", "git_config", "project_templates"]:
+    for category in [
+        "claude_plans",
+        "claude_todos",
+        "claude_memories",
+        "claude_settings",
+        "git_config",
+        "project_templates",
+    ]:
         if category in config["sync_categories"]:
             config["sync_categories"][category]["enabled"] = False
 

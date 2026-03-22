@@ -345,6 +345,7 @@ sccs categories disable fish     # Kategorie deaktivieren
 | `claude_skills` | `~/.claude/skills/` | Skills (Verzeichnisse mit SKILL.md) |
 | `claude_commands` | `~/.claude/commands/` | Commands (einzelne .md-Dateien) |
 | `claude_hooks` | `~/.claude/hooks/` | Event-Handler-Skripte |
+| `claude_agents` | `~/.claude/agents/` | Sub-Agent-Definitionen mit Modell-Routing |
 | `claude_scripts` | `~/.claude/scripts/` | Hilfsskripte |
 | `claude_plugins` | `~/.claude/plugins/` | Plugin-Konfigurationen |
 | `claude_mcp` | `~/.claude/mcp/` | MCP-Server-Konfigurationen |
@@ -356,6 +357,7 @@ sccs categories disable fish     # Kategorie deaktivieren
 |-----------|------|-------------|
 | `claude_memories` | `~/.claude/projects/*/memory/` | Persistente Projekt-Memories (feedback, project, user, reference) |
 | `claude_memory` | `~/.claude/memory/` | Memory Bridge Items (claude_memory aktivieren) |
+| `claude_settings` | `~/.claude/settings.json` | Claude Code Settings (Permissions, Hooks-Config) |
 
 #### Shell (standardmäßig aktiv)
 
@@ -816,6 +818,7 @@ sccs categories disable fish     # Disable category
 | `claude_skills` | `~/.claude/skills/` | Skills (directories with SKILL.md) |
 | `claude_commands` | `~/.claude/commands/` | Commands (single .md files) |
 | `claude_hooks` | `~/.claude/hooks/` | Event handler scripts |
+| `claude_agents` | `~/.claude/agents/` | Sub-agent definitions with model routing |
 | `claude_scripts` | `~/.claude/scripts/` | Utility scripts |
 | `claude_plugins` | `~/.claude/plugins/` | Plugin configurations |
 | `claude_mcp` | `~/.claude/mcp/` | MCP server configs |
@@ -827,6 +830,7 @@ sccs categories disable fish     # Disable category
 |----------|------|-------------|
 | `claude_memories` | `~/.claude/projects/*/memory/` | Persistent project memories (feedback, project, user, reference) |
 | `claude_memory` | `~/.claude/memory/` | Memory Bridge items (enable claude_memory to use) |
+| `claude_settings` | `~/.claude/settings.json` | Claude Code settings (permissions, hooks config) |
 
 #### Shell (enabled by default)
 
