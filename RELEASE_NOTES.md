@@ -5,9 +5,11 @@
 ### Added
 - Claude Agents sync category (`claude_agents`) for sub-agent definitions with model routing
 - Claude Settings sync category (`claude_settings`, disabled by default) for permissions and hooks config
+- Auto-generate hub README when `--commit` is used (no extra `--docs` flag needed)
+- `--no-docs` flag to suppress automatic README generation during commit
 
 ### Changed
-- SCCS Skill updated with new categories documentation
+- SCCS Skill updated with new categories and docs commands documentation
 - Version bump to 2.11.0
 
 ## Version 2.10.0 (14.03.2026)

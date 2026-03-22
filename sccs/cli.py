@@ -92,7 +92,7 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.option("--no-push", is_flag=True, help="Skip push (overrides auto_push=true)")
 @click.option("--pull", "do_pull", is_flag=True, help="Pull remote changes before sync")
 @click.option("--no-pull-check", is_flag=True, help="Skip remote status check before sync")
-@click.option("--docs", "do_docs", is_flag=True, help="Regenerate hub README after sync")
+@click.option("--docs/--no-docs", "do_docs", default=None, help="Regenerate hub README after sync (auto when --commit)")
 @click.pass_context
 def sync(
     ctx: click.Context,
@@ -237,8 +237,10 @@ def sync(
     # Display results
     console.print_sync_result(result, dry_run=dry_run)
 
-    # Generate hub README if requested
-    if do_docs and not dry_run and result.synced_items > 0:
+    # Generate hub README: auto when committing, explicit with --docs, skip with --no-docs
+    should_commit = (config.repository.auto_commit or do_commit) and not no_commit
+    should_generate_docs = do_docs if do_docs is not None else should_commit
+    if should_generate_docs and not dry_run and result.synced_items > 0:
         from sccs.docs.generator import DocsGenerator
 
         docs_gen = DocsGenerator(config)
@@ -250,9 +252,6 @@ def sync(
 
     # Handle git operations
     if not dry_run and result.synced_items > 0:
-        # Commit if: (auto_commit OR --commit) AND NOT --no-commit
-        should_commit = (config.repository.auto_commit or do_commit) and not no_commit
-
         if should_commit and has_uncommitted_changes(repo_path):
             stage_all(repo_path)
             commit_msg = f"{config.repository.commit_prefix} Sync {result.synced_items} items"
