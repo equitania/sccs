@@ -164,6 +164,64 @@ def validate_config_file(config_path: Path | None = None) -> tuple[bool, list[st
     return len(errors) == 0, errors
 
 
+def load_raw_user_data(config_path: Path | None = None) -> dict:
+    """
+    Load raw YAML config without merging defaults.
+
+    Returns the user's on-disk config as-is, for comparing against
+    DEFAULT_CONFIG to detect new categories.
+
+    Args:
+        config_path: Optional path to config file. Uses default if not provided.
+
+    Returns:
+        Raw config dict, or empty dict if file doesn't exist.
+    """
+    if config_path is None:
+        config_path = get_config_path()
+
+    if not config_path.exists():
+        return {}
+
+    with open(config_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    return data or {}
+
+
+def adopt_new_categories(
+    category_names: list[str],
+    config_path: Path | None = None,
+) -> SccsConfig:
+    """
+    Add specified default categories to the user's config.yaml and save.
+
+    Operates on the raw YAML dict to avoid inflating the user's config
+    with all default categories from _merge_with_defaults().
+
+    Args:
+        category_names: Names of categories to add from DEFAULT_CONFIG.
+        config_path: Optional path to config file.
+
+    Returns:
+        Updated SccsConfig after reloading.
+    """
+    if config_path is None:
+        config_path = get_config_path()
+
+    raw = load_raw_user_data(config_path)
+    raw.setdefault("sync_categories", {})
+
+    for name in category_names:
+        if name in DEFAULT_CONFIG["sync_categories"] and name not in raw["sync_categories"]:
+            raw["sync_categories"][name] = DEFAULT_CONFIG["sync_categories"][name]
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.dump(raw, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    return load_config(config_path)
+
+
 def _merge_with_defaults(data: dict) -> dict:
     """Merge loaded data with default values for missing keys."""
     result = DEFAULT_CONFIG.copy()

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.12.0
+**Version**: 2.13.0
 
 ### Key Features
 
@@ -39,6 +39,7 @@ sccs diff <item> -c <cat>    # Show diff for item
 sccs config show             # Show current config
 sccs config init             # Create new config
 sccs config validate         # Validate config
+sccs config upgrade          # Adopt new default categories interactively
 
 # Categories
 sccs categories              # List categories
@@ -74,7 +75,8 @@ sccs/
 │   ├── __init__.py       # Config module exports
 │   ├── schema.py         # Pydantic models (SccsConfig, SyncCategory)
 │   ├── loader.py         # YAML loading/saving/validation
-│   └── defaults.py       # Default configuration
+│   ├── defaults.py       # Default configuration
+│   └── migration.py      # New-category detection, MigrationStateManager
 ├── sync/
 │   ├── __init__.py       # Sync module exports
 │   ├── item.py           # SyncItem model, scan functions

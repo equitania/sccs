@@ -8,12 +8,20 @@ import click
 
 from sccs import __version__
 from sccs.config import (
+    adopt_new_categories,
     ensure_config_exists,
     generate_default_config,
     get_config_path,
     load_config,
+    load_raw_user_data,
     update_category_enabled,
     validate_config_file,
+)
+from sccs.config.migration import (
+    MigrationStateManager,
+    detect_new_categories,
+    get_categories_to_offer,
+    get_category_info,
 )
 from sccs.git import commit, get_remote_status, has_uncommitted_changes, pull, push, stage_all
 from sccs.output import Console, show_diff
@@ -93,6 +101,7 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.option("--pull", "do_pull", is_flag=True, help="Pull remote changes before sync")
 @click.option("--no-pull-check", is_flag=True, help="Skip remote status check before sync")
 @click.option("--docs/--no-docs", "do_docs", default=None, help="Regenerate hub README after sync (auto when --commit)")
+@click.option("--no-migrate", is_flag=True, help="Skip new-category migration check")
 @click.pass_context
 def sync(
     ctx: click.Context,
@@ -107,6 +116,7 @@ def sync(
     do_pull: bool,
     no_pull_check: bool,
     do_docs: bool,
+    no_migrate: bool,
 ) -> None:
     """Synchronize files between local and repository.
 
@@ -139,6 +149,9 @@ def sync(
     except FileNotFoundError as e:
         console.print_error(str(e))
         sys.exit(1)
+
+    # Check for new default categories
+    _run_migration_check(console, no_migrate, get_config_path())
 
     repo_path = Path(config.repository.path).expanduser()
 
@@ -553,6 +566,41 @@ def config_edit(ctx: click.Context) -> None:
         console.print_info(f"Set EDITOR environment variable or open manually: {config_path}")
 
 
+@config.command("upgrade")
+@click.pass_context
+def config_upgrade(ctx: click.Context) -> None:
+    """Check for new default categories and add them to config.
+
+    \b
+    Compares your config.yaml against built-in defaults and offers
+    to add any new categories. Previously declined categories are
+    re-offered here.
+
+    \b
+    Examples:
+        sccs config upgrade    Review and adopt new categories
+    """
+    console = ctx.obj["console"]
+
+    config_path = get_config_path()
+    if not config_path.exists():
+        console.print_error(f"Config file not found: {config_path}")
+        console.print_info("Run 'sccs config init' to create one")
+        sys.exit(1)
+
+    raw_data = load_raw_user_data(config_path)
+    mgr = MigrationStateManager()
+
+    # detect_new_categories (not get_categories_to_offer) — re-offer previously declined
+    all_new = detect_new_categories(raw_data)
+
+    if not all_new:
+        console.print_success("Your config is up to date with all available categories.")
+        return
+
+    _interactive_migration_prompt(console, all_new, mgr, config_path)
+
+
 @config.command("validate")
 @click.pass_context
 def config_validate(ctx: click.Context) -> None:
@@ -723,6 +771,100 @@ def docs_generate(ctx: click.Context, dry_run: bool, do_commit: bool, do_push: b
                     console.print_success(f"Pushed to {config.repository.remote}")
                 else:
                     console.print_warning("Push failed")
+
+
+def _run_migration_check(
+    console: Console,
+    no_migrate: bool,
+    config_path: Path | None = None,
+) -> None:
+    """
+    Check for new default categories and prompt user to adopt them.
+
+    Non-blocking: sync continues whether or not user adopts anything.
+    In non-TTY mode (CI), only prints a notice without interaction.
+    """
+    if no_migrate:
+        return
+
+    raw_data = load_raw_user_data(config_path)
+    mgr = MigrationStateManager()
+    is_tty = sys.stdout.isatty()
+
+    if is_tty:
+        to_offer = get_categories_to_offer(raw_data, mgr)
+        if not to_offer:
+            return
+        _interactive_migration_prompt(console, to_offer, mgr, config_path)
+    else:
+        # Non-TTY (CI): notify about ALL new categories, no state write
+        to_offer = detect_new_categories(raw_data)
+        if to_offer:
+            count = len(to_offer)
+            names = ", ".join(to_offer)
+            console.print_info(
+                f"Notice: {count} new categor{'y' if count == 1 else 'ies'} "
+                f"available ({names}). Run 'sccs config upgrade' to review."
+            )
+
+
+def _interactive_migration_prompt(
+    console: Console,
+    to_offer: list[str],
+    mgr: MigrationStateManager,
+    config_path: Path | None = None,
+) -> None:
+    """
+    Interactive prompt to adopt new default categories.
+
+    Displays available categories and lets the user choose which to add.
+    Declined categories are remembered in MigrationState.
+    """
+    count = len(to_offer)
+    console.print(f"\n[bold cyan]New categories available ({count})[/bold cyan]")
+    console.print("[dim]These categories exist in the defaults but not in your config.yaml.[/dim]\n")
+
+    for i, name in enumerate(to_offer, 1):
+        cat = get_category_info(name)
+        enabled = cat.get("enabled", True)
+        enabled_label = "[green]enabled[/green]" if enabled else "[dim]disabled[/dim]"
+        description = cat.get("description", "")
+        local_path = cat.get("local_path", "")
+        repo_path = cat.get("repo_path", "")
+
+        console.print(f"  [cyan]{i}[/cyan] [bold]{name}[/bold] - {description}")
+        console.print(f"      local: [dim]{local_path}[/dim]  repo: [dim]{repo_path}[/dim]  (default: {enabled_label})")
+
+    console.print()
+
+    adopted: list[str] = []
+    declined: list[str] = []
+
+    # Offer "add all" shortcut
+    if console.confirm(f"Add all {count} categories at once?", default=False):
+        adopted = list(to_offer)
+    else:
+        for name in to_offer:
+            cat = get_category_info(name)
+            default_yes = cat.get("enabled", True)
+            if console.confirm(f"  Add '{name}'?", default=default_yes):
+                adopted.append(name)
+            else:
+                declined.append(name)
+
+    if adopted:
+        adopt_new_categories(adopted, config_path)
+        mgr.mark_adopted(adopted)
+        n = len(adopted)
+        console.print_success(f"Added {n} categor{'y' if n == 1 else 'ies'}: {', '.join(adopted)}")
+
+    if declined:
+        mgr.mark_declined(declined)
+        console.print(
+            f"[dim]Skipped: {', '.join(declined)} (won't ask again; run 'sccs config upgrade' to review)[/dim]"
+        )
+
+    console.print()
 
 
 def main() -> None:

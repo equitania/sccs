@@ -3,9 +3,11 @@
 
 from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
 from sccs.config.loader import (
+    adopt_new_categories,
     ensure_config_exists,
     get_config_path,
     load_config,
+    load_raw_user_data,
     save_config,
     update_category_enabled,
     validate_config_file,
@@ -35,11 +37,13 @@ __all__ = [
     "ConflictResolution",
     # Loader
     "load_config",
+    "load_raw_user_data",
     "save_config",
     "get_config_path",
     "ensure_config_exists",
     "validate_config_file",
     "update_category_enabled",
+    "adopt_new_categories",
     # Defaults
     "DEFAULT_CONFIG",
     "generate_default_config",

@@ -1,5 +1,24 @@
 # Release Notes
 
+## Version 2.13.0 (22.03.2026)
+
+### Added
+- Config Migration Assistant: detects new default categories and offers interactive adoption during `sccs sync`
+- `sccs config upgrade` command to review and adopt new categories (re-offers previously declined)
+- `--no-migrate` flag on `sccs sync` to skip migration check
+- Migration state tracking (`~/.config/sccs/.migration_state.yaml`) to remember declined categories
+- CI/non-TTY support: prints notice instead of interactive prompt
+- `load_raw_user_data()` and `adopt_new_categories()` in config loader
+
+### Changed
+- Version bump to 2.13.0
+- SCCS Skill updated with migration module and config upgrade command
+
+## Version 2.12.0 (22.03.2026)
+
+### Changed
+- Version bump to v2.12.0
+
 ## Version 2.11.0 (22.03.2026)
 
 ### Added
