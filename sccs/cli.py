@@ -841,7 +841,7 @@ def _interactive_migration_prompt(
     declined: list[str] = []
 
     # Offer "add all" shortcut
-    if console.confirm(f"Add all {count} categories at once?", default=False):
+    if console.confirm(f"Add all {count} categories at once? (No = decide individually)", default=False):
         adopted = list(to_offer)
     else:
         for name in to_offer:

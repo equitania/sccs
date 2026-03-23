@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from sccs.config.defaults import DEFAULT_CONFIG
+from sccs.utils.platform import is_platform_match
 
 
 def detect_new_categories(raw_user_data: dict) -> list[str]:
@@ -22,7 +23,11 @@ def detect_new_categories(raw_user_data: dict) -> list[str]:
         List of category names not present in user's config, in DEFAULT_CONFIG order.
     """
     user_cats = set((raw_user_data.get("sync_categories") or {}).keys())
-    return [name for name in DEFAULT_CONFIG["sync_categories"] if name not in user_cats]
+    return [
+        name
+        for name in DEFAULT_CONFIG["sync_categories"]
+        if name not in user_cats and is_platform_match(DEFAULT_CONFIG["sync_categories"][name].get("platforms"))
+    ]
 
 
 def get_category_info(name: str) -> dict[str, Any]:
@@ -35,7 +40,8 @@ def get_category_info(name: str) -> dict[str, Any]:
     Returns:
         Category dict from DEFAULT_CONFIG.
     """
-    return DEFAULT_CONFIG["sync_categories"].get(name, {})
+    result: dict[str, Any] = DEFAULT_CONFIG["sync_categories"].get(name, {})
+    return result
 
 
 @dataclass

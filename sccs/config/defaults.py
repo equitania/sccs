@@ -18,7 +18,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Claude Framework
         "claude_framework": {
             "enabled": True,
-            "description": "SuperClaude Framework files (CLAUDE.md, PERSONAS.md, etc.)",
+            "description": "SuperClaude Framework Core (shared, non-personal files)",
             "local_path": "~/.claude",
             "repo_path": ".claude/framework",
             "sync_mode": "bidirectional",
@@ -30,8 +30,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "MCP.md",
                 "MODES.md",
                 "ORCHESTRATOR.md",
-                "PERSONAS.md",
+            ],
+            "exclude": [],
+        },
+        # User-specific Framework (personal customizations, opt-in)
+        "claude_user_framework": {
+            "enabled": False,
+            "description": "User-specific SuperClaude Framework (SOUL, PRINCIPLES, PERSONAS, RULES)",
+            "local_path": "~/.claude",
+            "repo_path": ".claude/user-framework",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "include": [
+                "SOUL.md",
                 "PRINCIPLES.md",
+                "PERSONAS.md",
                 "RULES.md",
             ],
             "exclude": [],

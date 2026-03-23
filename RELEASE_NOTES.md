@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.14.0 (23.03.2026)
+
+### Added
+- User-specific framework category `claude_user_framework` (SOUL.md, PRINCIPLES.md, PERSONAS.md, RULES.md) — disabled by default, opt-in for personal config sync across machines
+- Platform filtering in migration prompts — macOS-only categories no longer offered on Linux/Windows
+
+### Changed
+- `claude_framework` category reduced to shared core files (CLAUDE.md, COMMANDS.md, FLAGS.md, MCP.md, MODES.md, ORCHESTRATOR.md)
+- Migration "Add all" prompt clarified: `(No = decide individually)` to avoid confusion
+
+### Fixed
+- `detect_new_categories()` mypy `no-any-return` error resolved with explicit type annotation
+
 ## Version 2.13.0 (22.03.2026)
 
 ### Added
