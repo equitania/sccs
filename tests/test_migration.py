@@ -18,11 +18,7 @@ from sccs.utils.platform import is_platform_match
 
 def _platform_filtered_defaults() -> list[str]:
     """Return default category names filtered for the current platform."""
-    return [
-        name
-        for name, cat in DEFAULT_CONFIG["sync_categories"].items()
-        if is_platform_match(cat.get("platforms"))
-    ]
+    return [name for name, cat in DEFAULT_CONFIG["sync_categories"].items() if is_platform_match(cat.get("platforms"))]
 
 
 class TestDetectNewCategories:
