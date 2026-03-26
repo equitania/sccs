@@ -1,19 +1,20 @@
 # Release Notes
 
-## Version 2.15.0 (26.03.2026)
+## Version 2.16.0 (26.03.2026)
 
 ### Added
 - Selective ZIP export/import for deploying configurations to customer systems
-- `sccs export` command with interactive questionary checkbox selection (categories + individual items)
+- `sccs export` command with interactive questionary checkbox selection
 - `sccs import` command with dry-run preview, overwrite control, and automatic backup
 - New `sccs/transfer/` module: manifest, exporter, importer, and UI helpers
 - `questionary` dependency for interactive checkbox prompts with [✔]/[ ] indicators
 - Path traversal protection (CWE-22) on ZIP import
 - Platform hints in export manifest for cross-platform awareness
+- Two-stage hierarchical export/import selection (areas → items)
 - 37 new tests for transfer functionality (325 total)
 
 ### Changed
-- Export/import interactive selection now uses two-stage navigation: first choose areas (Claude Code, Fish Shell, Shell Tools), then pick individual items — prevents 171-item flat list
+- Export/import uses two-stage navigation: first choose areas (Claude Code, Fish Shell, Shell Tools), then pick individual items — replaces flat 171-item list
 - Category grouping with platform-aware separation (Fish Shell vs Fish Shell macOS)
 - Small groups (≤5 items) auto-included without extra prompt
 - CI migration tests now platform-aware (macOS-only categories excluded on Linux)
