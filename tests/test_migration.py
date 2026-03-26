@@ -13,20 +13,32 @@ from sccs.config.migration import (
     detect_new_categories,
     get_categories_to_offer,
 )
+from sccs.utils.platform import is_platform_match
+
+
+def _platform_filtered_defaults() -> list[str]:
+    """Return default category names filtered for the current platform."""
+    return [
+        name
+        for name, cat in DEFAULT_CONFIG["sync_categories"].items()
+        if is_platform_match(cat.get("platforms"))
+    ]
 
 
 class TestDetectNewCategories:
     """Tests for detect_new_categories()."""
 
     def test_empty_user_data_returns_all_defaults(self):
-        """Empty user config → all default categories returned."""
+        """Empty user config → all platform-matching default categories returned."""
         result = detect_new_categories({})
-        assert result == list(DEFAULT_CONFIG["sync_categories"].keys())
+        expected = _platform_filtered_defaults()
+        assert result == expected
 
     def test_no_sync_categories_key(self):
-        """Missing sync_categories key → all defaults."""
+        """Missing sync_categories key → all platform-matching defaults."""
         result = detect_new_categories({"repository": {"path": "/tmp"}})
-        assert len(result) == len(DEFAULT_CONFIG["sync_categories"])
+        expected = _platform_filtered_defaults()
+        assert len(result) == len(expected)
 
     def test_partial_user_data(self):
         """User has some categories → only missing ones returned."""
@@ -39,8 +51,8 @@ class TestDetectNewCategories:
         result = detect_new_categories(user_data)
         assert "claude_framework" not in result
         assert "claude_skills" not in result
-        # All other defaults should be present
-        expected_count = len(DEFAULT_CONFIG["sync_categories"]) - 2
+        # All other platform-matching defaults should be present
+        expected_count = len(_platform_filtered_defaults()) - 2
         assert len(result) == expected_count
 
     def test_all_categories_present(self):
@@ -53,7 +65,7 @@ class TestDetectNewCategories:
         """Results are in DEFAULT_CONFIG insertion order."""
         user_data = {"sync_categories": {}}
         result = detect_new_categories(user_data)
-        expected = list(DEFAULT_CONFIG["sync_categories"].keys())
+        expected = _platform_filtered_defaults()
         assert result == expected
 
     def test_custom_user_category_ignored(self):
@@ -64,8 +76,9 @@ class TestDetectNewCategories:
             }
         }
         result = detect_new_categories(user_data)
-        # All defaults should be listed since user has none of them
-        assert len(result) == len(DEFAULT_CONFIG["sync_categories"])
+        # All platform-matching defaults should be listed since user has none of them
+        expected = _platform_filtered_defaults()
+        assert len(result) == len(expected)
 
 
 class TestMigrationState:
@@ -161,13 +174,13 @@ class TestGetCategoriesToOffer:
 
     def test_filters_declined(self, mgr: MigrationStateManager):
         # Mark some as declined
-        first_default = list(DEFAULT_CONFIG["sync_categories"].keys())[0]
+        first_default = _platform_filtered_defaults()[0]
         mgr.mark_declined([first_default])
 
         result = get_categories_to_offer({}, mgr)
         assert first_default not in result
         # Still returns others
-        assert len(result) == len(DEFAULT_CONFIG["sync_categories"]) - 1
+        assert len(result) == len(_platform_filtered_defaults()) - 1
 
     def test_no_new_categories(self, mgr: MigrationStateManager):
         user_data = {"sync_categories": {name: {} for name in DEFAULT_CONFIG["sync_categories"]}}
