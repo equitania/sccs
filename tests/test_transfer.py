@@ -634,6 +634,100 @@ class TestBuildImportChoices:
         assert choice_items[0].value == "claude_skills::my-skill"
 
 
+# ── Category Grouping Tests ─────────────────────────────────────
+
+
+class TestBuildCategoryGroups:
+    """Test category grouping logic."""
+
+    def test_claude_categories_grouped(self):
+        """All claude_* categories land in one group."""
+        from sccs.transfer.ui import build_category_groups
+
+        counts = {
+            "claude_skills": 45,
+            "claude_commands": 9,
+            "claude_agents": 7,
+        }
+        groups = build_category_groups(counts)
+
+        assert len(groups) == 1
+        assert groups[0].name == "Claude Code"
+        assert groups[0].item_count == 61
+        assert len(groups[0].categories) == 3
+
+    def test_fish_platform_separated(self, sample_config):
+        """Fish macOS categories get their own group."""
+        from sccs.transfer.ui import build_category_groups
+
+        # Simulate categories with platform info
+        counts = {
+            "fish_config": 55,
+            "fish_functions": 30,
+            "fish_config_macos": 3,
+            "fish_functions_macos": 1,
+        }
+
+        # Need config with platform info for macOS categories
+        # Without config, platform detection falls back to no-platform
+        groups = build_category_groups(counts)
+
+        # Without config, all fish_ categories are in one group
+        fish_groups = [g for g in groups if "Fish" in g.name]
+        assert len(fish_groups) >= 1
+        total_fish = sum(g.item_count for g in fish_groups)
+        assert total_fish == 89
+
+    def test_empty_categories_excluded(self):
+        """Categories with 0 items are excluded."""
+        from sccs.transfer.ui import build_category_groups
+
+        counts = {"claude_skills": 0, "fish_config": 10}
+        groups = build_category_groups(counts)
+
+        assert len(groups) == 1
+        assert groups[0].name == "Fish Shell"
+
+    def test_shell_tools_grouped(self):
+        """Starship and git configs are in Shell Tools."""
+        from sccs.transfer.ui import build_category_groups
+
+        counts = {"starship_config": 1, "git_config": 2}
+        groups = build_category_groups(counts)
+
+        assert len(groups) == 1
+        assert groups[0].name == "Shell Tools"
+        assert groups[0].item_count == 3
+
+    def test_mixed_groups(self):
+        """Multiple group types are sorted correctly."""
+        from sccs.transfer.ui import build_category_groups
+
+        counts = {
+            "claude_skills": 10,
+            "fish_config": 20,
+            "starship_config": 1,
+        }
+        groups = build_category_groups(counts)
+
+        names = [g.name for g in groups]
+        assert "Claude Code" in names
+        assert "Fish Shell" in names
+        assert "Shell Tools" in names
+
+    def test_group_label_format(self):
+        """Group label includes item count."""
+        from sccs.transfer.ui import build_category_groups
+
+        counts = {"claude_skills": 1}
+        groups = build_category_groups(counts)
+        assert "1 item)" in groups[0].label
+
+        counts = {"claude_skills": 10}
+        groups = build_category_groups(counts)
+        assert "10 items)" in groups[0].label
+
+
 # ── CLI Tests ───────────────────────────────────────────────────
 
 

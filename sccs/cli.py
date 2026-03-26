@@ -802,7 +802,7 @@ def export_cmd(ctx: click.Context, output_path: Path | None, select_all: bool, c
         sys.exit(1)
 
     from sccs.transfer.exporter import Exporter, generate_export_filename
-    from sccs.transfer.ui import build_export_choices, checkbox_with_separators, parse_selections
+    from sccs.transfer.ui import interactive_export_selection
 
     raw_config = load_raw_user_data()
     exporter = Exporter(config)
@@ -825,28 +825,17 @@ def export_cmd(ctx: click.Context, output_path: Path | None, select_all: bool, c
         # Export everything without UI
         selections = exporter.build_selections_all(scanned)
     else:
-        # Interactive checkbox selection
+        # Two-stage interactive selection
         if not sys.stdout.isatty():
             console.print_error("Interactive mode requires a TTY. Use --all for non-interactive export.")
             sys.exit(1)
 
-        choices = build_export_choices(scanned, config, raw_config)
-        if not choices:
-            console.print_warning("No items available for export")
-            sys.exit(1)
+        parsed = interactive_export_selection(scanned, config, raw_config, console=console)
 
-        total = sum(len(items) for items in scanned.values())
-        selected_values = checkbox_with_separators(
-            f"Select items to export ({total} available):",
-            choices=choices,
-            instruction="(Space: toggle, Enter: confirm)",
-        )
-
-        if not selected_values:
+        if not parsed:
             console.print_warning("No items selected")
             sys.exit(0)
 
-        parsed = parse_selections(selected_values)
         selections = exporter.build_selections_from_parsed(parsed, scanned)
 
     if not selections:
@@ -893,7 +882,7 @@ def import_cmd(
     console = ctx.obj["console"]
 
     from sccs.transfer.importer import Importer
-    from sccs.transfer.ui import build_import_choices, checkbox_with_separators, parse_selections
+    from sccs.transfer.ui import interactive_import_selection
 
     importer = Importer(zip_path)
 
@@ -918,22 +907,12 @@ def import_cmd(
             console.print_error("Interactive mode requires a TTY. Use --all for non-interactive import.")
             sys.exit(1)
 
-        choices = build_import_choices(manifest)
-        if not choices:
-            console.print_warning("No items in archive")
-            sys.exit(1)
+        parsed = interactive_import_selection(manifest, console=console)
 
-        selected_values = checkbox_with_separators(
-            f"Select items to import ({manifest.total_items} available):",
-            choices=choices,
-            instruction="(Space: toggle, Enter: confirm)",
-        )
-
-        if not selected_values:
+        if not parsed:
             console.print_warning("No items selected")
             sys.exit(0)
 
-        parsed = parse_selections(selected_values)
         selections = importer.build_selections_from_parsed(parsed)
 
     if not selections:

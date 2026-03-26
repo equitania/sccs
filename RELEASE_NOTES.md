@@ -10,7 +10,16 @@
 - `questionary` dependency for interactive checkbox prompts with [✔]/[ ] indicators
 - Path traversal protection (CWE-22) on ZIP import
 - Platform hints in export manifest for cross-platform awareness
-- 31 new tests for transfer functionality (319 total)
+- 37 new tests for transfer functionality (325 total)
+
+### Changed
+- Export/import interactive selection now uses two-stage navigation: first choose areas (Claude Code, Fish Shell, Shell Tools), then pick individual items — prevents 171-item flat list
+- Category grouping with platform-aware separation (Fish Shell vs Fish Shell macOS)
+- Small groups (≤5 items) auto-included without extra prompt
+- CI migration tests now platform-aware (macOS-only categories excluded on Linux)
+
+### Fixed
+- `test_migration.py` assertions failed on Linux CI due to macOS-only categories in expected counts
 
 ## Version 2.14.0 (23.03.2026)
 
