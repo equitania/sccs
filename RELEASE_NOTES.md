@@ -1,5 +1,17 @@
 # Release Notes
 
+## Version 2.15.0 (26.03.2026)
+
+### Added
+- Selective ZIP export/import for deploying configurations to customer systems
+- `sccs export` command with interactive questionary checkbox selection (categories + individual items)
+- `sccs import` command with dry-run preview, overwrite control, and automatic backup
+- New `sccs/transfer/` module: manifest, exporter, importer, and UI helpers
+- `questionary` dependency for interactive checkbox prompts with [✔]/[ ] indicators
+- Path traversal protection (CWE-22) on ZIP import
+- Platform hints in export manifest for cross-platform awareness
+- 31 new tests for transfer functionality (319 total)
+
 ## Version 2.14.0 (23.03.2026)
 
 ### Added

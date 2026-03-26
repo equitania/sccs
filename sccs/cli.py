@@ -773,6 +773,199 @@ def docs_generate(ctx: click.Context, dry_run: bool, do_commit: bool, do_push: b
                     console.print_warning("Push failed")
 
 
+@cli.command("export")
+@click.option("-o", "--output", "output_path", type=click.Path(path_type=Path), default=None, help="Output ZIP path")
+@click.option("--all", "select_all", is_flag=True, help="Export all enabled categories without prompting")
+@click.option("-c", "--category", "categories", multiple=True, help="Limit to specific categories (repeatable)")
+@click.pass_context
+def export_cmd(ctx: click.Context, output_path: Path | None, select_all: bool, categories: tuple[str, ...]) -> None:
+    """Export selected items as ZIP archive.
+
+    \b
+    Creates a portable ZIP archive with selected skills, commands,
+    hooks, and other configurations for deployment to other systems.
+
+    \b
+    Examples:
+        sccs export                          Interactive selection
+        sccs export --all                    Export everything
+        sccs export -c claude_skills         Export only skills
+        sccs export -o my-config.zip         Custom output path
+        sccs export -c skills -c agents      Multiple categories
+    """
+    console = ctx.obj["console"]
+
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        console.print_error(str(e))
+        sys.exit(1)
+
+    from sccs.transfer.exporter import Exporter, generate_export_filename
+    from sccs.transfer.ui import build_export_choices, checkbox_with_separators, parse_selections
+
+    raw_config = load_raw_user_data()
+    exporter = Exporter(config)
+
+    # Scan available items
+    scanned = exporter.scan_available_items()
+
+    if not scanned:
+        console.print_warning("No local items found to export")
+        sys.exit(1)
+
+    # Apply category filter if specified
+    if categories:
+        scanned = {k: v for k, v in scanned.items() if k in categories}
+        if not scanned:
+            console.print_error(f"No items found for categories: {', '.join(categories)}")
+            sys.exit(1)
+
+    if select_all:
+        # Export everything without UI
+        selections = exporter.build_selections_all(scanned)
+    else:
+        # Interactive checkbox selection
+        if not sys.stdout.isatty():
+            console.print_error("Interactive mode requires a TTY. Use --all for non-interactive export.")
+            sys.exit(1)
+
+        choices = build_export_choices(scanned, config, raw_config)
+        if not choices:
+            console.print_warning("No items available for export")
+            sys.exit(1)
+
+        total = sum(len(items) for items in scanned.values())
+        selected_values = checkbox_with_separators(
+            f"Select items to export ({total} available):",
+            choices=choices,
+            instruction="(Space: toggle, Enter: confirm)",
+        )
+
+        if not selected_values:
+            console.print_warning("No items selected")
+            sys.exit(0)
+
+        parsed = parse_selections(selected_values)
+        selections = exporter.build_selections_from_parsed(parsed, scanned)
+
+    if not selections:
+        console.print_warning("No items selected for export")
+        sys.exit(0)
+
+    # Resolve output path
+    if output_path is None:
+        output_path = Path.cwd() / generate_export_filename()
+
+    result = exporter.export_to_zip(selections, output_path, raw_config)
+
+    if result.success:
+        console.print_success(f"Exported {result.total_items} items from {result.total_categories} categories")
+        console.print_info(f"  Archive: {result.output_path}")
+    else:
+        console.print_error(f"Export failed: {result.error}")
+        sys.exit(1)
+
+
+@cli.command("import")
+@click.argument("zip_path", type=click.Path(exists=True, path_type=Path))
+@click.option("-n", "--dry-run", is_flag=True, help="Preview what would be written without writing")
+@click.option("--overwrite", is_flag=True, help="Overwrite existing files without prompting")
+@click.option("--no-backup", is_flag=True, help="Skip backup before overwriting")
+@click.option("--all", "select_all", is_flag=True, help="Import all items without prompting")
+@click.pass_context
+def import_cmd(
+    ctx: click.Context, zip_path: Path, dry_run: bool, overwrite: bool, no_backup: bool, select_all: bool
+) -> None:
+    """Import items from an SCCS export archive.
+
+    \b
+    Extracts selected items from a ZIP archive and places them
+    in the appropriate local paths.
+
+    \b
+    Examples:
+        sccs import config.zip               Interactive selection
+        sccs import config.zip --all         Import everything
+        sccs import config.zip --dry-run     Preview only
+        sccs import config.zip --overwrite   Overwrite existing files
+    """
+    console = ctx.obj["console"]
+
+    from sccs.transfer.importer import Importer
+    from sccs.transfer.ui import build_import_choices, checkbox_with_separators, parse_selections
+
+    importer = Importer(zip_path)
+
+    try:
+        manifest = importer.load_manifest()
+    except (ValueError, FileNotFoundError) as e:
+        console.print_error(str(e))
+        sys.exit(1)
+
+    # Show manifest summary
+    console.print("\n[bold]SCCS Export Archive[/bold]")
+    console.print(f"  Created: {manifest.created_at}")
+    console.print(f"  Platform: {manifest.created_on}")
+    console.print(f"  SCCS version: {manifest.sccs_version}")
+    console.print(f"  Categories: {manifest.total_categories}")
+    console.print(f"  Items: {manifest.total_items}\n")
+
+    if select_all:
+        selections = importer.build_selections_all()
+    else:
+        if not sys.stdout.isatty():
+            console.print_error("Interactive mode requires a TTY. Use --all for non-interactive import.")
+            sys.exit(1)
+
+        choices = build_import_choices(manifest)
+        if not choices:
+            console.print_warning("No items in archive")
+            sys.exit(1)
+
+        selected_values = checkbox_with_separators(
+            f"Select items to import ({manifest.total_items} available):",
+            choices=choices,
+            instruction="(Space: toggle, Enter: confirm)",
+        )
+
+        if not selected_values:
+            console.print_warning("No items selected")
+            sys.exit(0)
+
+        parsed = parse_selections(selected_values)
+        selections = importer.build_selections_from_parsed(parsed)
+
+    if not selections:
+        console.print_warning("No items selected for import")
+        sys.exit(0)
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    result = importer.apply(
+        selections,
+        dry_run=dry_run,
+        overwrite=overwrite,
+        backup=not no_backup,
+    )
+
+    if result.success:
+        action = "Would write" if dry_run else "Written"
+        console.print_success(f"{action}: {result.written} items")
+        if result.skipped > 0:
+            console.print_info(f"  Skipped (already exist): {result.skipped}")
+            if not overwrite:
+                console.print_info("  Tip: Use --overwrite to replace existing files")
+        if result.backed_up > 0:
+            console.print_info(f"  Backed up: {result.backed_up}")
+    else:
+        console.print_error("Import completed with errors:")
+        for error in result.errors:
+            console.print(f"  [red]•[/red] {error}")
+        sys.exit(1)
+
+
 def _run_migration_check(
     console: Console,
     no_migrate: bool,
