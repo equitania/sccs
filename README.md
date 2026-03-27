@@ -31,23 +31,48 @@ SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für 
 - **Memory-CLI** — Vollständige CRUD-Verwaltung mit `sccs memory`
 - **Auto-Expire** — Zeitgesteuerte Archivierung abgelaufener Memory-Items
 
+### Voraussetzungen
+
+[UV](https://docs.astral.sh/uv/) muss installiert sein:
+
+| Betriebssystem | Befehl |
+|----------------|--------|
+| macOS | `brew install uv` |
+| Linux / WSL | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Windows | `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+
 ### Installation
 
-```bash
-# Via PyPI
-pip install sccs
+**Als CLI-Tool (empfohlen):**
 
-# Mit UV (empfohlen)
-uv pip install sccs
+```bash
+uv tool install sccs
 ```
 
-Für Entwicklung:
+**Aktualisierung:**
+
+```bash
+uv tool upgrade sccs
+```
+
+**UV aktualisieren:**
+
+```bash
+# macOS
+brew upgrade uv
+
+# Linux / Windows
+uv self update
+```
+
+### Für Entwickler
 
 ```bash
 git clone https://github.com/equitania/sccs.git
 cd sccs
-uv venv && source .venv/bin/activate
+uv venv --python 3.13 && source .venv/bin/activate
 uv pip install -e ".[dev]"
+sccs --help
 ```
 
 ### Workflows
@@ -585,23 +610,48 @@ SCCS is a YAML-configured bidirectional synchronization tool for Claude Code fil
 - **Memory CLI** — Full CRUD management with `sccs memory`
 - **Auto-Expire** — Time-based archiving of expired memory items
 
+### Prerequisites
+
+[UV](https://docs.astral.sh/uv/) must be installed:
+
+| OS | Command |
+|----|---------|
+| macOS | `brew install uv` |
+| Linux / WSL | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Windows | `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+
 ### Installation
 
-```bash
-# From PyPI
-pip install sccs
+**As CLI tool (recommended):**
 
-# With UV (recommended)
-uv pip install sccs
+```bash
+uv tool install sccs
 ```
 
-For development:
+**Update:**
+
+```bash
+uv tool upgrade sccs
+```
+
+**Update UV itself:**
+
+```bash
+# macOS
+brew upgrade uv
+
+# Linux / Windows
+uv self update
+```
+
+### For Developers
 
 ```bash
 git clone https://github.com/equitania/sccs.git
 cd sccs
-uv venv && source .venv/bin/activate
+uv venv --python 3.13 && source .venv/bin/activate
 uv pip install -e ".[dev]"
+sccs --help
 ```
 
 ### Workflows
