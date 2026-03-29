@@ -7,6 +7,7 @@ from rich.console import Console as RichConsole
 from rich.panel import Panel
 from rich.table import Table
 
+from sccs.integrations.detectors import AntigravityInfo, AntigravitySkillGap, ClaudeDesktopInfo
 from sccs.sync.actions import ActionType, SyncAction
 from sccs.sync.category import CategoryStatus, CategorySyncResult
 from sccs.sync.engine import SyncResult
@@ -371,6 +372,69 @@ class Console:
                 return "abort"
             else:
                 self._console.print("[yellow]Please enter 1, 2, 3, 4, or 5, 6, or 7[/yellow]")
+
+    def print_integrations_status(
+        self,
+        antigravity_info: AntigravityInfo | None,
+        antigravity_gaps: list[AntigravitySkillGap],
+        claude_desktop_info: ClaudeDesktopInfo | None,
+        repo_trusted: bool,
+    ) -> None:
+        """
+        Print integration status for Antigravity and Claude Desktop.
+
+        Args:
+            antigravity_info: Antigravity detection result (None if not installed).
+            antigravity_gaps: List of missing/outdated skills.
+            claude_desktop_info: Claude Desktop detection result (None if not installed).
+            repo_trusted: Whether SCCS repo is in Claude Desktop trusted folders.
+        """
+        has_any = antigravity_info is not None or claude_desktop_info is not None
+        if not has_any:
+            return
+
+        self._console.print("\n[bold]Integrations:[/bold]")
+
+        # Antigravity status
+        if antigravity_info is not None:
+            missing = sum(1 for g in antigravity_gaps if not g.prompt_exists)
+            outdated = sum(1 for g in antigravity_gaps if g.needs_update)
+            total_gaps = len(antigravity_gaps)
+
+            status_parts: list[str] = []
+            if not antigravity_info.prompts_dir_exists:
+                status_parts.append("[yellow]prompts/ missing[/yellow]")
+            if missing > 0:
+                status_parts.append(f"[yellow]{missing} missing[/yellow]")
+            if outdated > 0:
+                status_parts.append(f"[yellow]{outdated} outdated[/yellow]")
+
+            if total_gaps == 0 and antigravity_info.prompts_dir_exists:
+                self._console.print("  [green]●[/green] Antigravity — all skills synced")
+            else:
+                detail = ", ".join(status_parts) if status_parts else "no gaps"
+                self._console.print(f"  [yellow]●[/yellow] Antigravity — {detail}")
+                self._console.print("    [dim]Run: sccs integrations migrate-skills[/dim]")
+
+            if self.verbose and antigravity_gaps:
+                for gap in antigravity_gaps:
+                    label = "outdated" if gap.needs_update else "missing"
+                    self._console.print(f"      [dim]{gap.name} ({label})[/dim]")
+        else:
+            self._console.print("  [dim]○ Antigravity — not detected[/dim]")
+
+        # Claude Desktop status
+        if claude_desktop_info is not None:
+            if repo_trusted:
+                self._console.print("  [green]●[/green] Claude Desktop — repo trusted")
+            else:
+                self._console.print("  [yellow]●[/yellow] Claude Desktop — repo NOT trusted")
+                self._console.print("    [dim]Run: sccs integrations trust-repo[/dim]")
+        else:
+            from sccs.utils.platform import get_current_platform
+
+            if get_current_platform() == "macos":
+                self._console.print("  [dim]○ Claude Desktop — not detected[/dim]")
 
 
 def create_console(*, verbose: bool = False, colored: bool = True) -> Console:

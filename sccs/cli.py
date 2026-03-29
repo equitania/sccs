@@ -330,6 +330,12 @@ def status(ctx: click.Context, category: str | None) -> None:
 
     console.print_status(statuses)
 
+    # Inline integration status (non-blocking)
+    try:
+        _show_integrations_inline(console, config)
+    except Exception:
+        pass
+
 
 @cli.command()
 @click.argument("item_name", required=False)
@@ -1037,6 +1043,212 @@ def _interactive_migration_prompt(
         )
 
     console.print()
+
+
+def _show_integrations_inline(console: Console, config) -> None:
+    """Show integration status inline in sccs status output."""
+    from sccs.integrations.detectors import AntigravityDetector, ClaudeDesktopDetector
+
+    ag_detector = AntigravityDetector()
+    ag_info = ag_detector.get_info()
+    ag_gaps = ag_detector.get_skill_gaps() if ag_info else []
+
+    cd_detector = ClaudeDesktopDetector()
+    cd_info = cd_detector.get_info()
+    repo_trusted = False
+    if cd_info and hasattr(config, "repository"):
+        repo_trusted = cd_detector.is_repo_trusted(config.repository.path)
+
+    console.print_integrations_status(ag_info, ag_gaps, cd_info, repo_trusted)
+
+
+# --- Integrations command group ---
+
+
+@cli.group("integrations")
+def integrations_group() -> None:
+    """Integration status and migration commands.
+
+    \b
+    Detect and manage integrations with Antigravity IDE
+    and Claude Desktop.
+
+    \b
+    Examples:
+        sccs integrations status            Show integration status
+        sccs integrations migrate-skills    Copy skills to Antigravity prompts
+        sccs integrations trust-repo        Register SCCS repo as trusted
+    """
+
+
+@integrations_group.command("status")
+@click.pass_context
+def integrations_status(ctx: click.Context) -> None:
+    """Show detailed integration status."""
+    from sccs.integrations.detectors import AntigravityDetector, ClaudeDesktopDetector
+
+    console = ctx.obj["console"]
+
+    ag_detector = AntigravityDetector()
+    ag_info = ag_detector.get_info()
+    ag_gaps = ag_detector.get_skill_gaps() if ag_info else []
+
+    cd_detector = ClaudeDesktopDetector()
+    cd_info = cd_detector.get_info()
+
+    repo_trusted = False
+    try:
+        config = load_config()
+        if cd_info:
+            repo_trusted = cd_detector.is_repo_trusted(config.repository.path)
+    except FileNotFoundError:
+        pass
+
+    if ag_info is None and cd_info is None:
+        console.print("[dim]No integrations detected[/dim]")
+        return
+
+    console.print_integrations_status(ag_info, ag_gaps, cd_info, repo_trusted)
+
+    # Detailed gap list
+    if ag_info and ag_gaps:
+        console.print(f"\n[bold]Antigravity skill gaps ({len(ag_gaps)}):[/bold]")
+        for gap in ag_gaps:
+            label = "[yellow]outdated[/yellow]" if gap.needs_update else "[red]missing[/red]"
+            console.print(f"  {gap.name} — {label}")
+
+
+@integrations_group.command("migrate-skills")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing prompts (default: yes)")
+@click.option("-s", "--skill", "skills", multiple=True, help="Limit to specific skill (repeatable)")
+@click.pass_context
+def integrations_migrate_skills(
+    ctx: click.Context,
+    dry_run: bool,
+    overwrite: bool,
+    skills: tuple[str, ...],
+) -> None:
+    """Migrate Claude Code skills to Antigravity prompts.
+
+    \b
+    Copies SKILL.md content from ~/.claude/skills/<name>/
+    to ~/.antigravity/prompts/<name>.md
+
+    \b
+    Examples:
+        sccs integrations migrate-skills                Migrate all
+        sccs integrations migrate-skills --dry-run      Preview only
+        sccs integrations migrate-skills -s astro -s sccs   Specific skills
+        sccs integrations migrate-skills --no-overwrite     Skip existing
+    """
+    from sccs.integrations.antigravity import migrate_skills_to_prompts
+    from sccs.integrations.detectors import AntigravityDetector
+
+    console = ctx.obj["console"]
+
+    detector = AntigravityDetector()
+    if not detector.is_installed():
+        console.print_error("Antigravity is not installed (~/.antigravity/ not found)")
+        sys.exit(1)
+
+    gaps = detector.get_skill_gaps()
+    if not gaps:
+        console.print_success("All skills are already available in Antigravity prompts")
+        return
+
+    selected = list(skills) if skills else None
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    result = migrate_skills_to_prompts(
+        gaps,
+        dry_run=dry_run,
+        overwrite_existing=overwrite,
+        selected=selected,
+    )
+
+    verb = "Would create" if dry_run else "Created"
+    verb_upd = "Would update" if dry_run else "Updated"
+
+    if result.prompts_dir_created:
+        action = "Would create" if dry_run else "Created"
+        console.print_info(f"{action} ~/.antigravity/prompts/")
+
+    if result.created:
+        console.print_success(f"{verb}: {len(result.created)} skills")
+        if ctx.obj["verbose"]:
+            for name in result.created:
+                console.print(f"  [green]+[/green] {name}")
+
+    if result.updated:
+        console.print_success(f"{verb_upd}: {len(result.updated)} skills")
+        if ctx.obj["verbose"]:
+            for name in result.updated:
+                console.print(f"  [yellow]~[/yellow] {name}")
+
+    if result.skipped:
+        console.print(f"[dim]Skipped: {len(result.skipped)} (already exist, use --overwrite)[/dim]")
+
+    if result.errors:
+        console.print_error(f"Errors: {len(result.errors)}")
+        for name, error in result.errors.items():
+            console.print(f"  [red]✗[/red] {name}: {error}")
+        sys.exit(1)
+
+
+@integrations_group.command("trust-repo")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.pass_context
+def integrations_trust_repo(ctx: click.Context, dry_run: bool) -> None:
+    """Register SCCS repository as trusted in Claude Desktop.
+
+    \b
+    Adds the configured repository path to Claude Desktop's
+    localAgentModeTrustedFolders list.
+
+    \b
+    Examples:
+        sccs integrations trust-repo            Register repo
+        sccs integrations trust-repo --dry-run  Preview only
+    """
+    from sccs.integrations.claude_desktop import register_trusted_folder
+    from sccs.integrations.detectors import ClaudeDesktopDetector
+
+    console = ctx.obj["console"]
+
+    detector = ClaudeDesktopDetector()
+    if not detector.is_installed():
+        console.print_error("Claude Desktop is not installed")
+        sys.exit(1)
+
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        console.print_error(str(e))
+        sys.exit(1)
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    result = register_trusted_folder(
+        config.repository.path,
+        dry_run=dry_run,
+    )
+
+    if result.already_trusted:
+        console.print_success(f"Already trusted: {result.repo_path}")
+        return
+
+    if result.success:
+        verb = "Would register" if dry_run else "Registered"
+        console.print_success(f"{verb}: {result.repo_path}")
+        if not dry_run:
+            console.print_info("Restart Claude Desktop to apply changes")
+    else:
+        console.print_error(result.error or "Unknown error")
+        sys.exit(1)
 
 
 def main() -> None:

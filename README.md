@@ -12,7 +12,7 @@
 
 SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für Claude Code Dateien und optionale Shell-Konfigurationen. Es hält Skills, Commands, Hooks, Scripts und Shell-Configs zwischen einer lokalen Installation und einem Git-Repository synchron.
 
-**Version:** 2.16.0 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.17.0 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Funktionen
 
@@ -30,6 +30,8 @@ SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für 
 - **Memory Bridge** — Persistenter Kontext zwischen Claude Code und Claude.ai via Git-Sync
 - **Memory-CLI** — Vollständige CRUD-Verwaltung mit `sccs memory`
 - **Auto-Expire** — Zeitgesteuerte Archivierung abgelaufener Memory-Items
+- **Antigravity-Integration** — Skills zu Antigravity IDE Prompts migrieren
+- **Claude Desktop-Integration** — Repository als Trusted Folder registrieren
 
 ### Voraussetzungen
 
@@ -591,7 +593,7 @@ AGPL-3.0 — Equitania Software GmbH
 
 SCCS is a YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations. It keeps skills, commands, hooks, scripts, and shell configs in sync between a local installation and a Git repository.
 
-**Version:** 2.16.0 · **License:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.17.0 · **License:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Features
 
@@ -609,6 +611,8 @@ SCCS is a YAML-configured bidirectional synchronization tool for Claude Code fil
 - **Memory Bridge** — Persistent context between Claude Code and Claude.ai via Git sync
 - **Memory CLI** — Full CRUD management with `sccs memory`
 - **Auto-Expire** — Time-based archiving of expired memory items
+- **Antigravity Integration** — Migrate skills to Antigravity IDE prompts
+- **Claude Desktop Integration** — Register repository as trusted folder
 
 ### Prerequisites
 

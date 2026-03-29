@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.17.0 (29.03.2026)
+
+### Added
+- Integrations sub-package (`sccs/integrations/`) for Antigravity IDE and Claude Desktop
+- `sccs integrations status` — detect Antigravity and Claude Desktop installations
+- `sccs integrations migrate-skills` — copy Claude Code skills to Antigravity prompts (`SKILL.md` → `<name>.md`)
+- `sccs integrations trust-repo` — register SCCS repo in Claude Desktop trusted folders
+- Inline integration status in `sccs status` output
+- 28 new tests for integration detectors, migration, and trust registration (353 total)
+
+### Changed
+- Version bump 2.16.0 → 2.17.0
+
 ## Version 2.16.0 (26.03.2026)
 
 ### Added
