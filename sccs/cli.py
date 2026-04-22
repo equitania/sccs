@@ -29,6 +29,7 @@ from sccs.output.merge import edit_in_editor, interactive_merge
 from sccs.sync import SyncEngine
 from sccs.sync.actions import SyncAction
 from sccs.sync.state import StateManager
+from sccs.utils.logging import configure_logging
 
 # Global console instance
 _console: Console | None = None
@@ -82,6 +83,17 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
     set_console(console)
     ctx.obj["console"] = console
     ctx.obj["verbose"] = verbose
+
+    # Configure logging once per invocation. The log_file is best-effort: it
+    # comes from config.output.log_file when a config exists, otherwise the
+    # CLI just logs to the console stream at the chosen verbosity.
+    log_file: str | None = None
+    try:
+        cfg = load_config()
+        log_file = cfg.output.log_file
+    except Exception:  # noqa: BLE001 — config errors are surfaced elsewhere
+        pass
+    configure_logging(log_file=log_file, verbose=verbose)
 
 
 @cli.command()
@@ -890,7 +902,14 @@ def import_cmd(
     from sccs.transfer.importer import Importer
     from sccs.transfer.ui import interactive_import_selection
 
-    importer = Importer(zip_path)
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        console.print_error(str(e))
+        console.print_info("Run 'sccs config init' before importing — a local config is required for path validation")
+        sys.exit(1)
+
+    importer = Importer(zip_path, config=config)
 
     try:
         manifest = importer.load_manifest()

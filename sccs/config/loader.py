@@ -1,6 +1,7 @@
 # SCCS Configuration Loader
 # Load, save, and manage YAML configuration files
 
+import logging
 import os
 from pathlib import Path
 
@@ -9,6 +10,12 @@ from pydantic import ValidationError
 
 from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
 from sccs.config.schema import SccsConfig
+
+logger = logging.getLogger(__name__)
+
+
+class ConfigWriteError(OSError):
+    """Raised when the SCCS config cannot be persisted to disk."""
 
 
 def get_config_dir() -> Path:
@@ -74,19 +81,38 @@ def save_config(config: SccsConfig, config_path: Path | None = None) -> Path:
 
     Returns:
         Path: Path where config was saved.
+
+    Raises:
+        ConfigWriteError: If the target directory cannot be created, the
+            config cannot be serialized, or the file cannot be written.
     """
     if config_path is None:
         config_path = get_config_path()
 
-    ensure_config_dir()
+    try:
+        ensure_config_dir()
+    except OSError as exc:
+        logger.error("Could not create config directory for %s: %s", config_path, exc)
+        raise ConfigWriteError(f"Cannot create config directory: {exc}") from exc
 
     # Convert to dict and write as YAML
     # Use mode='json' to serialize Enums as their string values
     data = config.model_dump(exclude_none=True, mode="json")
 
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    try:
+        yaml_text = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    except yaml.YAMLError as exc:
+        logger.error("Could not serialize config to YAML: %s", exc)
+        raise ConfigWriteError(f"Cannot serialize config to YAML: {exc}") from exc
 
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+    except OSError as exc:
+        logger.error("Could not write config %s: %s", config_path, exc)
+        raise ConfigWriteError(f"Cannot write config file {config_path}: {exc}") from exc
+
+    logger.debug("Wrote config to %s (%d bytes)", config_path, len(yaml_text))
     return config_path
 
 
@@ -216,8 +242,13 @@ def adopt_new_categories(
         if name in DEFAULT_CONFIG["sync_categories"] and name not in raw["sync_categories"]:
             raw["sync_categories"][name] = DEFAULT_CONFIG["sync_categories"][name]
 
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(raw, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    try:
+        yaml_text = yaml.dump(raw, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+    except (OSError, yaml.YAMLError) as exc:
+        logger.error("Could not persist adopted categories to %s: %s", config_path, exc)
+        raise ConfigWriteError(f"Cannot persist adopted categories to {config_path}: {exc}") from exc
 
     return load_config(config_path)
 

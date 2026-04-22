@@ -7,6 +7,7 @@ from sccs.utils.hashing import (
     file_hash,
     quick_compare,
 )
+from sccs.utils.logging import configure_logging, get_logger
 from sccs.utils.paths import (
     atomic_write,
     ensure_dir,
@@ -40,4 +41,7 @@ __all__ = [
     "file_hash",
     "directory_hash",
     "quick_compare",
+    # Logging
+    "configure_logging",
+    "get_logger",
 ]

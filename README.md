@@ -12,7 +12,7 @@
 
 SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für Claude Code Dateien und optionale Shell-Konfigurationen. Es hält Skills, Commands, Hooks, Scripts und Shell-Configs zwischen einer lokalen Installation und einem Git-Repository synchron.
 
-**Version:** 2.17.0 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.17.1 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Funktionen
 
@@ -593,7 +593,7 @@ AGPL-3.0 — Equitania Software GmbH
 
 SCCS is a YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations. It keeps skills, commands, hooks, scripts, and shell configs in sync between a local installation and a Git repository.
 
-**Version:** 2.17.0 · **License:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.17.1 · **License:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Features
 

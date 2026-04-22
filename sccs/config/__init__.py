@@ -3,6 +3,7 @@
 
 from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
 from sccs.config.loader import (
+    ConfigWriteError,
     adopt_new_categories,
     ensure_config_exists,
     get_config_path,
@@ -44,6 +45,7 @@ __all__ = [
     "validate_config_file",
     "update_category_enabled",
     "adopt_new_categories",
+    "ConfigWriteError",
     # Defaults
     "DEFAULT_CONFIG",
     "generate_default_config",
