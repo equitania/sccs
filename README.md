@@ -12,7 +12,7 @@
 
 SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für Claude Code Dateien und optionale Shell-Konfigurationen. Es hält Skills, Commands, Hooks, Scripts und Shell-Configs zwischen einer lokalen Installation und einem Git-Repository synchron.
 
-**Version:** 2.17.1 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.18.0 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Funktionen
 
@@ -20,6 +20,7 @@ SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für 
 - **Flexible Kategorien** — Claude Skills, Commands, Hooks, Scripts, Fish-Shell u.v.m.
 - **Bidirektionale Synchronisierung** — Zweiwege-Sync mit Konflikterkennung
 - **Interaktive Konflikterkennung** — Menügesteuerte Konfliktauflösung mit `-i`
+- **Interaktive Divergenz-Auflösung** — Menü (Rebase / Merge / Force-Push / Abort) wenn Branch von Remote abgewichen ist; CI-freundlich (auto-Abort ohne TTY)
 - **Automatische Backups** — Zeitgestempelte Sicherungen vor Überschreiben
 - **Git-Integration** — Auto-Commit und Push nach Synchronisierung
 - **Plattform-Filter** — Kategorien nur auf macOS, Linux oder beidem synchronisieren
@@ -593,7 +594,7 @@ AGPL-3.0 — Equitania Software GmbH
 
 SCCS is a YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations. It keeps skills, commands, hooks, scripts, and shell configs in sync between a local installation and a Git repository.
 
-**Version:** 2.17.1 · **License:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.18.0 · **License:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Features
 
@@ -601,6 +602,7 @@ SCCS is a YAML-configured bidirectional synchronization tool for Claude Code fil
 - **Flexible Categories** — Claude skills, commands, hooks, scripts, Fish shell, and more
 - **Bidirectional Sync** — Full two-way synchronization with conflict detection
 - **Interactive Conflict Resolution** — Menu-driven conflict handling with `-i` flag
+- **Interactive Divergence Resolution** — Menu (Rebase / Merge / Force-Push / Abort) when the branch has diverged from its remote; CI-friendly (auto-Abort without TTY)
 - **Automatic Backups** — Timestamped backups before overwriting files
 - **Git Integration** — Auto-commit and push after sync operations
 - **Platform Filtering** — Sync categories only on macOS, Linux, or both

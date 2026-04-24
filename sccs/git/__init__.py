@@ -4,6 +4,7 @@
 from sccs.git.operations import (
     commit,
     fetch,
+    force_push,
     get_current_branch,
     get_remote_status,
     get_repo_root,
@@ -24,6 +25,7 @@ __all__ = [
     "stage_all",
     "commit",
     "push",
+    "force_push",
     "pull",
     "fetch",
     "get_remote_status",

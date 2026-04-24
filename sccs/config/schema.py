@@ -1,11 +1,16 @@
 # SCCS Configuration Schema
 # Pydantic models for YAML configuration validation
 
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+
+# Git remote name: alphanumeric start, then alphanumerics/underscore/dot/hyphen.
+# Leading hyphen is forbidden to block option-injection (e.g. "--upload-pack=evil").
+_GIT_REMOTE_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
 
 
 class SyncMode(str, Enum):
@@ -48,6 +53,17 @@ class RepositoryConfig(BaseModel):
     def expand_path(cls, v: str) -> str:
         """Expand ~ in path."""
         return str(Path(v).expanduser())
+
+    @field_validator("remote")
+    @classmethod
+    def validate_remote(cls, v: str) -> str:
+        """Reject remote names that could be interpreted as git options (e.g. '--upload-pack=...')."""
+        if not _GIT_REMOTE_PATTERN.match(v):
+            raise ValueError(
+                f"Invalid git remote name: {v!r}. "
+                "Only alphanumerics, '_', '.', '-' are allowed, and it must not start with '-'."
+            )
+        return v
 
 
 class SettingsEnsure(BaseModel):

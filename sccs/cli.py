@@ -24,6 +24,11 @@ from sccs.config.migration import (
     get_category_info,
 )
 from sccs.git import commit, get_remote_status, has_uncommitted_changes, pull, push, stage_all
+from sccs.git.resolve import (
+    DivergenceStrategy,
+    apply_divergence_strategy,
+    prompt_divergence_strategy,
+)
 from sccs.output import Console, show_diff
 from sccs.output.merge import edit_in_editor, interactive_merge
 from sccs.sync import SyncEngine
@@ -175,12 +180,30 @@ def sync(
             # Non-fatal: just warn and continue
             console.print_warning(f"Could not check remote status: {remote_status['error']}")
         elif remote_status.get("diverged"):
-            # Diverged: require manual intervention
+            # Diverged: offer an interactive resolution prompt.
+            # In non-TTY contexts the prompt auto-answers ABORT, preserving the
+            # previous fail-loud behaviour for CI/pipe usage.
             ahead = remote_status.get("ahead", 0)
             behind = remote_status.get("behind", 0)
-            console.print_error(f"Repository is diverged: {ahead} commit(s) ahead, {behind} commit(s) behind remote")
-            console.print_info("Please merge or rebase manually before syncing")
-            sys.exit(1)
+            console.print_warning(f"Repository diverged: {ahead} commit(s) ahead, {behind} commit(s) behind remote")
+            strategy = prompt_divergence_strategy(
+                ahead=ahead,
+                behind=behind,
+                remote=config.repository.remote,
+            )
+            if strategy is DivergenceStrategy.ABORT:
+                console.print_info(
+                    "Run 'sccs sync' in an interactive terminal to pick a strategy, "
+                    "or resolve with git manually (pull --rebase, merge, or push --force-with-lease)."
+                )
+                sys.exit(1)
+            if not apply_divergence_strategy(
+                strategy,
+                repo_path,
+                console,
+                remote=config.repository.remote,
+            ):
+                sys.exit(1)
         elif remote_status.get("behind", 0) > 0:
             behind = remote_status["behind"]
             console.print_warning(f"Repository is {behind} commit(s) behind remote")

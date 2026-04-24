@@ -8,6 +8,12 @@ from pathlib import Path
 # Pattern for validating git author format: "Name <email>"
 _GIT_AUTHOR_PATTERN = re.compile(r"^[^<>]+\s<[^@\s]+@[^@\s]+>$")
 
+# Remote names / short refs: must not start with '-' (blocks option-injection like '--upload-pack=...').
+_GIT_REMOTE_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
+
+# Branch names may contain '/' (e.g. 'feature/x') but still must not start with '-'.
+_GIT_BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./\-]*$")
+
 
 class GitError(Exception):
     """Exception raised for git operation errors."""
@@ -17,6 +23,26 @@ class GitError(Exception):
         self.returncode = returncode
         self.stderr = stderr
         super().__init__(message)
+
+
+def _require_no_option_prefix(kind: str, value: str) -> None:
+    """Reject values that would be interpreted as a git option flag."""
+    if value.startswith("-"):
+        raise GitError(f"Invalid {kind}: {value!r} must not start with '-'")
+
+
+def _validate_remote(value: str) -> str:
+    """Validate a git remote name. Raises GitError on failure."""
+    if not _GIT_REMOTE_PATTERN.match(value):
+        raise GitError(f"Invalid git remote name: {value!r}")
+    return value
+
+
+def _validate_branch(value: str) -> str:
+    """Validate a git branch name. Raises GitError on failure."""
+    if not _GIT_BRANCH_PATTERN.match(value):
+        raise GitError(f"Invalid git branch name: {value!r}")
+    return value
 
 
 def _run_git(
@@ -236,6 +262,10 @@ def push(
     Returns:
         True if successful.
     """
+    _validate_remote(remote)
+    if branch is not None:
+        _validate_branch(branch)
+
     args = ["push"]
 
     if set_upstream:
@@ -243,6 +273,42 @@ def push(
 
     args.append(remote)
 
+    if branch:
+        args.append(branch)
+
+    try:
+        _run_git(*args, cwd=path)
+        return True
+    except GitError:
+        return False
+
+
+def force_push(
+    path: Path | None = None,
+    *,
+    remote: str = "origin",
+    branch: str | None = None,
+) -> bool:
+    """
+    Force-push with lease.
+
+    Uses ``--force-with-lease`` rather than ``--force`` so the push is refused
+    if the remote has advanced since the last fetch — this makes an unintended
+    overwrite of third-party commits much less likely.
+
+    Args:
+        path: Repository path.
+        remote: Remote name (validated).
+        branch: Branch name (validated; uses current if not specified).
+
+    Returns:
+        True if successful.
+    """
+    _validate_remote(remote)
+    if branch is not None:
+        _validate_branch(branch)
+
+    args = ["push", "--force-with-lease", remote]
     if branch:
         args.append(branch)
 
@@ -343,6 +409,10 @@ def clone_repo(
     Returns:
         True if successful.
     """
+    if branch is not None:
+        _validate_branch(branch)
+    _require_no_option_prefix("clone URL", url)
+
     args = ["clone"]
 
     if branch:
@@ -351,7 +421,8 @@ def clone_repo(
     if depth:
         args.extend(["--depth", str(depth)])
 
-    args.extend([url, str(dest)])
+    # '--' separator prevents url/dest from being parsed as options.
+    args.extend(["--", url, str(dest)])
 
     try:
         _run_git(*args)

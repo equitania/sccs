@@ -13,6 +13,7 @@ from sccs.git.operations import (
     clone_repo,
     commit,
     fetch,
+    force_push,
     get_changed_files,
     get_current_branch,
     get_remote_status,
@@ -356,3 +357,80 @@ class TestCloneRepo:
     @patch("sccs.git.operations._run_git", side_effect=GitError("error"))
     def test_failure(self, mock_git):
         assert clone_repo("https://example.com/repo.git", Path("/tmp/dest")) is False
+
+
+class TestArgumentInjectionHardening:
+    """Reject git remote/branch/URL values that could be parsed as options (CVE-2017-1000117 class)."""
+
+    @patch("sccs.git.operations._run_git")
+    def test_push_rejects_option_like_remote(self, mock_git):
+        with pytest.raises(GitError, match="Invalid git remote name"):
+            push(remote="--upload-pack=/tmp/evil")
+        mock_git.assert_not_called()
+
+    @patch("sccs.git.operations._run_git")
+    def test_push_rejects_option_like_branch(self, mock_git):
+        with pytest.raises(GitError, match="Invalid git branch name"):
+            push(remote="origin", branch="--upload-pack=/tmp/evil")
+        mock_git.assert_not_called()
+
+    @patch("sccs.git.operations._run_git")
+    def test_push_accepts_normal_values(self, mock_git):
+        assert push(remote="origin", branch="feature/x") is True
+
+    @patch("sccs.git.operations._run_git")
+    def test_clone_rejects_option_like_url(self, mock_git):
+        with pytest.raises(GitError, match="must not start with '-'"):
+            clone_repo("--upload-pack=/tmp/evil", Path("/tmp/dest"))
+        mock_git.assert_not_called()
+
+    @patch("sccs.git.operations._run_git")
+    def test_clone_rejects_option_like_branch(self, mock_git):
+        with pytest.raises(GitError, match="Invalid git branch name"):
+            clone_repo("https://example.com/repo.git", Path("/tmp/dest"), branch="--exec=evil")
+        mock_git.assert_not_called()
+
+    @patch("sccs.git.operations._run_git")
+    def test_clone_uses_double_dash_separator(self, mock_git):
+        clone_repo("https://example.com/repo.git", Path("/tmp/dest"))
+        args = mock_git.call_args[0]
+        # '--' must appear before the URL so git stops parsing options there.
+        idx_sep = args.index("--")
+        idx_url = args.index("https://example.com/repo.git")
+        assert idx_sep < idx_url
+
+
+class TestForcePush:
+    """Tests for force_push (--force-with-lease)."""
+
+    @patch("sccs.git.operations._run_git")
+    def test_success(self, mock_git):
+        assert force_push(remote="origin", branch="main") is True
+        args = mock_git.call_args[0]
+        assert "--force-with-lease" in args
+        assert "origin" in args
+        assert "main" in args
+
+    @patch("sccs.git.operations._run_git")
+    def test_without_branch(self, mock_git):
+        assert force_push(remote="origin") is True
+        args = mock_git.call_args[0]
+        assert "--force-with-lease" in args
+        # No branch appended when not given
+        assert args.count("--force-with-lease") == 1
+
+    @patch("sccs.git.operations._run_git", side_effect=GitError("rejected (non-fast-forward)"))
+    def test_failure(self, mock_git):
+        assert force_push(remote="origin") is False
+
+    @patch("sccs.git.operations._run_git")
+    def test_rejects_option_like_remote(self, mock_git):
+        with pytest.raises(GitError, match="Invalid git remote name"):
+            force_push(remote="--upload-pack=/tmp/evil")
+        mock_git.assert_not_called()
+
+    @patch("sccs.git.operations._run_git")
+    def test_rejects_option_like_branch(self, mock_git):
+        with pytest.raises(GitError, match="Invalid git branch name"):
+            force_push(remote="origin", branch="--exec=evil")
+        mock_git.assert_not_called()

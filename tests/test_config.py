@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
 from sccs.config.loader import load_config, save_config, validate_config_file
@@ -163,3 +164,36 @@ class TestDefaults:
         parsed = yaml.safe_load(yaml_str)
         assert parsed is not None
         assert "repository" in parsed
+
+
+class TestRemoteValidation:
+    """Block option-like remote names that would trigger git argument injection."""
+
+    @pytest.mark.parametrize(
+        "bad_remote",
+        [
+            "--upload-pack=/tmp/evil",
+            "-u",
+            "--exec=whoami",
+            "origin; rm -rf /",
+            "origin space",
+            "",
+        ],
+    )
+    def test_rejects_option_like_remote(self, temp_dir: Path, bad_remote: str):
+        with pytest.raises(ValidationError):
+            SccsConfig(
+                repository={"path": str(temp_dir), "remote": bad_remote},
+                sync_categories={},
+            )
+
+    @pytest.mark.parametrize(
+        "good_remote",
+        ["origin", "upstream", "fork-2", "my_remote", "remote.prod", "a"],
+    )
+    def test_accepts_normal_remote(self, temp_dir: Path, good_remote: str):
+        config = SccsConfig(
+            repository={"path": str(temp_dir), "remote": good_remote},
+            sync_categories={},
+        )
+        assert config.repository.remote == good_remote

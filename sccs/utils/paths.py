@@ -61,6 +61,11 @@ def create_backup(path: Path, category: str = "unknown") -> Path | None:
     if not path.exists():
         return None
 
+    # Refuse to follow symlinks — a crafted link (e.g. SKILL.md -> /etc/passwd)
+    # would otherwise leak sensitive files into the backup directory.
+    if path.is_symlink():
+        raise ValueError(f"Refusing to backup symlink: {path}")
+
     backup_dir = get_backup_dir() / category
     backup_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,7 +75,8 @@ def create_backup(path: Path, category: str = "unknown") -> Path | None:
     backup_path = backup_dir / backup_name
 
     if path.is_dir():
-        shutil.copytree(path, backup_path)
+        # symlinks=True preserves nested symlinks as links instead of dereferencing them.
+        shutil.copytree(path, backup_path, symlinks=True)
     else:
         shutil.copy2(path, backup_path)
 
@@ -108,6 +114,12 @@ def safe_copy(
     if not source.exists():
         raise FileNotFoundError(f"Source does not exist: {source}")
 
+    # Refuse to copy symlinks — defence-in-depth against link-following
+    # during a regular sync (an attacker-controlled SKILL.md -> /etc/passwd
+    # in ~/.claude/skills/ would otherwise end up in the git repo).
+    if source.is_symlink():
+        raise ValueError(f"Refusing to copy symlink: {source}")
+
     # Create backup if destination exists and backup requested
     backup_path = None
     if backup and dest.exists():
@@ -124,7 +136,9 @@ def safe_copy(
         try:
             if temp_dest.exists():
                 shutil.rmtree(temp_dest)
-            shutil.copytree(source, temp_dest)
+            # symlinks=True preserves nested symlinks as links rather than dereferencing them,
+            # so a hostile link inside a skill directory can't leak target file contents.
+            shutil.copytree(source, temp_dest, symlinks=True)
             # Remove existing destination if it exists
             if dest.exists():
                 shutil.rmtree(dest)
