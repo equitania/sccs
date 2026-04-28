@@ -404,6 +404,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def get_default_settings_ensure(category_name: str) -> dict[str, Any] | None:
+    """Return the bundled default ``settings_ensure`` block for a category.
+
+    Used by the sync engine to fill in fields that are missing from a
+    user-supplied category — most importantly ``platform_overrides``, which
+    older user config files (generated before v2.20.0) do not carry.
+
+    Returns None if the category is not a bundled default or has no
+    ``settings_ensure`` block.
+    """
+    cat_default = DEFAULT_CONFIG.get("sync_categories", {}).get(category_name)
+    if not cat_default:
+        return None
+    block = cat_default.get("settings_ensure")
+    if not block:
+        return None
+    return block
+
+
 def generate_default_config() -> str:
     """Generate default configuration as YAML string with comments."""
     header = """# SCCS - SkillsCommandsConfigsSync Configuration

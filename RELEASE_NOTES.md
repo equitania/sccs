@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.20.3 (28.04.2026)
+
+### Fixed
+- **`platform_overrides` from bundled defaults are now auto-applied to user configs that pre-date v2.20.0.** Symptom: a Windows user upgrading from v2.19.x or earlier kept seeing `[missing: bc]` in the Claude Code statusline because `~/.claude/settings.json` still pointed at `statusline.sh`. Root cause: `sccs config upgrade` adopts new categories but does not patch new *fields* into existing user-config blocks, so a `claude_statusline` entry written by an older SCCS lacked `settings_ensure.platform_overrides`. The Windows-only override that should have rewritten `statusLine.command` to `pwsh -NoProfile -File ~/.claude/statusline.ps1` therefore never ran. The sync engine now resolves an *effective* `settings_ensure` per category at sync time: when the user has no block, the bundled default is used; when the user has a block but `platform_overrides` is empty or missing the current platform, the missing platform keys are filled in from the default. The user's `entries`, `target_file` and per-platform overrides they did define are never overwritten. Six new tests in `tests/test_settings.py::TestResolveEffectiveSettingsEnsure` cover the four merge scenarios plus the no-default and empty-default fallbacks.
+
+### Added
+- `sccs.config.defaults.get_default_settings_ensure(category_name)` — returns the bundled `settings_ensure` block for a default category, or `None`. Used by the sync engine for the merge above; available for downstream tooling.
+
 ## Version 2.20.2 (28.04.2026)
 
 ### Fixed

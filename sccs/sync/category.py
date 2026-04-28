@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sccs.config.schema import SyncCategory
+from sccs.config.defaults import get_default_settings_ensure
+from sccs.config.schema import SettingsEnsure, SyncCategory
 from sccs.sync.actions import (
     ActionResult,
     ActionType,
@@ -21,6 +22,42 @@ from sccs.sync.state import StateManager
 
 if TYPE_CHECKING:
     from sccs.sync.settings import SettingsEnsureResult
+
+
+def _resolve_effective_settings_ensure(
+    category_name: str,
+    user_block: SettingsEnsure | None,
+) -> SettingsEnsure | None:
+    """Combine a user-provided settings_ensure with the bundled default.
+
+    Handles two upgrade scenarios from pre-v2.20.0 user configs:
+      * The user has no ``settings_ensure`` block at all — adopt the
+        bundled default (so platform_overrides take effect).
+      * The user has a block but ``platform_overrides`` is empty / lacks
+        the current platform — fill in missing platform keys from the
+        default. The user's per-platform overrides still win.
+
+    The user's ``entries``, ``target_file`` and other top-level fields
+    are NEVER overwritten — only platform_overrides are augmented.
+    """
+    default_block = get_default_settings_ensure(category_name)
+    if user_block is None:
+        if default_block is None:
+            return None
+        return SettingsEnsure.model_validate(default_block)
+
+    if not default_block:
+        return user_block
+
+    default_overrides = default_block.get("platform_overrides", {}) or {}
+    if not default_overrides:
+        return user_block
+
+    merged_overrides = dict(default_overrides)
+    merged_overrides.update(user_block.platform_overrides)
+    if merged_overrides == user_block.platform_overrides:
+        return user_block
+    return user_block.model_copy(update={"platform_overrides": merged_overrides})
 
 
 @dataclass
@@ -248,12 +285,15 @@ class CategoryHandler:
                 result.errors += 1
                 result.success = False
 
-        # Run settings ensure hook if configured
-        if self.category.settings_ensure is not None:
+        # Run settings ensure hook if configured. The effective config is
+        # the user's block augmented with bundled defaults — this lets
+        # pre-v2.20 user configs pick up platform_overrides automatically.
+        effective_se = _resolve_effective_settings_ensure(self.name, self.category.settings_ensure)
+        if effective_se is not None:
             from sccs.sync.settings import ensure_settings
 
             result.settings_result = ensure_settings(
-                self.category.settings_ensure,
+                effective_se,
                 dry_run=dry_run,
                 category_name=self.name,
             )

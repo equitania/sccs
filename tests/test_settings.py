@@ -441,3 +441,118 @@ class TestPlatformOverrides:
         assert "existingKey" in result.keys_skipped
         data = json.loads(settings_file.read_text(encoding="utf-8"))
         assert data["existingKey"] == {"original": True}
+
+
+class TestResolveEffectiveSettingsEnsure:
+    """Verify the default-fallback logic that heals pre-v2.20 user configs."""
+
+    def _stub_default(self, monkeypatch, block):
+        from sccs.sync import category as cat_module
+
+        monkeypatch.setattr(cat_module, "get_default_settings_ensure", lambda name: block)
+
+    def test_user_block_none_with_default_adopts_default(self, monkeypatch):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        default_block = {
+            "target_file": "~/.claude/settings.json",
+            "entries": {"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}},
+            "platform_overrides": {"windows": {"statusLine": {"command": "pwsh -File ~/.claude/statusline.ps1"}}},
+        }
+        self._stub_default(monkeypatch, default_block)
+
+        effective = _resolve_effective_settings_ensure("claude_statusline", None)
+
+        assert effective is not None
+        assert effective.entries["statusLine"]["command"] == "~/.claude/statusline.sh"
+        assert "windows" in effective.platform_overrides
+        assert effective.platform_overrides["windows"]["statusLine"]["command"].startswith("pwsh")
+
+    def test_user_block_none_without_default_returns_none(self, monkeypatch):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        self._stub_default(monkeypatch, None)
+        assert _resolve_effective_settings_ensure("custom_cat", None) is None
+
+    def test_user_block_without_overrides_inherits_default_overrides(self, tmp_path, monkeypatch):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        default_block = {
+            "target_file": "~/.claude/settings.json",
+            "entries": {"statusLine": {"command": "~/.claude/statusline.sh"}},
+            "platform_overrides": {"windows": {"statusLine": {"command": "pwsh -File ~/.claude/statusline.ps1"}}},
+        }
+        self._stub_default(monkeypatch, default_block)
+
+        user_block = SettingsEnsure(
+            target_file=str(tmp_path / "settings.json"),
+            entries={"statusLine": {"command": "/custom/path/statusline.sh"}},
+        )
+
+        effective = _resolve_effective_settings_ensure("claude_statusline", user_block)
+
+        assert effective is not None
+        # User's entries are preserved.
+        assert effective.entries["statusLine"]["command"] == "/custom/path/statusline.sh"
+        # User's target_file is preserved.
+        assert effective.target_file == str(tmp_path / "settings.json")
+        # Missing platform_overrides are filled in from the default.
+        assert "windows" in effective.platform_overrides
+        assert effective.platform_overrides["windows"]["statusLine"]["command"].startswith("pwsh")
+
+    def test_user_per_platform_override_wins(self, tmp_path, monkeypatch):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        default_block = {
+            "target_file": "~/.claude/settings.json",
+            "entries": {"statusLine": {"command": "default.sh"}},
+            "platform_overrides": {
+                "windows": {"statusLine": {"command": "default.ps1"}},
+                "macos": {"statusLine": {"command": "default-mac.sh"}},
+            },
+        }
+        self._stub_default(monkeypatch, default_block)
+
+        user_block = SettingsEnsure(
+            target_file=str(tmp_path / "settings.json"),
+            entries={"statusLine": {"command": "user.sh"}},
+            platform_overrides={"windows": {"statusLine": {"command": "user-custom.ps1"}}},
+        )
+
+        effective = _resolve_effective_settings_ensure("claude_statusline", user_block)
+
+        assert effective is not None
+        # User's per-platform override wins for Windows.
+        assert effective.platform_overrides["windows"]["statusLine"]["command"] == "user-custom.ps1"
+        # macOS comes from default, since user didn't define it.
+        assert effective.platform_overrides["macos"]["statusLine"]["command"] == "default-mac.sh"
+
+    def test_user_block_returned_unchanged_when_no_default(self, tmp_path, monkeypatch):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        self._stub_default(monkeypatch, None)
+
+        user_block = SettingsEnsure(
+            target_file=str(tmp_path / "settings.json"),
+            entries={"foo": "bar"},
+            platform_overrides={"windows": {"foo": "baz"}},
+        )
+
+        effective = _resolve_effective_settings_ensure("custom_cat", user_block)
+        assert effective is user_block
+
+    def test_user_block_returned_unchanged_when_default_has_no_overrides(self, tmp_path, monkeypatch):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        self._stub_default(
+            monkeypatch,
+            {"target_file": "~/x", "entries": {"k": "v"}, "platform_overrides": {}},
+        )
+
+        user_block = SettingsEnsure(
+            target_file=str(tmp_path / "settings.json"),
+            entries={"foo": "bar"},
+        )
+
+        effective = _resolve_effective_settings_ensure("claude_statusline", user_block)
+        assert effective is user_block
