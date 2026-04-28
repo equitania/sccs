@@ -224,6 +224,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "conf.d/*secret*.fish",
                 "*.macos.fish",
             ],
+            "platforms": ["macos", "linux"],
         },
         # Fish Shell macOS Config (conf.d/*.macos.fish)
         "fish_config_macos": {
@@ -249,6 +250,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "item_pattern": "*.fish",
             "include": ["*.fish"],
             "exclude": ["_*.fish", "*.local.fish", "macos/*"],
+            "platforms": ["macos", "linux"],
         },
         # Fish Functions macOS (functions/macos/*.fish)
         "fish_functions_macos": {
@@ -262,6 +264,31 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "include": ["*.fish"],
             "exclude": [],
             "platforms": ["macos"],
+        },
+        # PowerShell Profile (Windows-only, disabled by default)
+        # NOTE: With OneDrive sync enabled, Documents may live under
+        # ~/OneDrive/Documents/PowerShell — override local_path in the user
+        # config if that applies.
+        "powershell_profile": {
+            "enabled": False,
+            "description": "PowerShell 7 profile and modular conf.d/ scripts",
+            "local_path": "~/Documents/PowerShell",
+            "repo_path": ".config/powershell",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "include": [
+                "Microsoft.PowerShell_profile.ps1",
+                "conf.d/*.ps1",
+                "functions/*.ps1",
+                "README.md",
+            ],
+            "exclude": [
+                "*.local.ps1",
+                "*secret*.ps1",
+                "*.bak",
+                "*credential*.ps1",
+            ],
+            "platforms": ["windows"],
         },
         # Starship Prompt
         "starship_config": {

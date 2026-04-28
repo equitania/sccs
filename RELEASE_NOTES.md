@@ -1,5 +1,34 @@
 # Release Notes
 
+## Version 2.19.1 (28.04.2026)
+
+### Fixed
+- **Windows: `sccs sync` aborted writing JSON files (e.g. `~/.claude/settings.json`)** with `WinError 183: Cannot create a file when that file already exists`. Root cause: `atomic_write()` and `safe_copy()` used `os.rename()` / `Path.rename()` to swap the staged temp file into place, which is non-atomic on Windows when the target already exists. Both helpers now use `os.replace()`, which atomically overwrites on POSIX *and* Windows. Affects every category whose sync touches an existing file on Windows; the `claude_statusline` settings_ensure step is the most visible path.
+- New `tests/test_paths_atomic.py` (12 tests) including a static guard that fails the suite if `os.rename(` is reintroduced into `sccs/utils/paths.py`.
+
+### Security
+- The Fish→PowerShell converter now skips files matching `*secret*`, `*secrets*`, `*token*`, `*credential*`, `*password*` and the explicit `99-secrets.fish` filename so credential material can never leak from a private Fish config into a generated `.ps1` artefact. Two regression tests in `tests/test_convert.py` (`test_skips_secret_files`, plus updated skip count) pin this behaviour.
+
+### Changed
+- `sccs/convert/rules.py`: `set -gx VAR "$OTHER_VAR"` now correctly rewrites `$OTHER_VAR` (a Fish env-var reference) to `$env:OTHER_VAR`, while preserving PowerShell built-ins (`$HOME`, `$PWD`, `$PROFILE`, `$PSScriptRoot`, `$args`, `$_`). Previously the rewrite was hard-coded to `$HOME` only, leaving every other `$VAR` reference broken on Windows.
+
+## Version 2.19.0 (28.04.2026)
+
+### Added
+- **Windows / PowerShell support.** SCCS now runs cleanly on Windows 11 with PowerShell 7+. Fish-only categories (`fish_config`, `fish_functions`) are filtered out automatically via the existing `platforms` mechanism so no `~/.config/fish/` is needed.
+- **New default category `powershell_profile`** (disabled by default, `platforms: ["windows"]`). Local path defaults to `~/Documents/PowerShell`; OneDrive users can override `local_path` in their config when Documents lives under OneDrive.
+- **New CLI command `sccs convert fish-to-pwsh`.** Generates a modular PowerShell profile (`Microsoft.PowerShell_profile.ps1` + `conf.d/*.ps1` + `functions/*.ps1`) from `~/.config/fish/`. Aliases (`alias name=value`), env vars (`set -gx`), `fish_add_path` and abbreviations are translated; Fish functions are emitted as commented stubs because their syntax (`begin/end`, `string match`, `$argv[N]`) is not auto-portable. `--src`, `--dst`, `--force`, `--dry-run` supported.
+- **Startup platform hint.** When categories are skipped on the current OS due to `platforms` filtering, `sccs` prints a one-line dimmed hint (e.g. `ℹ Plattform: windows — Fish nicht verfügbar — übersprungen: fish_config, fish_functions`). Suppressed in non-TTY contexts.
+- New module `sccs/convert/` with `FishToPwshConverter`, regex-based `rules.py`, and `templates.py` for the generated profile entry point and README.
+- `sccs.utils.platform` gains `is_shell_available()`, `detect_shell_for_category()`, `get_unavailable_shells_for_enabled_categories()`, and `get_platform_skipped_categories()`.
+
+### Changed
+- `fish_config` and `fish_functions` defaults now declare `platforms: ["macos", "linux"]` so they are skipped on Windows. No effect on existing macOS/Linux setups.
+
+### Tests
+- 17 new conversion tests (`tests/test_convert.py`) covering rule pipeline, directory walking, dry-run behaviour, backup-on-overwrite, and stub emission.
+- 13 new platform tests (`tests/test_platform_utils.py`) covering shell detection and platform-skipped category reporting.
+
 ## Version 2.18.0 (24.04.2026)
 
 ### Added

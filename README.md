@@ -525,7 +525,64 @@ fish_config_macos:
   item_pattern: "*.macos.fish"
 ```
 
-Erkennung: `Darwin` → `macos`, `Linux` → `linux`. Kategorien mit `platforms: null` synchronisieren auf allen Plattformen.
+Erkennung: `Darwin` → `macos`, `Linux` → `linux`, `Windows` → `windows`. Kategorien mit `platforms: null` synchronisieren auf allen Plattformen.
+
+Wenn beim Start Kategorien aufgrund des `platforms`-Filters auf der aktuellen Plattform übersprungen werden, gibt SCCS einen einzeiligen Hinweis aus (nur in interaktiven Terminals, nicht in Pipes/CI):
+
+```
+ℹ Plattform: windows — Fish nicht verfügbar — übersprungen: fish_config, fish_functions
+  Tipp: `sccs convert fish-to-pwsh` generiert PowerShell-Aliasse aus den Fish-Configs
+```
+
+### Windows / PowerShell-Support
+
+Auf Windows 11 mit PowerShell 7+ läuft SCCS direkt:
+
+```powershell
+# Installation
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+uv tool install sccs
+
+# Konfiguration anlegen
+sccs config init
+
+# PowerShell-Profile-Kategorie aktivieren und syncen
+sccs categories enable powershell_profile
+sccs sync --category powershell_profile
+```
+
+Fish-Kategorien (`fish_config`, `fish_functions`) sind durch `platforms: ["macos", "linux"]` automatisch ausgeschlossen — kein Fehler, kein Sync-Versuch.
+
+#### Fish → PowerShell Konvertierung
+
+Auf macOS/Linux generiert ein einmaliger CLI-Aufruf ein modulares PowerShell-Profil aus deiner Fish-Konfiguration:
+
+```bash
+# Vorschau
+sccs convert fish-to-pwsh --dry-run
+
+# Konvertieren ins Sync-Repo
+sccs convert fish-to-pwsh
+
+# Ergebnis prüfen
+ls ~/gitbase/sccs-sync/.config/powershell/
+# Microsoft.PowerShell_profile.ps1
+# conf.d/  functions/  README.md
+```
+
+Was wird konvertiert:
+
+| Fish | PowerShell | Hinweis |
+|---|---|---|
+| `alias name=value` | `Set-Alias -Name name -Value value -Scope Global -Force` | Wert ohne Whitespace |
+| `alias name='cmd args'` | `function name { cmd args @args }` | Mit Argumenten — `@args`-Splatting |
+| `set -gx VAR value` | `$env:VAR = "value"` | `$HOME` bleibt `$HOME` |
+| `fish_add_path /opt/bin` | duplikatsicheres `$env:PATH`-Prepend | Nutzt `[IO.Path]::PathSeparator` |
+| `abbr -a name expansion` | `Set-Alias` oder `function` | Kürzeste Semantik |
+| `*.macos.fish`, `*.linux.fish` | übersprungen | Plattform-spezifisch |
+| Fish-Funktionen (`function … end`) | Stub mit Original als Kommentar | Manuell portieren |
+
+Nach Edits in `~/.config/fish/` einfach `sccs convert fish-to-pwsh --force` erneut aufrufen — bestehende Zieldateien werden mit `.bak` gesichert.
 
 ### Architektur
 
@@ -1107,7 +1164,64 @@ fish_config_macos:
   item_pattern: "*.macos.fish"
 ```
 
-Detection: `Darwin` → `macos`, `Linux` → `linux`. Categories with `platforms: null` sync on all platforms.
+Detection: `Darwin` → `macos`, `Linux` → `linux`, `Windows` → `windows`. Categories with `platforms: null` sync on all platforms.
+
+When categories are skipped on the current platform due to the `platforms` filter, SCCS prints a one-line dimmed hint at startup (only in interactive terminals, not in pipes/CI):
+
+```
+ℹ Plattform: windows — Fish nicht verfügbar — übersprungen: fish_config, fish_functions
+  Tipp: `sccs convert fish-to-pwsh` generiert PowerShell-Aliasse aus den Fish-Configs
+```
+
+### Windows / PowerShell Support
+
+SCCS runs natively on Windows 11 with PowerShell 7+:
+
+```powershell
+# Install
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+uv tool install sccs
+
+# Initialize config
+sccs config init
+
+# Enable and sync the PowerShell profile category
+sccs categories enable powershell_profile
+sccs sync --category powershell_profile
+```
+
+Fish categories (`fish_config`, `fish_functions`) carry `platforms: ["macos", "linux"]` and are skipped automatically on Windows — no error, no sync attempt.
+
+#### Fish → PowerShell Conversion
+
+On macOS/Linux a one-shot CLI command generates a modular PowerShell profile from your Fish configuration:
+
+```bash
+# Preview
+sccs convert fish-to-pwsh --dry-run
+
+# Convert into the sync repo
+sccs convert fish-to-pwsh
+
+# Inspect
+ls ~/gitbase/sccs-sync/.config/powershell/
+# Microsoft.PowerShell_profile.ps1
+# conf.d/  functions/  README.md
+```
+
+Conversion rules:
+
+| Fish | PowerShell | Note |
+|---|---|---|
+| `alias name=value` | `Set-Alias -Name name -Value value -Scope Global -Force` | Single-word value |
+| `alias name='cmd args'` | `function name { cmd args @args }` | With args — uses `@args` splatting |
+| `set -gx VAR value` | `$env:VAR = "value"` | `$HOME` stays `$HOME` |
+| `fish_add_path /opt/bin` | duplicate-aware `$env:PATH` prepend | Uses `[IO.Path]::PathSeparator` |
+| `abbr -a name expansion` | `Set-Alias` or `function` | Closest semantic fit |
+| `*.macos.fish`, `*.linux.fish` | skipped | Platform-specific |
+| Fish functions (`function … end`) | Stub with original as comment | Port by hand |
+
+After editing Fish files, just rerun `sccs convert fish-to-pwsh --force` — existing target files are backed up as `.bak`.
 
 ### Architecture
 

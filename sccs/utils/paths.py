@@ -142,7 +142,9 @@ def safe_copy(
             # Remove existing destination if it exists
             if dest.exists():
                 shutil.rmtree(dest)
-            temp_dest.rename(dest)
+            # os.replace is atomic and overwrites on POSIX *and* Windows,
+            # whereas Path.rename fails under Windows when dest exists.
+            os.replace(temp_dest, dest)
         except (FileExistsError, PermissionError, OSError):
             # Cleanup on failure
             if temp_dest.exists():
@@ -155,8 +157,9 @@ def safe_copy(
                 shutil.copy2(source, temp_dest)
             else:
                 shutil.copy(source, temp_dest)
-            # Atomic rename
-            temp_dest.rename(dest)
+            # os.replace is atomic and overwrites on POSIX *and* Windows,
+            # whereas Path.rename fails under Windows when dest exists.
+            os.replace(temp_dest, dest)
         except (FileExistsError, PermissionError, OSError):
             # Cleanup on failure
             if temp_dest.exists():
@@ -214,8 +217,10 @@ def atomic_write(path: Path, content: str | bytes, *, encoding: str = "utf-8") -
         else:
             with os.fdopen(fd, "wb") as f:
                 f.write(content)
-        # Atomic rename
-        os.rename(temp_path, path)
+        # os.replace is atomic and overwrites on POSIX *and* Windows,
+        # whereas os.rename raises FileExistsError under Windows when the
+        # target already exists (WinError 183).
+        os.replace(temp_path, path)
     except Exception:
         # Cleanup on failure
         try:

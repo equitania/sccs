@@ -35,6 +35,10 @@ from sccs.sync import SyncEngine
 from sccs.sync.actions import SyncAction
 from sccs.sync.state import StateManager
 from sccs.utils.logging import configure_logging
+from sccs.utils.platform import (
+    get_current_platform,
+    get_platform_skipped_categories,
+)
 
 # Global console instance
 _console: Console | None = None
@@ -93,12 +97,19 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
     # comes from config.output.log_file when a config exists, otherwise the
     # CLI just logs to the console stream at the chosen verbosity.
     log_file: str | None = None
+    cfg = None
     try:
         cfg = load_config()
         log_file = cfg.output.log_file
     except Exception:  # noqa: BLE001 — config errors are surfaced elsewhere
         pass
     configure_logging(log_file=log_file, verbose=verbose)
+
+    # One-shot platform hint: when categories are skipped on this OS due to
+    # `platforms` filtering, surface that to interactive users so they don't
+    # silently miss configurations. Skipped on pipe/CI to keep scripts clean.
+    if cfg is not None and sys.stdout.isatty() and not no_color:
+        _print_platform_hint(console, cfg)
 
 
 @cli.command()
@@ -738,6 +749,131 @@ def categories_disable(ctx: click.Context, category_name: str) -> None:
         sys.exit(1)
 
 
+@cli.group("convert")
+def convert_group() -> None:
+    """Convert configurations between shell formats.
+
+    \b
+    Generates PowerShell-equivalent profile files from your existing
+    Fish shell configuration so the same aliases/env vars work on Windows.
+
+    \b
+    Examples:
+        sccs convert fish-to-pwsh              Convert ~/.config/fish to repo
+        sccs convert fish-to-pwsh --dry-run    Preview without writing files
+        sccs convert fish-to-pwsh --force      Overwrite existing PS files
+    """
+
+
+@convert_group.command("fish-to-pwsh")
+@click.option(
+    "--src",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Source Fish config dir (default: ~/.config/fish)",
+)
+@click.option(
+    "--dst",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Destination dir (default: <repo>/.config/powershell)",
+)
+@click.option("--force", is_flag=True, help="Overwrite existing PowerShell files")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview without writing files")
+@click.pass_context
+def convert_fish_to_pwsh(
+    ctx: click.Context,
+    src: Path | None,
+    dst: Path | None,
+    force: bool,
+    dry_run: bool,
+) -> None:
+    """Generate a PowerShell profile from Fish shell configuration.
+
+    \b
+    Converts:
+      - alias name=value             → Set-Alias / function with @args
+      - set -gx VAR value            → $env:VAR = "value"
+      - fish_add_path /some/dir      → duplicate-aware $env:PATH prepend
+      - abbr -a name expansion       → Set-Alias / function
+
+    \b
+    Fish function bodies (~/.config/fish/functions/*.fish) are emitted
+    as commented stubs because their syntax does not map to PowerShell
+    automatically. Port them by hand in the generated functions/*.ps1
+    files; the original Fish source is preserved as a reference.
+
+    \b
+    Files matching *.macos.fish, *.linux.fish or *.local.fish are skipped.
+    """
+    from sccs.convert import FishToPwshConverter
+
+    console = ctx.obj["console"]
+
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        console.print_error(str(e))
+        console.print_info("Run 'sccs config init' first")
+        sys.exit(1)
+
+    src_path = src.expanduser() if src else Path("~/.config/fish").expanduser()
+    if dst is not None:
+        dst_path = dst.expanduser()
+    else:
+        repo_path = Path(config.repository.path).expanduser()
+        dst_path = repo_path / ".config" / "powershell"
+
+    if not src_path.exists():
+        console.print_error(f"Source directory not found: {src_path}")
+        sys.exit(1)
+
+    # Refuse to clobber an existing destination unless --force or --dry-run.
+    if not dry_run and dst_path.exists() and any(dst_path.iterdir()) and not force:
+        console.print_warning(f"Destination is not empty: {dst_path}")
+        console.print_info("Use --force to overwrite (creates .bak files), or --dry-run to preview")
+        sys.exit(1)
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    console.print(f"[bold]Source:[/bold] {src_path}")
+    console.print(f"[bold]Target:[/bold] {dst_path}\n")
+
+    converter = FishToPwshConverter(src_path, dst_path)
+    report = converter.convert_directory(dry_run=dry_run)
+
+    # Summary table
+    console.print("[bold]Conversion summary:[/bold]")
+    console.print(f"  Files processed:       {report.files_processed}")
+    console.print(f"  Files skipped:         {report.files_skipped}")
+    console.print(f"  Aliases (Set-Alias):   {report.aliases_converted}")
+    console.print(f"  Aliases (function):    {report.functions_wrapped}")
+    console.print(f"  Env vars:              {report.env_vars_converted}")
+    console.print(f"  PATH lines:            {report.path_lines_converted}")
+    console.print(f"  Function stubs:        {report.functions_stubbed}")
+    console.print(f"  Fish-only passthrough: {report.fish_lines_passthrough}")
+
+    if report.warnings:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for warn in report.warnings:
+            console.print(f"  • {warn}")
+
+    if dry_run:
+        console.print(
+            f"\n[dim]Would write {len(report.written_files)} file(s) to {dst_path}[/dim]"
+        )
+        return
+
+    console.print_success(
+        f"\nWrote {len(report.written_files)} file(s) to {dst_path}"
+    )
+    console.print_info(
+        "Next: `sccs categories enable powershell_profile` "
+        "and `sccs sync --category powershell_profile` on Windows"
+    )
+
+
 @cli.group("docs")
 def docs_group() -> None:
     """Documentation generation commands.
@@ -991,6 +1127,50 @@ def import_cmd(
         for error in result.errors:
             console.print(f"  [red]•[/red] {error}")
         sys.exit(1)
+
+
+_PLATFORM_HINT_PRINTED: bool = False
+
+
+def _print_platform_hint(console: Console, cfg) -> None:
+    """
+    Print a one-line hint when platform-restricted categories are skipped.
+
+    Only emits the hint once per process (subcommands invoked through
+    Click's nested groups otherwise repeat it). Stays silent when no
+    categories are filtered out.
+    """
+    global _PLATFORM_HINT_PRINTED
+    if _PLATFORM_HINT_PRINTED:
+        return
+    _PLATFORM_HINT_PRINTED = True
+
+    skipped = get_platform_skipped_categories(cfg)
+    if not skipped:
+        return
+
+    current = get_current_platform()
+    parts: list[str] = []
+    extra_tip: str | None = None
+    for shell, names in skipped.items():
+        names_str = ", ".join(sorted(names))
+        if shell == "fish":
+            parts.append(f"Fish nicht verfügbar — übersprungen: {names_str}")
+            if current == "windows":
+                extra_tip = (
+                    "Tipp: `sccs convert fish-to-pwsh` generiert "
+                    "PowerShell-Aliasse aus den Fish-Configs"
+                )
+        elif shell == "powershell":
+            parts.append(f"PowerShell nicht verfügbar — übersprungen: {names_str}")
+        elif shell == "other":
+            parts.append(f"Übersprungen (Plattform-Filter): {names_str}")
+        else:
+            parts.append(f"{shell} nicht verfügbar — übersprungen: {names_str}")
+
+    console.print(f"[dim]ℹ Plattform: {current} — {'; '.join(parts)}[/dim]")
+    if extra_tip:
+        console.print(f"[dim]  {extra_tip}[/dim]")
 
 
 def _run_migration_check(
