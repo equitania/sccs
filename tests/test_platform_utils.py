@@ -38,10 +38,7 @@ class TestShellDetection:
         assert detect_shell_for_category("fish_config", "~/.config/fish") == "fish"
 
     def test_detects_powershell_from_path(self) -> None:
-        assert (
-            detect_shell_for_category("powershell_profile", "~/Documents/PowerShell")
-            == "powershell"
-        )
+        assert detect_shell_for_category("powershell_profile", "~/Documents/PowerShell") == "powershell"
 
     def test_returns_none_for_unrelated_category(self) -> None:
         assert detect_shell_for_category("claude_skills", "~/.claude/skills") is None
@@ -59,9 +56,7 @@ class TestShellDetection:
     @patch("sccs.utils.platform.shutil.which")
     def test_powershell_accepts_pwsh_or_powershell(self, mock_which) -> None:
         # Map: pwsh missing, powershell present → still True overall.
-        mock_which.side_effect = lambda name: (
-            "/usr/local/bin/powershell" if name == "powershell" else None
-        )
+        mock_which.side_effect = lambda name: "/usr/local/bin/powershell" if name == "powershell" else None
         assert is_shell_available("powershell") is True
 
 
@@ -119,16 +114,12 @@ class TestPlatformSkippedCategories:
         assert "powershell_profile" in skipped["powershell"]
 
     @patch("sccs.utils.platform.get_current_platform", return_value="linux")
-    def test_linux_skips_powershell_keeps_fish(
-        self, _mock, config_with_fish_and_ps
-    ) -> None:
+    def test_linux_skips_powershell_keeps_fish(self, _mock, config_with_fish_and_ps) -> None:
         skipped = get_platform_skipped_categories(config_with_fish_and_ps)
         assert "powershell" in skipped
         assert "fish" not in skipped
 
-    def test_categories_without_platform_filter_never_skipped(
-        self, config_with_fish_and_ps
-    ) -> None:
+    def test_categories_without_platform_filter_never_skipped(self, config_with_fish_and_ps) -> None:
         skipped = get_platform_skipped_categories(config_with_fish_and_ps)
         # claude_skills has no platforms list → never appears in skipped.
         for names in skipped.values():
@@ -138,12 +129,8 @@ class TestPlatformSkippedCategories:
 class TestUnavailableShellsForEnabled:
     @patch("sccs.utils.platform.shutil.which", return_value=None)
     @patch("sccs.utils.platform.get_current_platform", return_value="linux")
-    def test_reports_missing_fish(
-        self, _plat, _which, config_with_fish_and_ps
-    ) -> None:
+    def test_reports_missing_fish(self, _plat, _which, config_with_fish_and_ps) -> None:
         # On Linux fish_config is enabled (platforms includes linux), but the
         # binary isn't available. Should be reported.
-        unavailable = get_unavailable_shells_for_enabled_categories(
-            config_with_fish_and_ps
-        )
+        unavailable = get_unavailable_shells_for_enabled_categories(config_with_fish_and_ps)
         assert "fish" in unavailable

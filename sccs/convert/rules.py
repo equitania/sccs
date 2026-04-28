@@ -72,9 +72,7 @@ ABBR_PATTERN = re.compile(
 # Fish variable references we want to keep as PowerShell built-ins (no $env:
 # prefix). PowerShell exposes these directly. Everything else we treat as an
 # env-var reference and rewrite `$FOO` -> `$env:FOO`.
-_PS_BUILTIN_VARS: frozenset[str] = frozenset(
-    {"HOME", "PWD", "PROFILE", "PSScriptRoot", "args", "_"}
-)
+_PS_BUILTIN_VARS: frozenset[str] = frozenset({"HOME", "PWD", "PROFILE", "PSScriptRoot", "args", "_"})
 
 # Pattern for `$VAR` or `${VAR}` references in shell strings.
 _VAR_REF_PATTERN = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
@@ -180,7 +178,7 @@ def convert_fish_add_path(line: str) -> ConversionResult | None:
     rewritten = _rewrite_vars(value).replace('"', '`"')
 
     ps = (
-        f'if (-not ($env:PATH -split [IO.Path]::PathSeparator | '
+        f"if (-not ($env:PATH -split [IO.Path]::PathSeparator | "
         f'Where-Object {{ $_ -eq "{rewritten}" }})) '
         f'{{ $env:PATH = "{rewritten}" + [IO.Path]::PathSeparator + $env:PATH }}'
     )
@@ -203,7 +201,7 @@ def convert_abbr(line: str) -> ConversionResult | None:
         ps = f"Set-Alias -Name {name} -Value {parts[0]} -Scope Global -Force"
         return ConversionResult(powershell=ps, kind="alias")
     cmd, *rest = parts
-    ps = f'function {name} {{ {cmd} {" ".join(rest)} @args }}'
+    ps = f"function {name} {{ {cmd} {' '.join(rest)} @args }}"
     return ConversionResult(powershell=ps, kind="function")
 
 

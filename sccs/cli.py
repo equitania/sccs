@@ -860,17 +860,12 @@ def convert_fish_to_pwsh(
             console.print(f"  • {warn}")
 
     if dry_run:
-        console.print(
-            f"\n[dim]Would write {len(report.written_files)} file(s) to {dst_path}[/dim]"
-        )
+        console.print(f"\n[dim]Would write {len(report.written_files)} file(s) to {dst_path}[/dim]")
         return
 
-    console.print_success(
-        f"\nWrote {len(report.written_files)} file(s) to {dst_path}"
-    )
+    console.print_success(f"\nWrote {len(report.written_files)} file(s) to {dst_path}")
     console.print_info(
-        "Next: `sccs categories enable powershell_profile` "
-        "and `sccs sync --category powershell_profile` on Windows"
+        "Next: `sccs categories enable powershell_profile` and `sccs sync --category powershell_profile` on Windows"
     )
 
 
@@ -1157,10 +1152,7 @@ def _print_platform_hint(console: Console, cfg) -> None:
         if shell == "fish":
             parts.append(f"Fish nicht verfügbar — übersprungen: {names_str}")
             if current == "windows":
-                extra_tip = (
-                    "Tipp: `sccs convert fish-to-pwsh` generiert "
-                    "PowerShell-Aliasse aus den Fish-Configs"
-                )
+                extra_tip = "Tipp: `sccs convert fish-to-pwsh` generiert PowerShell-Aliasse aus den Fish-Configs"
         elif shell == "powershell":
             parts.append(f"PowerShell nicht verfügbar — übersprungen: {names_str}")
         elif shell == "other":

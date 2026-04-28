@@ -144,17 +144,12 @@ def fish_tree(tmp_path: Path) -> Path:
     fns.mkdir(parents=True)
 
     (confd / "00-env.fish").write_text(
-        "# Env vars\n"
-        'set -gx GITBASE_PATH "$HOME/gitbase"\n'
-        "set -gx FOO bar\n",
+        '# Env vars\nset -gx GITBASE_PATH "$HOME/gitbase"\nset -gx FOO bar\n',
         encoding="utf-8",
     )
 
     (confd / "31-aliases-git.fish").write_text(
-        "# Git aliases\n"
-        "alias g='git'\n"
-        "alias gst='git status'\n"
-        "alias gcm='git commit -m'\n",
+        "# Git aliases\nalias g='git'\nalias gst='git status'\nalias gcm='git commit -m'\n",
         encoding="utf-8",
     )
 
@@ -171,9 +166,7 @@ def fish_tree(tmp_path: Path) -> Path:
     )
 
     (fns / "mkcd.fish").write_text(
-        'function mkcd --description "Create dir and cd"\n'
-        "    mkdir -p $argv[1] && cd $argv[1]\n"
-        "end\n",
+        'function mkcd --description "Create dir and cd"\n    mkdir -p $argv[1] && cd $argv[1]\nend\n',
         encoding="utf-8",
     )
 
@@ -262,9 +255,7 @@ class TestConverterDirectory:
         # Report still tracks what would have been written.
         assert report.files_processed > 0
 
-    def test_existing_file_is_backed_up(
-        self, fish_tree: Path, tmp_path: Path
-    ) -> None:
+    def test_existing_file_is_backed_up(self, fish_tree: Path, tmp_path: Path) -> None:
         dst = tmp_path / "powershell"
         target = dst / "conf.d" / "00-env.ps1"
         target.parent.mkdir(parents=True)
@@ -285,9 +276,7 @@ class TestConverterDirectory:
         assert readme.exists()
         assert "PowerShell Profile" in readme.read_text(encoding="utf-8")
 
-    def test_existing_readme_not_clobbered(
-        self, fish_tree: Path, tmp_path: Path
-    ) -> None:
+    def test_existing_readme_not_clobbered(self, fish_tree: Path, tmp_path: Path) -> None:
         dst = tmp_path / "powershell"
         dst.mkdir()
         readme = dst / "README.md"

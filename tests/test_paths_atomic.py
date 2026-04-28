@@ -78,9 +78,7 @@ class TestNoLegacyRename:
         text = path.read_text(encoding="utf-8")
 
         # Strip comments so we only check executable lines.
-        executable = "\n".join(
-            line for line in text.splitlines() if not line.lstrip().startswith("#")
-        )
+        executable = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
 
         # No bare `os.rename(` or `.rename(` calls (those don't overwrite on Windows).
         assert "os.rename(" not in executable
@@ -88,9 +86,7 @@ class TestNoLegacyRename:
         # the atomic-write paths by checking that os.replace is used.
         assert executable.count("os.replace(") >= 3
 
-    def test_atomic_write_works_when_dest_is_readonly_target_dir(
-        self, tmp_path: Path
-    ) -> None:
+    def test_atomic_write_works_when_dest_is_readonly_target_dir(self, tmp_path: Path) -> None:
         # Sanity: writing into a fresh dir works (no surprises).
         target = tmp_path / "subdir" / "f.txt"
         atomic_write(target, "content")
@@ -98,9 +94,7 @@ class TestNoLegacyRename:
 
 
 @pytest.mark.parametrize("size", [0, 1, 1024, 65536])
-def test_atomic_write_preserves_content_at_various_sizes(
-    tmp_path: Path, size: int
-) -> None:
+def test_atomic_write_preserves_content_at_various_sizes(tmp_path: Path, size: int) -> None:
     """Make sure os.replace doesn't truncate at boundary sizes."""
     target = tmp_path / "varied.bin"
     payload = b"x" * size

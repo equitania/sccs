@@ -80,12 +80,7 @@ class ConversionReport:
 
     @property
     def total_converted(self) -> int:
-        return (
-            self.aliases_converted
-            + self.functions_wrapped
-            + self.env_vars_converted
-            + self.path_lines_converted
-        )
+        return self.aliases_converted + self.functions_wrapped + self.env_vars_converted + self.path_lines_converted
 
 
 class FishToPwshConverter:
