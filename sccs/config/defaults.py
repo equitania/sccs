@@ -176,7 +176,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "sync_mode": "bidirectional",
             "item_type": "file",
             "item_pattern": "statusline.*",
-            "include": ["statusline.sh", "statusline.py", "statusline.fish"],
+            "include": [
+                "statusline.sh",
+                "statusline.py",
+                "statusline.ps1",
+                "statusline.fish",
+            ],
             "exclude": [],
             "settings_ensure": {
                 "target_file": "~/.claude/settings.json",
@@ -184,6 +189,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
                     "statusLine": {
                         "type": "command",
                         "command": "~/.claude/statusline.sh",
+                    }
+                },
+                # Per-platform overrides: Windows users don't have bash/jq/bc,
+                # so route the statusLine through PowerShell's native runner.
+                # The override OVERWRITES existing values on the target platform.
+                "platform_overrides": {
+                    "windows": {
+                        "statusLine": {
+                            "type": "command",
+                            "command": "pwsh -NoProfile -File ~/.claude/statusline.ps1",
+                        }
                     }
                 },
                 "create_if_missing": True,

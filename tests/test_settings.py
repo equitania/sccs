@@ -269,3 +269,175 @@ class TestEmptyEntries:
         assert not result.keys_added
         assert not result.keys_skipped
         assert settings_file.read_text(encoding="utf-8") == original_content
+
+
+class TestPlatformOverrides:
+    """Per-platform overrides take precedence over base entries on a match."""
+
+    def _make_with_override(
+        self,
+        target: Path,
+        entries: dict,
+        platform_overrides: dict,
+    ) -> SettingsEnsure:
+        return SettingsEnsure(
+            target_file=str(target),
+            entries=entries,
+            platform_overrides=platform_overrides,
+            create_if_missing=True,
+            backup_before_modify=False,
+        )
+
+    def test_override_replaces_existing_value_on_matching_platform(
+        self, settings_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = settings_dir / "settings.json"
+        target.write_text(
+            json.dumps(
+                {
+                    "statusLine": {
+                        "type": "command",
+                        "command": "~/.claude/statusline.sh",
+                    }
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr("sccs.sync.settings.get_current_platform", lambda: "windows")
+
+        config = self._make_with_override(
+            target,
+            entries={"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}},
+            platform_overrides={
+                "windows": {
+                    "statusLine": {
+                        "type": "command",
+                        "command": "pwsh -File ~/.claude/statusline.ps1",
+                    }
+                }
+            },
+        )
+
+        result = ensure_settings(config)
+
+        assert result.success
+        assert "statusLine" in result.keys_overridden
+        data = json.loads(target.read_text(encoding="utf-8"))
+        assert data["statusLine"]["command"] == "pwsh -File ~/.claude/statusline.ps1"
+
+    def test_override_ignored_on_non_matching_platform(
+        self, settings_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = settings_dir / "settings.json"
+        target.write_text(
+            json.dumps(
+                {
+                    "statusLine": {
+                        "type": "command",
+                        "command": "~/.claude/statusline.sh",
+                    }
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr("sccs.sync.settings.get_current_platform", lambda: "macos")
+
+        config = self._make_with_override(
+            target,
+            entries={"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}},
+            platform_overrides={
+                "windows": {
+                    "statusLine": {
+                        "type": "command",
+                        "command": "pwsh -File ~/.claude/statusline.ps1",
+                    }
+                }
+            },
+        )
+
+        result = ensure_settings(config)
+
+        assert result.success
+        assert "statusLine" not in result.keys_overridden
+        data = json.loads(target.read_text(encoding="utf-8"))
+        # Existing macOS value untouched.
+        assert data["statusLine"]["command"] == "~/.claude/statusline.sh"
+
+    def test_override_deep_merges_nested_dict(self, settings_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        target = settings_dir / "settings.json"
+        target.write_text(
+            json.dumps(
+                {
+                    "statusLine": {
+                        "type": "command",
+                        "command": "~/.claude/statusline.sh",
+                        "extra": "preserve me",
+                    }
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr("sccs.sync.settings.get_current_platform", lambda: "windows")
+
+        config = self._make_with_override(
+            target,
+            entries={},
+            platform_overrides={"windows": {"statusLine": {"command": "pwsh -File ~/.claude/statusline.ps1"}}},
+        )
+
+        result = ensure_settings(config)
+
+        assert result.success
+        data = json.loads(target.read_text(encoding="utf-8"))
+        # Override replaces "command" but preserves siblings.
+        assert data["statusLine"]["command"] == "pwsh -File ~/.claude/statusline.ps1"
+        assert data["statusLine"]["type"] == "command"
+        assert data["statusLine"]["extra"] == "preserve me"
+
+    def test_override_creates_key_if_missing(self, settings_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        target = settings_dir / "settings.json"
+        target.write_text("{}\n", encoding="utf-8")
+
+        monkeypatch.setattr("sccs.sync.settings.get_current_platform", lambda: "windows")
+
+        config = self._make_with_override(
+            target,
+            entries={},
+            platform_overrides={"windows": {"winOnly": {"foo": "bar"}}},
+        )
+
+        result = ensure_settings(config)
+
+        assert result.success
+        assert "winOnly" in result.keys_added
+        data = json.loads(target.read_text(encoding="utf-8"))
+        assert data["winOnly"] == {"foo": "bar"}
+
+    def test_no_overrides_means_legacy_behaviour(self, settings_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # When no platform_overrides are set, behaviour matches the original
+        # non-destructive merge (existing keys never overwritten).
+        monkeypatch.setattr("sccs.sync.settings.get_current_platform", lambda: "windows")
+        existing = json.loads(settings_file.read_text(encoding="utf-8"))
+        existing["existingKey"] = {"original": True}
+        settings_file.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+
+        config = SettingsEnsure(
+            target_file=str(settings_file),
+            entries={"existingKey": {"new": True}},
+            backup_before_modify=False,
+        )
+        result = ensure_settings(config)
+
+        assert result.success
+        assert "existingKey" in result.keys_skipped
+        data = json.loads(settings_file.read_text(encoding="utf-8"))
+        assert data["existingKey"] == {"original": True}

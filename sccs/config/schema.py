@@ -74,6 +74,15 @@ class SettingsEnsure(BaseModel):
         default_factory=dict,
         description="Key-value pairs to ensure exist. Missing keys are added, existing keys are never overwritten.",
     )
+    platform_overrides: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-platform overrides keyed by platform name (macos, linux, windows). "
+            "Values from the matching platform are deep-merged into `entries` and, "
+            "unlike normal entries, OVERWRITE existing values in the target file — "
+            "platform overrides express explicit per-OS choices."
+        ),
+    )
     create_if_missing: bool = Field(default=True, description="Create the target file if it doesn't exist")
     backup_before_modify: bool = Field(default=True, description="Create backup before modifying")
 

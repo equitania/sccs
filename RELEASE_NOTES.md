@@ -1,5 +1,17 @@
 # Release Notes
 
+## Version 2.20.0 (28.04.2026)
+
+### Added
+- **Platform-aware `settings_ensure`**: `SettingsEnsure` (and the underlying YAML schema) gains a new `platform_overrides: dict[str, dict]` field. Values from the entry matching the current platform are deep-merged into the target file and — unlike normal `entries` — overwrite existing keys, because they express explicit per-OS choices (e.g. "on Windows the statusLine command must point to PowerShell, not bash"). Sibling keys not mentioned in the override are preserved through the deep-merge.
+- **PowerShell statusline** (`statusline.ps1`): Cross-platform port of `statusline.sh` using `ConvertFrom-Json` and native PowerShell math. No external dependencies (no `jq`, no `bc`). Same on-screen layout as the bash version: model · progress bar · % · tokens · cache efficiency · cost · lines · git · directory.
+- The `claude_statusline` default category now ships a Windows override so `~/.claude/settings.json` automatically points to `pwsh -NoProfile -File ~/.claude/statusline.ps1` on Windows machines while keeping `statusline.sh` on macOS/Linux.
+- Five new tests in `tests/test_settings.py::TestPlatformOverrides` covering replace-on-match, ignore-on-mismatch, deep-merge of nested dicts, key-creation, and legacy behaviour without overrides.
+
+### Changed
+- `claude_statusline.include` adds `statusline.ps1` to the rotation alongside `statusline.sh`, `statusline.py` and `statusline.fish`.
+- `SettingsEnsureResult` gains a `keys_overridden: list[str]` field so callers can distinguish added-because-missing from overwritten-by-platform.
+
 ## Version 2.19.1 (28.04.2026)
 
 ### Fixed
