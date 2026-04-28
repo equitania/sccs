@@ -3,9 +3,12 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
-from sccs.cli import cli
+import sccs.cli as cli_module
+from sccs.cli import _print_platform_hint, cli
+from sccs.config.schema import SccsConfig
 
 
 class TestCliGroup:
@@ -252,3 +255,101 @@ class TestDiffCommand:
         runner = CliRunner()
         result = runner.invoke(cli, ["diff"])
         assert result.exit_code == 1
+
+
+class _CapturingConsole:
+    """Minimal stand-in for sccs.output.Console that records printed text."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def print(self, *args, **kwargs) -> None:
+        self.lines.append(" ".join(str(a) for a in args))
+
+    @property
+    def text(self) -> str:
+        return "\n".join(self.lines)
+
+
+@pytest.fixture
+def reset_platform_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset the once-per-process hint guard so each test sees a fresh state."""
+    monkeypatch.setattr(cli_module, "_PLATFORM_HINT_PRINTED", False)
+
+
+def _build_fish_macos_config(temp_home, mock_repo) -> SccsConfig:
+    """Config with two macos-only fish categories that should be skipped on linux."""
+    raw = {
+        "repository": {"path": str(mock_repo)},
+        "sync_categories": {
+            "fish_config_macos": {
+                "enabled": True,
+                "description": "Fish macOS",
+                "local_path": str(temp_home / ".config" / "fish" / "conf.d"),
+                "repo_path": ".config/fish/conf.d",
+                "sync_mode": "bidirectional",
+                "item_type": "file",
+                "platforms": ["macos"],
+            },
+            "fish_functions_macos": {
+                "enabled": True,
+                "description": "Fish functions macOS",
+                "local_path": str(temp_home / ".config" / "fish" / "functions" / "macos"),
+                "repo_path": ".config/fish/functions/macos",
+                "sync_mode": "bidirectional",
+                "item_type": "file",
+                "platforms": ["macos"],
+            },
+        },
+    }
+    return SccsConfig.model_validate(raw)
+
+
+class TestPlatformHint:
+    """Regression tests for the platform-skipped-categories hint wording."""
+
+    def test_linux_with_fish_uses_platform_specific_wording(
+        self, monkeypatch, reset_platform_hint, temp_home, mock_repo
+    ):
+        """Fish installed on Linux + macos-only fish categories → 'plattformspezifisch', not 'nicht verfügbar'."""
+        monkeypatch.setattr("sccs.cli.get_current_platform", lambda: "linux")
+        monkeypatch.setattr("sccs.utils.platform.get_current_platform", lambda: "linux")
+        monkeypatch.setattr("sccs.cli.is_shell_available", lambda shell: shell == "fish")
+
+        cfg = _build_fish_macos_config(temp_home, mock_repo)
+        console = _CapturingConsole()
+
+        _print_platform_hint(console, cfg)
+
+        assert "plattformspezifisch übersprungen" in console.text
+        assert "Fish nicht verfügbar" not in console.text
+        assert "fish_config_macos" in console.text
+        assert "fish_functions_macos" in console.text
+
+    def test_linux_without_fish_uses_unavailable_wording(self, monkeypatch, reset_platform_hint, temp_home, mock_repo):
+        """Fish missing on Linux → keep 'Fish nicht verfügbar' wording."""
+        monkeypatch.setattr("sccs.cli.get_current_platform", lambda: "linux")
+        monkeypatch.setattr("sccs.utils.platform.get_current_platform", lambda: "linux")
+        monkeypatch.setattr("sccs.cli.is_shell_available", lambda shell: False)
+
+        cfg = _build_fish_macos_config(temp_home, mock_repo)
+        console = _CapturingConsole()
+
+        _print_platform_hint(console, cfg)
+
+        assert "Fish nicht verfügbar" in console.text
+        assert "plattformspezifisch" not in console.text
+
+    def test_no_skipped_categories_emits_nothing(self, monkeypatch, reset_platform_hint, temp_home, mock_repo):
+        """When no enabled category is filtered out, the hint stays silent."""
+        # macos current platform → macos-only categories match → nothing skipped
+        monkeypatch.setattr("sccs.cli.get_current_platform", lambda: "macos")
+        monkeypatch.setattr("sccs.utils.platform.get_current_platform", lambda: "macos")
+        monkeypatch.setattr("sccs.cli.is_shell_available", lambda shell: True)
+
+        cfg = _build_fish_macos_config(temp_home, mock_repo)
+        console = _CapturingConsole()
+
+        _print_platform_hint(console, cfg)
+
+        assert console.text == ""

@@ -38,6 +38,7 @@ from sccs.utils.logging import configure_logging
 from sccs.utils.platform import (
     get_current_platform,
     get_platform_skipped_categories,
+    is_shell_available,
 )
 
 # Global console instance
@@ -1149,16 +1150,19 @@ def _print_platform_hint(console: Console, cfg) -> None:
     extra_tip: str | None = None
     for shell, names in skipped.items():
         names_str = ", ".join(sorted(names))
-        if shell == "fish":
-            parts.append(f"Fish nicht verfügbar — übersprungen: {names_str}")
-            if current == "windows":
-                extra_tip = "Tipp: `sccs convert fish-to-pwsh` generiert PowerShell-Aliasse aus den Fish-Configs"
-        elif shell == "powershell":
-            parts.append(f"PowerShell nicht verfügbar — übersprungen: {names_str}")
-        elif shell == "other":
+        if shell == "other":
             parts.append(f"Übersprungen (Plattform-Filter): {names_str}")
+            continue
+
+        shell_label = "Fish" if shell == "fish" else "PowerShell" if shell == "powershell" else shell
+        if is_shell_available(shell):
+            # Shell is installed locally — categories are skipped purely
+            # because their `platforms` filter excludes the current OS.
+            parts.append(f"{shell_label}-Kategorien plattformspezifisch übersprungen: {names_str}")
         else:
-            parts.append(f"{shell} nicht verfügbar — übersprungen: {names_str}")
+            parts.append(f"{shell_label} nicht verfügbar — übersprungen: {names_str}")
+            if shell == "fish" and current == "windows":
+                extra_tip = "Tipp: `sccs convert fish-to-pwsh` generiert PowerShell-Aliasse aus den Fish-Configs"
 
     console.print(f"[dim]ℹ Plattform: {current} — {'; '.join(parts)}[/dim]")
     if extra_tip:

@@ -1,5 +1,10 @@
 # Release Notes
 
+## Version 2.20.1 (28.04.2026)
+
+### Fixed
+- **Misleading platform hint on Linux with Fish installed.** `sccs sync` printed `ℹ Plattform: linux — Fish nicht verfügbar — übersprungen: fish_config_macos, fish_functions_macos`, although Fish was installed — only the macOS-specific subcategories were filtered out by their `platforms: ["macos"]` rule. `sccs/cli.py::_print_platform_hint` now distinguishes the two skip reasons via `is_shell_available()`: when the shell is installed but the categories are platform-restricted, the hint reads `"<Shell>-Kategorien plattformspezifisch übersprungen: …"`; the legacy `"<Shell> nicht verfügbar — übersprungen: …"` wording (and the `sccs convert fish-to-pwsh` tip on Windows) only fires when the shell binary is actually missing. Three new tests in `tests/test_cli.py::TestPlatformHint` cover both wordings plus the silent no-skip case.
+
 ## Version 2.20.0 (28.04.2026)
 
 ### Added
