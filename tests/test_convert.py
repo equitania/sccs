@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
 
+from sccs.cli import cli
 from sccs.convert import ConversionReport, FishToPwshConverter
 from sccs.convert.rules import (
     convert_abbr,
@@ -14,6 +18,8 @@ from sccs.convert.rules import (
     convert_line,
     convert_set_gx,
 )
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # ---------------------------------------------------------------------- rules
 
@@ -294,3 +300,56 @@ class TestConverterDirectory:
         report = converter.convert_directory()
         assert report.warnings
         assert "not found" in report.warnings[0]
+
+
+# ----------------------------------------------------------------- CLI defaults
+
+
+@pytest.fixture
+def _windows_repo(tmp_path: Path) -> Path:
+    """Build a fake repo with a .config/fish/ tree to act as Windows default source."""
+    repo = tmp_path / "repo"
+    fish = repo / ".config" / "fish"
+    (fish / "conf.d").mkdir(parents=True)
+    (fish / "conf.d" / "10-aliases.fish").write_text("alias ll='ls -la'\n", encoding="utf-8")
+    return repo
+
+
+class TestFishToPwshCliDefaults:
+    """Default --src on Windows must point at the synced repo, not ~/.config/fish."""
+
+    def test_windows_default_src_uses_repo(self, _windows_repo, tmp_path):
+        cfg = MagicMock()
+        cfg.repository.path = str(_windows_repo)
+        with (
+            patch("sccs.cli.load_config", return_value=cfg),
+            patch("sccs.cli.get_current_platform", return_value="windows"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["convert", "fish-to-pwsh", "--dry-run", "--dst", str(tmp_path / "out")],
+            )
+        assert result.exit_code == 0, result.output
+        # Rich wraps long paths across lines and injects ANSI color codes,
+        # so strip both before asserting the repo-rooted source path is the
+        # one that got picked up as default on Windows.
+        cleaned = "".join(_ANSI_RE.sub("", result.output).split())
+        expected = "".join(str(_windows_repo / ".config" / "fish").split())
+        assert expected in cleaned
+        assert "Source directory not found" not in result.output
+
+    def test_windows_default_src_missing_hint(self, tmp_path):
+        empty_repo = tmp_path / "empty-repo"
+        empty_repo.mkdir()
+        cfg = MagicMock()
+        cfg.repository.path = str(empty_repo)
+        with (
+            patch("sccs.cli.load_config", return_value=cfg),
+            patch("sccs.cli.get_current_platform", return_value="windows"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["convert", "fish-to-pwsh", "--dry-run"])
+        assert result.exit_code == 1
+        assert "Source directory not found" in result.output
+        assert "sccs sync --pull" in result.output

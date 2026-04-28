@@ -759,8 +759,14 @@ def convert_group() -> None:
     Fish shell configuration so the same aliases/env vars work on Windows.
 
     \b
+    Source default depends on platform:
+      - macOS/Linux: ~/.config/fish (your local Fish install)
+      - Windows:    <repo>/.config/fish (the synced copy, since Fish is
+                    not expected to be installed on Windows)
+
+    \b
     Examples:
-        sccs convert fish-to-pwsh              Convert ~/.config/fish to repo
+        sccs convert fish-to-pwsh              Convert default source to repo
         sccs convert fish-to-pwsh --dry-run    Preview without writing files
         sccs convert fish-to-pwsh --force      Overwrite existing PS files
     """
@@ -771,7 +777,7 @@ def convert_group() -> None:
     "--src",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Source Fish config dir (default: ~/.config/fish)",
+    help="Source Fish config dir (default: ~/.config/fish on macOS/Linux, <repo>/.config/fish on Windows)",
 )
 @click.option(
     "--dst",
@@ -818,15 +824,26 @@ def convert_fish_to_pwsh(
         console.print_info("Run 'sccs config init' first")
         sys.exit(1)
 
-    src_path = src.expanduser() if src else Path("~/.config/fish").expanduser()
+    repo_path = Path(config.repository.path).expanduser()
+    if src is not None:
+        src_path = src.expanduser()
+    elif get_current_platform() == "windows":
+        # On Windows, Fish is typically not installed locally — fall back to
+        # the synced copy in the repository so users can build a PowerShell
+        # profile from the configs they pushed from macOS/Linux.
+        src_path = repo_path / ".config" / "fish"
+    else:
+        src_path = Path("~/.config/fish").expanduser()
     if dst is not None:
         dst_path = dst.expanduser()
     else:
-        repo_path = Path(config.repository.path).expanduser()
         dst_path = repo_path / ".config" / "powershell"
 
     if not src_path.exists():
         console.print_error(f"Source directory not found: {src_path}")
+        if src is None and get_current_platform() == "windows":
+            console.print_info("Run 'sccs sync --pull' first to fetch fish configs from the repo,")
+            console.print_info("or pass --src explicitly if Fish is installed locally.")
         sys.exit(1)
 
     # Refuse to clobber an existing destination unless --force or --dry-run.

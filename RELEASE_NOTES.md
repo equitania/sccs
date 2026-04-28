@@ -1,5 +1,10 @@
 # Release Notes
 
+## Version 2.20.2 (28.04.2026)
+
+### Fixed
+- **`sccs convert fish-to-pwsh` failed on Windows with `Source directory not found: C:\Users\<user>\.config\fish`.** The default `--src` path was hard-coded to `~/.config/fish`, which on Windows expands to a directory that doesn't exist (Fish is not installed there — that's the entire point of converting *to* PowerShell). On Windows the default now resolves to `<repo>/.config/fish`, i.e. the synced copy that `sccs sync --pull` brings in from macOS/Linux. macOS/Linux behaviour is unchanged. When the repo source is also missing, the error message now points the user at `sccs sync --pull` or passing `--src` explicitly. Two new tests in `tests/test_convert.py::TestFishToPwshCliDefaults` cover the Windows positive and negative path. Help text and the `convert` group docstring document the platform-dependent default.
+
 ## Version 2.20.1 (28.04.2026)
 
 ### Fixed
