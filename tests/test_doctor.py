@@ -729,3 +729,95 @@ class TestExecutePlanRecordsState:
             )
 
         assert state.is_npx_tool_marked("get-shit-done-cc", invocation) is False
+
+
+# --------------------------------------------------------------------------- #
+# Doctor-managed excludes — files installed by doctor tools must NOT sync     #
+# --------------------------------------------------------------------------- #
+
+
+class TestDoctorManagedExcludes:
+    """v2.22.0: files installed by `sccs doctor install` (e.g. gsd-* via
+    npx get-shit-done-cc) are reproducible from the doctor manifest, so
+    `sccs sync` skips them to avoid cross-machine conflicts."""
+
+    def test_default_npx_tools_contribute_gsd_pattern(self):
+        from sccs.doctor.managed import get_doctor_managed_excludes
+
+        cfg = DoctorConfig()  # default tools incl. get-shit-done-cc
+        assert "gsd-*" in get_doctor_managed_excludes(cfg)
+
+    def test_user_managed_excludes_are_appended(self):
+        from sccs.doctor.managed import get_doctor_managed_excludes
+
+        cfg = DoctorConfig(managed_excludes=["custom-*", "another-*"])
+        excludes = get_doctor_managed_excludes(cfg)
+        assert "custom-*" in excludes
+        assert "another-*" in excludes
+        assert "gsd-*" in excludes  # bundled default still present
+
+    def test_excludes_are_deduplicated(self):
+        from sccs.doctor.managed import get_doctor_managed_excludes
+
+        cfg = DoctorConfig(managed_excludes=["gsd-*"])  # duplicate of bundled
+        excludes = get_doctor_managed_excludes(cfg)
+        assert excludes.count("gsd-*") == 1
+
+    def test_npx_tool_removed_drops_its_pattern(self):
+        from sccs.doctor.managed import get_doctor_managed_excludes
+
+        # User explicitly clears the npx tool list — gsd-* must drop out.
+        cfg = DoctorConfig(npx_tools=[])
+        assert get_doctor_managed_excludes(cfg) == []
+
+    def test_sync_engine_merges_doctor_excludes_into_global_exclude(self, tmp_path):
+        """Verify the SyncEngine actually picks up the patterns and pushes
+        them through to CategoryHandler.global_exclude (which is what the
+        scan code reads). This is the integration that makes the bug fix
+        observable end-to-end."""
+        from sccs.config.schema import SccsConfig
+        from sccs.sync.engine import SyncEngine
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        config = SccsConfig.model_validate(
+            {
+                "repository": {"path": str(repo)},
+                "sync_categories": {
+                    "claude_skills": {
+                        "enabled": True,
+                        "local_path": str(tmp_path / "skills"),
+                        "repo_path": ".claude/skills",
+                        "item_type": "directory",
+                        "item_marker": "SKILL.md",
+                    }
+                },
+                "global_exclude": [".DS_Store"],
+            }
+        )
+
+        engine = SyncEngine(config)
+        # gsd-* must be merged in via the doctor block, alongside the
+        # explicit .DS_Store from global_exclude.
+        assert ".DS_Store" in engine.effective_global_exclude
+        assert "gsd-*" in engine.effective_global_exclude
+
+    def test_managed_pattern_filters_real_directory_scan(self, tmp_path, monkeypatch):
+        """End-to-end: a `gsd-foo/SKILL.md` directory is silently skipped
+        by find_directories when the doctor exclude pattern is active."""
+        from sccs.utils.paths import find_directories
+
+        skills = tmp_path / "skills"
+        skills.mkdir()
+        (skills / "user-skill").mkdir()
+        (skills / "user-skill" / "SKILL.md").write_text("...", encoding="utf-8")
+        (skills / "gsd-managed").mkdir()
+        (skills / "gsd-managed" / "SKILL.md").write_text("...", encoding="utf-8")
+
+        # Without the exclude both are found
+        all_dirs = find_directories(skills, marker="SKILL.md")
+        assert {d.name for d in all_dirs} == {"user-skill", "gsd-managed"}
+
+        # With gsd-* exclude only the user-owned one survives
+        filtered = find_directories(skills, marker="SKILL.md", exclude=["gsd-*"])
+        assert {d.name for d in filtered} == {"user-skill"}

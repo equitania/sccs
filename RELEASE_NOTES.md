@@ -1,5 +1,21 @@
 # Release Notes
 
+## Version 2.22.0 (04.05.2026)
+
+### Added
+- **Doctor-managed file exclusion from `sccs sync`.** Files installed by `sccs doctor install` (currently the `gsd-*` skills/agents/hooks dropped by `npx get-shit-done-cc --claude --global`) are reproducible from the doctor manifest, so syncing them across machines was a guaranteed conflict source. The sync engine now silently excludes them so the same machine can run both `sccs doctor install` and `sccs sync` without producing conflicts on the next pull.
+- New module `sccs/doctor/managed.py` with:
+  - `DEFAULT_MANAGED_PATTERNS: dict[str, list[str]]` mapping bundled doctor tool names to their installed glob patterns. Initial entry: `get-shit-done-cc → ["gsd-*"]`.
+  - `get_doctor_managed_excludes(doctor_config)` — returns the deduplicated, sorted glob list to merge into the sync engine's effective exclude list. Honours `doctor.npx_tools` membership, so removing the npx tool also drops its patterns.
+- New `DoctorConfig.managed_excludes: list[str]` field for user-supplied patterns when shipping additional npx tools or plugins via `~/.config/sccs/config.yaml`.
+- `SyncEngine.effective_global_exclude` (new attribute) is the concatenation of `config.global_exclude` plus the doctor-managed patterns; passed through to every `CategoryHandler`.
+
+### Fixed
+- **`sccs sync --pull` no longer reports 64 conflicts on machines that ran `sccs doctor install` independently.** Root cause: the `gsd-*` skills/agents/hooks installed by `get-shit-done-cc` carry per-machine differences (timestamps, install order) that produce hash mismatches in `claude_skills`, `claude_hooks` and `claude_agents`. Excluding them from sync entirely is the correct fix because their canonical source is the doctor manifest, not the SCCS repository.
+
+### Tests
+- 6 new `tests/test_doctor.py::TestDoctorManagedExcludes` cases covering: bundled gsd-* contribution, user override append, deduplication, npx-tool-removal drop, end-to-end SyncEngine integration, and a directory-scan filter test that verifies `find_directories(exclude=["gsd-*"])` actually skips the gsd-managed entries.
+
 ## Version 2.21.4 (04.05.2026)
 
 ### Fixed

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from sccs.config.schema import SccsConfig
+from sccs.doctor.managed import get_doctor_managed_excludes
 from sccs.sync.actions import SyncAction
 from sccs.sync.category import CategoryHandler, CategoryStatus, CategorySyncResult
 from sccs.sync.state import StateManager
@@ -52,6 +53,13 @@ class SyncEngine:
         self.repo_base = Path(config.repository.path).expanduser()
         self.state_manager = state_manager or StateManager()
         self._handlers: dict[str, CategoryHandler] = {}
+        # Merge doctor-managed glob patterns into the effective global
+        # exclude list. Files installed by `sccs doctor install` (e.g. the
+        # gsd-* skills/agents/hooks dropped by `npx get-shit-done-cc`) are
+        # reproducible from the doctor manifest, so syncing them across
+        # machines just produces conflicts. They are silently skipped here.
+        self._doctor_excludes = get_doctor_managed_excludes(config.doctor)
+        self.effective_global_exclude = list(config.global_exclude) + self._doctor_excludes
 
     def get_handler(self, category_name: str) -> CategoryHandler | None:
         """
@@ -75,7 +83,7 @@ class SyncEngine:
             category=category,
             repo_base=self.repo_base,
             state_manager=self.state_manager,
-            global_exclude=self.config.global_exclude,
+            global_exclude=self.effective_global_exclude,
         )
         self._handlers[category_name] = handler
         return handler

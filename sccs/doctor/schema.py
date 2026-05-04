@@ -183,6 +183,15 @@ class DoctorConfig(BaseModel):
         default_factory=list,
         description="Additional npx tools appended to the default list.",
     )
+    managed_excludes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extra glob patterns for files installed by doctor tools that "
+            "should be excluded from `sccs sync`. Bundled tools such as "
+            "get-shit-done-cc already contribute their own patterns "
+            "automatically (see sccs/doctor/managed.py:DEFAULT_MANAGED_PATTERNS)."
+        ),
+    )
 
     def effective_plugins(self) -> list[PluginSpec]:
         """Return plugins to check: override or default, plus extras."""

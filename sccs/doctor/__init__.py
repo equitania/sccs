@@ -29,12 +29,14 @@ from sccs.doctor.installer import (
     build_update_plan,
     execute_plan,
 )
+from sccs.doctor.managed import DEFAULT_MANAGED_PATTERNS, get_doctor_managed_excludes
 from sccs.doctor.runner import DoctorError
 from sccs.doctor.schema import DoctorConfig, NodeInstallSpec, NpxToolSpec, PluginSpec
 from sccs.doctor.state import DoctorState, DoctorStateManager, NpxToolMark
 
 __all__ = [
     "DEFAULT_CLAUDE_PLUGINS",
+    "DEFAULT_MANAGED_PATTERNS",
     "DEFAULT_NPX_TOOLS",
     "MIN_NODE_MAJOR",
     "NODE_INSTALL",
@@ -60,4 +62,5 @@ __all__ = [
     "build_install_plan",
     "build_update_plan",
     "execute_plan",
+    "get_doctor_managed_excludes",
 ]
