@@ -15,6 +15,7 @@ from sccs.doctor.detectors import (
     ClaudeCliStatus,
     NodeStatus,
     NpxToolStatus,
+    PermissionStatus,
     PluginStatus,
 )
 from sccs.doctor.runner import DoctorError, _run
@@ -84,6 +85,40 @@ class ExecuteResult:
     @property
     def printed(self) -> list[ActionOutcome]:
         return [o for o in self.outcomes if o.status == "printed"]
+
+
+def _permission_actions(statuses: list[PermissionStatus]) -> list[DoctorAction]:
+    """Surface filesystem permission issues as runnable=False manual blocks.
+
+    These are intentionally print-only — `sudo chown` is out of scope for SCCS
+    (HARD RULE: never call sudo). Putting them at the front of the plan ensures
+    the user sees the chown command before we run any subsequent npm/npx/claude
+    plugin actions that would otherwise fail with EACCES.
+    """
+    actions: list[DoctorAction] = []
+    for st in statuses:
+        if st.ok:
+            continue
+        block_lines: list[str] = []
+        block_lines.append(f"# {st.spec.label}: {st.spec.purpose}")
+        if st.offending_paths:
+            block_lines.append(f"# Examples of foreign-owned entries under {st.resolved_path}:")
+            for p in st.offending_paths[:3]:
+                block_lines.append(f"#   {p}")
+        if not st.is_writable:
+            block_lines.append(f"# Path is not writable by uid {st.expected_uid}.")
+        block_lines.append("# Fix:")
+        block_lines.append(st.fix_command or "")
+        actions.append(
+            DoctorAction(
+                label=f"fix permissions: {st.spec.path}",
+                cmd=None,
+                manual_block="\n".join(block_lines),
+                runnable=False,
+                component=f"perm:{st.spec.path}",
+            )
+        )
+    return actions
 
 
 def _node_action(status: NodeStatus) -> DoctorAction | None:
@@ -214,9 +249,14 @@ def build_install_plan(
     claude_cli: ClaudeCliStatus,
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
+    permissions: list[PermissionStatus] | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
+    # Permission issues come FIRST so the user sees the chown command before
+    # any downstream subprocess fails with EACCES.
+    if permissions:
+        actions.extend(_permission_actions(permissions))
     node_action = _node_action(node)
     if node_action:
         actions.append(node_action)
@@ -235,9 +275,12 @@ def build_update_plan(
     claude_cli: ClaudeCliStatus,
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
+    permissions: list[PermissionStatus] | None = None,
 ) -> InstallPlan:
     """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones."""
     actions: list[DoctorAction] = []
+    if permissions:
+        actions.extend(_permission_actions(permissions))
     node_action = _node_action(node)
     if node_action:
         actions.append(node_action)

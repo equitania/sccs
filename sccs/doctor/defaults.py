@@ -5,7 +5,12 @@
 
 from __future__ import annotations
 
-from sccs.doctor.schema import NodeInstallSpec, NpxToolSpec, PluginSpec
+from sccs.doctor.schema import (
+    NodeInstallSpec,
+    NpxToolSpec,
+    PermissionCheckSpec,
+    PluginSpec,
+)
 
 MIN_NODE_MAJOR = 20
 
@@ -36,6 +41,29 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
         # binary on PATH. Detection therefore falls back to the doctor state
         # file once we've recorded a successful run.
         detect_via_state=True,
+    ),
+]
+
+# Filesystem paths whose ownership/writability matters for downstream doctor
+# actions. Triggered by the Debian 13 incident where ~/.npm/_cacache/ was
+# root-owned and broke every subsequent `npx ...` with EACCES. Each path is
+# recorded with the user-facing reason so the reporter can explain *why*
+# the check exists.
+DEFAULT_PERMISSION_CHECKS: list[PermissionCheckSpec] = [
+    PermissionCheckSpec(
+        path="~/.npm",
+        label="npm cache directory",
+        purpose="npx and npm install write here when fetching packages (e.g. get-shit-done-cc)",
+    ),
+    PermissionCheckSpec(
+        path="~/.claude",
+        label="Claude config directory",
+        purpose="`claude plugin install` writes plugin manifests, skills and agents here",
+    ),
+    PermissionCheckSpec(
+        path="~/.config/sccs",
+        label="SCCS config directory",
+        purpose="sccs persists doctor state and sync state in this directory",
     ),
 ]
 

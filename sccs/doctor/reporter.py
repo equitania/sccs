@@ -10,6 +10,7 @@ from sccs.doctor.detectors import (
     ClaudeCliStatus,
     NodeStatus,
     NpxToolStatus,
+    PermissionStatus,
     PluginStatus,
 )
 from sccs.doctor.installer import ExecuteResult
@@ -52,6 +53,22 @@ def _plugin_row(status: PluginStatus) -> tuple[str, str, str]:
     return (f"plugin: {label}", _OK, "installed")
 
 
+def _permission_row(status: PermissionStatus) -> tuple[str, str, str]:
+    label = f"perm: {status.spec.path}"
+    if status.skipped_reason:
+        return (label, _UNKNOWN, status.skipped_reason)
+    if not status.exists:
+        return (label, _OK, "will be created on first use")
+    if status.ok:
+        return (label, _OK, "user-owned, writable")
+    bits: list[str] = []
+    if not status.is_writable:
+        bits.append("not writable")
+    if status.offending_paths:
+        bits.append(f"{len(status.offending_paths)}+ foreign-owned")
+    return (label, _MISSING, ", ".join(bits) or "permission issue")
+
+
 def _npx_row(status: NpxToolStatus) -> tuple[str, str, str]:
     label = f"npx: {status.spec.name}"
     if not status.available:
@@ -72,6 +89,7 @@ def render_doctor_report(
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
     min_node_major: int,
+    permissions: list[PermissionStatus] | None = None,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -85,9 +103,28 @@ def render_doctor_report(
         table.add_row(*_plugin_row(plugin_st))
     for npx_st in npx_tools:
         table.add_row(*_npx_row(npx_st))
+    if permissions:
+        for perm_st in permissions:
+            table.add_row(*_permission_row(perm_st))
 
     console.print(table)
     console.print(f"[dim]Platform: {node.platform}[/dim]")
+
+    # Detailed remediation block for permission issues — shown below the table
+    # so the user gets the exact `sudo chown` command to copy.
+    if permissions:
+        bad = [p for p in permissions if not p.ok]
+        if bad:
+            console.print()
+            console.print("[yellow]Permission issues — run manually (SCCS never invokes sudo):[/yellow]")
+            for p in bad:
+                console.print(f"  [dim]{p.spec.purpose}[/dim]")
+                if p.offending_paths:
+                    sample = "\n    ".join(p.offending_paths[:3])
+                    console.print(f"    Examples:\n    {sample}")
+                if p.fix_command:
+                    console.print(f"  [bold]{p.fix_command}[/bold]")
+                console.print()
 
 
 def has_problems(
@@ -96,15 +133,18 @@ def has_problems(
     claude_cli: ClaudeCliStatus,
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
+    permissions: list[PermissionStatus] | None = None,
 ) -> bool:
-    """Return True if any component is missing or outdated."""
+    """Return True if any component is missing/outdated or has a permission issue."""
     if not (node.installed and node.meets_minimum):
         return True
     if not claude_cli.installed:
         return True
     if any(not p.installed for p in plugins):
         return True
-    return any(not t.available for t in npx_tools)
+    if any(not t.available for t in npx_tools):
+        return True
+    return bool(permissions and any(not p.ok for p in permissions))
 
 
 def render_inline_summary(
@@ -114,6 +154,7 @@ def render_inline_summary(
     claude_cli: ClaudeCliStatus,
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
+    permissions: list[PermissionStatus] | None = None,
 ) -> None:
     """One-line summary used by `sccs status`."""
     parts: list[str] = []
@@ -137,6 +178,11 @@ def render_inline_summary(
     missing_tools = [t.spec.name for t in npx_tools if not t.available]
     if missing_tools:
         parts.append(f"[red]npx tools missing: {len(missing_tools)}[/red]")
+
+    if permissions:
+        bad = [p for p in permissions if not p.ok]
+        if bad:
+            parts.append(f"[red]perm issues: {len(bad)}[/red]")
 
     console.print(f"[bold]doctor:[/bold] {' · '.join(parts)}")
 

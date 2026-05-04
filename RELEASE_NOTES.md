@@ -1,5 +1,24 @@
 # Release Notes
 
+## Version 2.23.0 (04.05.2026)
+
+### Added
+- **`sccs doctor` now verifies filesystem permissions for known-fragile paths.** Triggered by a real-world incident on Debian 13: a `~/.npm/_cacache/` subtree owned by root (leftover from a prior `sudo npm` run) silently broke every subsequent `npx ...` invocation with EACCES — and there was no diagnostic to tell the user which directory was misowned or how to fix it. Doctor now scans the relevant directories, reports any foreign-owned entries, and prints the exact `sudo chown -R UID:GID <path>` command to copy. SCCS itself never invokes sudo (HARD RULE) — the user runs the fix manually.
+- New module: `sccs/doctor/schema.py::PermissionCheckSpec` (Pydantic model with path/label/purpose), `sccs/doctor/detectors.py::PermissionStatus + PermissionDetector` (capped recursive ownership scan with `_MAX_PATHS_SCANNED=500` and `_MAX_OFFENDERS_REPORTED=5` so doctor stays fast even on huge caches).
+- New defaults: `DEFAULT_PERMISSION_CHECKS` ships three baseline checks — `~/.npm` (npx/npm cache), `~/.claude` (claude plugin install target), `~/.config/sccs` (doctor + sync state).
+- `DoctorConfig.permission_checks` (override) and `DoctorConfig.extra_permission_checks` (append) for users who want to add their own paths via `~/.config/sccs/config.yaml`.
+- Reporter changes: the doctor table now contains a `perm: <path>` row per check; below the table, any failing check prints its `purpose`, up to 3 example offending paths and the exact `sudo chown` fix command.
+- `sccs status` inline summary appends `[red]perm issues: N[/red]` when any permission check fails.
+
+### Hardened
+- Permission issues feed into `build_install_plan` / `build_update_plan` as runnable=False manual blocks at the *front* of the plan, so the user sees the chown command before any subsequent npm/npx/claude action would have failed with EACCES.
+- The detector skips entirely on Windows (`sys.platform == "win32"` or no `os.getuid`) and reports the path as `?` in the table — POSIX uid/gid checks don't map cleanly onto NT ACLs, and `sudo chown` wouldn't apply there.
+
+### Tests
+- 7 new tests in `tests/test_doctor.py`:
+  - `TestPermissionDetector` — 5 cases: nonexistent path → OK; user-owned path → OK; foreign-owned root → flagged with offending paths + correct fix command; offender list capped; `~` expansion via `HOME` monkeypatch.
+  - `TestPermissionInstallPlan` — 2 cases: foreign-owned path produces a runnable=False manual block at the front of the plan; default checks include `~/.npm` and `~/.claude` and `~/.config/sccs` (regression guard).
+
 ## Version 2.22.1 (04.05.2026)
 
 ### Fixed

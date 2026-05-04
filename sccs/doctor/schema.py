@@ -115,6 +115,46 @@ class NpxToolSpec(BaseModel):
         return v
 
 
+class PermissionCheckSpec(BaseModel):
+    """A filesystem path whose ownership/writability the doctor should verify.
+
+    Triggered by real-world failure mode on Debian 13: a `~/.npm/_cacache/`
+    directory tree owned by root (left over from a prior `sudo npm` run)
+    silently breaks `npx` / `npm install` with EACCES. The fix is always a
+    one-liner `sudo chown -R UID:GID <path>`, but the user has to know to
+    run it. Doctor surfaces the issue and prints the exact command.
+    """
+
+    path: str = Field(
+        description="Filesystem path to check. `~` is expanded to the user's home.",
+    )
+    label: str = Field(
+        description="Short human-readable name (e.g. 'npm cache directory').",
+    )
+    purpose: str = Field(
+        description=(
+            "Why doctor cares about this path — surfaced to the user when an "
+            "issue is found (e.g. 'npx writes here when installing tools')."
+        ),
+    )
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, v: str) -> str:
+        # Reject empty, shell metacharacters and absolute traversal hacks. Tilde
+        # at the front is fine (we expand it). Other tildes are rejected.
+        if not v or v.isspace():
+            raise ValueError("path must not be empty")
+        if v.startswith("-"):
+            raise ValueError(f"path must not start with '-': {v!r}")
+        # Strip a single leading '~' before validating the rest.
+        body = v[1:] if v.startswith("~") else v
+        # Allow absolute or relative paths but no shell metacharacters.
+        if any(ch in body for ch in (";", "|", "&", "$", "`", "\n", "\r")):
+            raise ValueError(f"path contains shell metacharacters: {v!r}")
+        return v
+
+
 class NodeInstallSpec(BaseModel):
     """How to install Node.js on a given platform."""
 
@@ -192,6 +232,17 @@ class DoctorConfig(BaseModel):
             "automatically (see sccs/doctor/managed.py:DEFAULT_MANAGED_PATTERNS)."
         ),
     )
+    permission_checks: list[PermissionCheckSpec] | None = Field(
+        default=None,
+        description=(
+            "Override list of filesystem paths whose ownership/writability "
+            "should be verified. None (default) keeps DEFAULT_PERMISSION_CHECKS."
+        ),
+    )
+    extra_permission_checks: list[PermissionCheckSpec] = Field(
+        default_factory=list,
+        description="Additional permission checks appended to the default list.",
+    )
 
     def effective_plugins(self) -> list[PluginSpec]:
         """Return plugins to check: override or default, plus extras."""
@@ -206,3 +257,10 @@ class DoctorConfig(BaseModel):
 
         base = list(self.npx_tools) if self.npx_tools is not None else list(DEFAULT_NPX_TOOLS)
         return base + list(self.extra_npx_tools)
+
+    def effective_permission_checks(self) -> list[PermissionCheckSpec]:
+        """Return permission checks to run: override or default, plus extras."""
+        from sccs.doctor.defaults import DEFAULT_PERMISSION_CHECKS
+
+        base = list(self.permission_checks) if self.permission_checks is not None else list(DEFAULT_PERMISSION_CHECKS)
+        return base + list(self.extra_permission_checks)

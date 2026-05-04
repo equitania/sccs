@@ -1,10 +1,14 @@
 # SCCS Doctor Detectors
-# Read-only inspection of Node.js, Claude CLI, Claude plugins and npx tools.
+# Read-only inspection of Node.js, Claude CLI, Claude plugins, npx tools
+# and filesystem permissions for known-fragile paths.
 
 from __future__ import annotations
 
+import os
 import re
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from sccs.doctor.defaults import get_node_install_spec
 from sccs.doctor.runner import (
@@ -13,9 +17,20 @@ from sccs.doctor.runner import (
     run_node_version,
     which,
 )
-from sccs.doctor.schema import NodeInstallSpec, NpxToolSpec, PluginSpec
+from sccs.doctor.schema import (
+    NodeInstallSpec,
+    NpxToolSpec,
+    PermissionCheckSpec,
+    PluginSpec,
+)
 from sccs.doctor.state import DoctorStateManager
 from sccs.utils.platform import get_current_platform
+
+# Cap the per-path recursive ownership scan to avoid pathological wait times
+# on huge caches (e.g. ~/.npm with thousands of packages). Whatever permission
+# damage there is, the first hundreds of entries usually expose it.
+_MAX_PATHS_SCANNED = 500
+_MAX_OFFENDERS_REPORTED = 5
 
 
 @dataclass
@@ -64,6 +79,43 @@ class NpxToolStatus:
     available: bool
     binary_path: str | None
     detection_source: str = "path"  # "path" | "state" | "missing"
+
+
+@dataclass
+class PermissionStatus:
+    """Result of inspecting filesystem ownership/writability for a path.
+
+    `ok=True` when the path either does not exist (will be created on first
+    use) OR every scanned entry is owned by the current user AND the root
+    is writable.
+    """
+
+    spec: PermissionCheckSpec
+    exists: bool
+    is_user_owned: bool
+    is_writable: bool
+    expected_uid: int
+    expected_gid: int
+    resolved_path: str
+    offending_paths: list[str] = field(default_factory=list)
+    skipped_reason: str | None = None  # set on Windows / fallback platforms
+
+    @property
+    def ok(self) -> bool:
+        if self.skipped_reason is not None:
+            return True
+        if not self.exists:
+            return True
+        return self.is_user_owned and self.is_writable
+
+    @property
+    def fix_command(self) -> str | None:
+        """Return the recommended fix command, or None when no fix is needed."""
+        if self.ok:
+            return None
+        # Always print the path WITHOUT shell expansion so a copy-paste works
+        # in any shell. We chown the resolved absolute path.
+        return f"sudo chown -R {self.expected_uid}:{self.expected_gid} {self.resolved_path}"
 
 
 class NodeDetector:
@@ -184,6 +236,100 @@ class ClaudePluginDetector:
                 )
             )
         return statuses
+
+
+class PermissionDetector:
+    """Verify filesystem ownership + writability for known-fragile paths.
+
+    Real-world failure mode this guards against: a `~/.npm/_cacache/`
+    subtree owned by root (left over from a prior `sudo npm` invocation
+    or a container that mounted the user's home) silently breaks every
+    subsequent `npx`/`npm install` with EACCES. The detector spots the
+    foreign-owned files and surfaces a one-shot `sudo chown -R` fix.
+
+    Skipped on Windows: NT ACLs do not map cleanly onto POSIX uid/gid,
+    and the `sudo chown` fix would not apply. `os.getuid()` is also
+    unavailable there.
+    """
+
+    def get_statuses(self, specs: list[PermissionCheckSpec]) -> list[PermissionStatus]:
+        return [self._check(spec) for spec in specs]
+
+    def _check(self, spec: PermissionCheckSpec) -> PermissionStatus:
+        resolved = os.path.expanduser(spec.path)
+
+        # Windows: skip entirely. Doctor still records the spec so the
+        # reporter can show "skipped (Windows)" without crashing.
+        if sys.platform == "win32" or not hasattr(os, "getuid"):
+            return PermissionStatus(
+                spec=spec,
+                exists=Path(resolved).exists(),
+                is_user_owned=True,
+                is_writable=True,
+                expected_uid=-1,
+                expected_gid=-1,
+                resolved_path=resolved,
+                skipped_reason="not applicable on Windows",
+            )
+
+        current_uid = os.getuid()
+        current_gid = os.getgid()
+        path = Path(resolved)
+
+        if not path.exists():
+            return PermissionStatus(
+                spec=spec,
+                exists=False,
+                is_user_owned=True,
+                is_writable=True,
+                expected_uid=current_uid,
+                expected_gid=current_gid,
+                resolved_path=resolved,
+            )
+
+        is_writable = os.access(path, os.W_OK)
+        offenders: list[str] = []
+
+        # Check the root path itself first — its ownership is the most
+        # diagnostic signal.
+        try:
+            root_st = path.stat()
+            if root_st.st_uid != current_uid:
+                offenders.append(resolved)
+        except OSError:
+            pass
+
+        # Recursive sample. Bail out early on cap or once we have enough
+        # offenders to convince the user.
+        scanned = 0
+        try:
+            for entry in path.rglob("*"):
+                scanned += 1
+                if scanned > _MAX_PATHS_SCANNED:
+                    break
+                try:
+                    st = entry.stat()
+                except OSError:
+                    continue
+                if st.st_uid != current_uid:
+                    s = str(entry)
+                    if s not in offenders:
+                        offenders.append(s)
+                        if len(offenders) >= _MAX_OFFENDERS_REPORTED:
+                            break
+        except OSError:
+            pass
+
+        return PermissionStatus(
+            spec=spec,
+            exists=True,
+            is_user_owned=not offenders,
+            is_writable=is_writable,
+            expected_uid=current_uid,
+            expected_gid=current_gid,
+            resolved_path=resolved,
+            offending_paths=offenders,
+        )
 
 
 class NpxToolDetector:

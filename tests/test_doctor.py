@@ -840,3 +840,149 @@ class TestDoctorManagedExcludes:
         # With gsd-* exclude only the user-owned one survives
         filtered = find_directories(skills, marker="SKILL.md", exclude=["gsd-*"])
         assert {d.name for d in filtered} == {"user-skill"}
+
+
+# --------------------------------------------------------------------------- #
+# Permission detector — guard against EACCES on ~/.npm and friends            #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "getuid"), reason="POSIX-only")
+class TestPermissionDetector:
+    def test_nonexistent_path_is_ok(self, tmp_path):
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        spec = PermissionCheckSpec(
+            path=str(tmp_path / "does-not-exist"),
+            label="missing dir",
+            purpose="test",
+        )
+        [status] = PermissionDetector().get_statuses([spec])
+        assert status.exists is False
+        assert status.ok is True
+        assert status.fix_command is None
+
+    def test_user_owned_path_is_ok(self, tmp_path):
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        # tmp_path is owned by the current user — perfect baseline.
+        (tmp_path / "child.txt").write_text("hi", encoding="utf-8")
+        spec = PermissionCheckSpec(
+            path=str(tmp_path),
+            label="user dir",
+            purpose="test",
+        )
+        [status] = PermissionDetector().get_statuses([spec])
+        assert status.exists is True
+        assert status.is_user_owned is True
+        assert status.is_writable is True
+        assert status.ok is True
+        assert status.offending_paths == []
+        assert status.fix_command is None
+
+    def test_foreign_owned_root_flagged(self, tmp_path, monkeypatch):
+        # Simulate the Debian 13 case: tmp_path itself reports a different
+        # owner than the current process. We patch os.getuid to return a uid
+        # that nobody on the box uses — every stat() will then look "foreign".
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        (tmp_path / "child.txt").write_text("hi", encoding="utf-8")
+        monkeypatch.setattr("sccs.doctor.detectors.os.getuid", lambda: 999999)
+        monkeypatch.setattr("sccs.doctor.detectors.os.getgid", lambda: 999999)
+
+        spec = PermissionCheckSpec(
+            path=str(tmp_path),
+            label="foreign-owned",
+            purpose="test",
+        )
+        [status] = PermissionDetector().get_statuses([spec])
+        assert status.exists is True
+        assert status.is_user_owned is False
+        assert status.ok is False
+        # Both the root and the child should show up as foreign.
+        assert str(tmp_path) in status.offending_paths
+        assert any(p.endswith("child.txt") for p in status.offending_paths)
+        # Fix command must contain the resolved path and the expected uid.
+        assert status.fix_command is not None
+        assert "sudo chown -R 999999:999999" in status.fix_command
+        assert str(tmp_path) in status.fix_command
+
+    def test_offenders_are_capped(self, tmp_path, monkeypatch):
+        # Even with thousands of files we should not blow up — the detector
+        # caps both the scan budget and the offender list. The user only
+        # needs a few examples in the report.
+        from sccs.doctor.detectors import (
+            _MAX_OFFENDERS_REPORTED,
+            PermissionDetector,
+        )
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        for i in range(20):
+            (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
+        monkeypatch.setattr("sccs.doctor.detectors.os.getuid", lambda: 999999)
+        monkeypatch.setattr("sccs.doctor.detectors.os.getgid", lambda: 999999)
+
+        spec = PermissionCheckSpec(path=str(tmp_path), label="big", purpose="test")
+        [status] = PermissionDetector().get_statuses([spec])
+        assert len(status.offending_paths) <= _MAX_OFFENDERS_REPORTED
+
+    def test_tilde_expansion(self, tmp_path, monkeypatch):
+        # Specs may use ~ — the detector must expand it before stat()ing.
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "marker").write_text("ok", encoding="utf-8")
+
+        spec = PermissionCheckSpec(path="~/marker", label="home file", purpose="test")
+        [status] = PermissionDetector().get_statuses([spec])
+        assert status.resolved_path == str(tmp_path / "marker")
+        assert status.exists is True
+        assert status.ok is True
+
+
+class TestPermissionInstallPlan:
+    def test_permission_issue_creates_manual_block_at_front(self, tmp_path, monkeypatch):
+        # End-to-end: a foreign-owned ~/.npm-style path should produce a
+        # runnable=False action that prints the chown fix BEFORE any other
+        # action runs.
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.installer import build_install_plan
+        from sccs.doctor.schema import DoctorConfig, PermissionCheckSpec
+
+        if not hasattr(__import__("os"), "getuid"):
+            pytest.skip("POSIX-only")
+
+        (tmp_path / "x").write_text("hi", encoding="utf-8")
+        monkeypatch.setattr("sccs.doctor.detectors.os.getuid", lambda: 999999)
+        monkeypatch.setattr("sccs.doctor.detectors.os.getgid", lambda: 999999)
+
+        spec = PermissionCheckSpec(path=str(tmp_path), label="cache", purpose="test cache")
+        [perm_status] = PermissionDetector().get_statuses([spec])
+
+        cfg = DoctorConfig()
+        all_plugins = {p.name: True for p in DEFAULT_CLAUDE_PLUGINS}
+        all_tools = {t.name: True for t in DEFAULT_NPX_TOOLS}
+        s = _make_status_set(plugins_present=all_plugins, tools_present=all_tools)
+        plan = build_install_plan(cfg, **s, permissions=[perm_status])
+
+        # Plan should now contain exactly one action — the manual permission block.
+        assert len(plan.actions) == 1
+        action = plan.actions[0]
+        assert action.runnable is False
+        assert action.cmd is None
+        assert "fix permissions" in action.label
+        assert "sudo chown -R 999999:999999" in (action.manual_block or "")
+
+    def test_default_permission_checks_cover_npm_and_claude(self):
+        # Regression guard: the bundled defaults must include ~/.npm so the
+        # Debian incident doesn't silently fall off the radar in a refactor.
+        from sccs.doctor.defaults import DEFAULT_PERMISSION_CHECKS
+
+        paths = [c.path for c in DEFAULT_PERMISSION_CHECKS]
+        assert "~/.npm" in paths
+        assert "~/.claude" in paths
+        assert "~/.config/sccs" in paths
