@@ -28,7 +28,10 @@ DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
 DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
     NpxToolSpec(
         name="get-shit-done-cc",
-        invocation=["npx", "get-shit-done-cc", "--claude", "--global", "--force-statusline"],
+        # `-y` auto-accepts npx's "Need to install... Ok to proceed?" prompt.
+        # Without it, fresh Linux hosts hang on stdin (the prompt is hidden by
+        # capture_output=True in runner._run).
+        invocation=["npx", "-y", "get-shit-done-cc", "--claude", "--global", "--force-statusline"],
         # `get-shit-done-cc` only patches ~/.claude/ config — it never drops a
         # binary on PATH. Detection therefore falls back to the doctor state
         # file once we've recorded a successful run.

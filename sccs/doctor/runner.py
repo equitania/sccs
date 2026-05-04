@@ -59,6 +59,10 @@ def _run(
             capture_output=capture,
             text=True,
             timeout=timeout,
+            # Doctor child processes are non-interactive by contract — any
+            # subprocess that asks for stdin should fail fast, not hang the
+            # parent for `timeout` seconds (see #npx-y-fix).
+            stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError as err:
         raise DoctorError(f"Command not found: {cmd[0]}") from err

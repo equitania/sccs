@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 2.22.1 (04.05.2026)
+
+### Fixed
+- **`sccs doctor install` hung indefinitely on Debian 13 (and any Linux host without an `npx` cache).** Root cause was a two-step interaction:
+  - `defaults.py` invoked `npx get-shit-done-cc ...` without the `-y` flag, so on a host where the package was not yet cached `npx` printed `Need to install the following packages: get-shit-done-cc — Ok to proceed? (y)` to stdout and waited on stdin.
+  - `runner._run` used `subprocess.run(..., capture_output=True)`, which pipes stdout/stderr (so the prompt was invisible to the user) but inherits stdin from the parent — so `npx` waited for an answer that the user could not see was being asked. Net effect: the doctor process froze for the full 300 s subprocess timeout.
+  - On macOS the same code path worked because previous doctor sprints had already populated the `npx` cache, so `npx` skipped the confirmation prompt entirely.
+- `DEFAULT_NPX_TOOLS[0].invocation` now starts with `["npx", "-y", ...]` so the npx confirmation auto-accepts on every host. `-y` is a no-op on cached hosts (macOS), so the change is safe there too.
+
+### Hardened
+- **`runner._run` now passes `stdin=subprocess.DEVNULL`** to every doctor subprocess. SCCS doctor is non-interactive by contract — every confirmation is collected up-front via `questionary` *before* the subprocess runs, so any child process that still asks for stdin should fail fast (EOF) instead of hanging the parent for `timeout` seconds. Defends against future hangs from `claude plugin install` (potential "Trust this marketplace?" prompts) and any other tool that might silently expect stdin.
+
+### Tests
+- 2 new tests in `tests/test_doctor.py::TestRunnerSecurity`:
+  - `test_run_passes_stdin_devnull` — patches `subprocess.run` and asserts that `_run(["echo", "x"])` forwards `stdin=subprocess.DEVNULL`.
+  - `test_default_npx_get_shit_done_uses_dash_y` — asserts `DEFAULT_NPX_TOOLS[0].invocation[1] == "-y"` so a future refactor that drops the flag is caught at test time, not on a Debian box.
+
 ## Version 2.22.0 (04.05.2026)
 
 ### Added

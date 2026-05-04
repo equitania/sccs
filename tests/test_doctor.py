@@ -101,6 +101,25 @@ class TestRunnerSecurity:
         with pytest.raises(DoctorError, match="Command not found"):
             _run(["this-binary-does-not-exist-xyz123"])
 
+    def test_run_passes_stdin_devnull(self):
+        # Defensive hardening: any doctor subprocess that asks for stdin
+        # should fail fast instead of hanging the parent for `timeout` seconds.
+        # Regression guard for the Debian 13 hang where npx asked
+        # "Ok to proceed? (y)" and waited on stdin forever.
+        fake = subprocess.CompletedProcess(args=["echo"], returncode=0, stdout="ok", stderr="")
+        with patch("sccs.doctor.runner.subprocess.run", return_value=fake) as run_mock:
+            _run(["echo", "x"])
+        kwargs = run_mock.call_args.kwargs
+        assert kwargs["stdin"] is subprocess.DEVNULL
+
+    def test_default_npx_get_shit_done_uses_dash_y(self):
+        # Without `-y`, npx prompts on stdout for "Need to install... Ok to
+        # proceed?" on Linux/fresh systems — and capture_output=True hides
+        # that prompt from the user. Regression guard for the v2.22.x Debian hang.
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "get-shit-done-cc")
+        assert spec.invocation[0] == "npx"
+        assert spec.invocation[1] == "-y"
+
 
 # --------------------------------------------------------------------------- #
 # Node version parsing & detector                                             #
