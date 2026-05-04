@@ -136,19 +136,35 @@ def _plugin_install_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
     return actions
 
 
+def _effective_update_target(status: PluginStatus) -> str:
+    """Return the `name@marketplace` argv that actually exists for `claude plugin update`.
+
+    `claude plugin update` always requires the EXACT installed identifier — bare
+    names fail with "Plugin not found", and so does the default marketplace when
+    the plugin was installed under a different one. Therefore we always prefer
+    `found_marketplace` (what `claude plugin list` actually reports) over the
+    user-configured `marketplace` (what the user wishes were installed).
+    """
+    if status.found_marketplace:
+        return f"{status.spec.name}@{status.found_marketplace}"
+    # Fallback: no marketplace anywhere — pass the bare name and let the CLI
+    # surface its own error rather than silently dropping the action.
+    return status.spec.install_target
+
+
 def _plugin_update_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
     actions: list[DoctorAction] = []
     for st in statuses:
         if not st.installed:
             # Skip — install plan covers missing plugins.
             continue
-        spec = st.spec
+        target = _effective_update_target(st)
         actions.append(
             DoctorAction(
-                label=f"update plugin {spec.install_target}",
-                cmd=["claude", "plugin", "update", spec.install_target],
+                label=f"update plugin {target}",
+                cmd=["claude", "plugin", "update", target],
                 runnable=True,
-                component=f"plugin:{spec.name}",
+                component=f"plugin:{st.spec.name}",
             )
         )
     return actions

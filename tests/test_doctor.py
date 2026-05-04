@@ -304,8 +304,20 @@ class TestDoctorConfig:
 # --------------------------------------------------------------------------- #
 
 
-def _make_status_set(node_ok=True, cli_ok=True, plugins_present=None, tools_present=None):
-    """Build the four detector results for plan tests."""
+def _make_status_set(
+    node_ok=True,
+    cli_ok=True,
+    plugins_present=None,
+    tools_present=None,
+    plugin_found_marketplace=None,
+    plugin_detection_source=None,
+):
+    """Build the four detector results for plan tests.
+
+    ``plugin_found_marketplace`` and ``plugin_detection_source`` accept
+    ``{plugin_name: value}`` dicts so individual tests can simulate the
+    alternative-marketplace and missing-marketplace cases.
+    """
     from sccs.doctor.detectors import (
         ClaudeCliStatus,
         NodeStatus,
@@ -315,9 +327,19 @@ def _make_status_set(node_ok=True, cli_ok=True, plugins_present=None, tools_pres
 
     plugins_present = plugins_present if plugins_present is not None else {}
     tools_present = tools_present if tools_present is not None else {}
+    plugin_found_marketplace = plugin_found_marketplace or {}
+    plugin_detection_source = plugin_detection_source or {}
 
     plugin_statuses = [
-        PluginStatus(spec=spec, installed=plugins_present.get(spec.name, False), update_available=None)
+        PluginStatus(
+            spec=spec,
+            installed=plugins_present.get(spec.name, False),
+            update_available=None,
+            detection_source=plugin_detection_source.get(
+                spec.name, "exact" if plugins_present.get(spec.name, False) else "missing"
+            ),
+            found_marketplace=plugin_found_marketplace.get(spec.name),
+        )
         for spec in DEFAULT_CLAUDE_PLUGINS
     ]
     tool_statuses = [
@@ -392,10 +414,69 @@ class TestBuildInstallPlan:
 class TestBuildUpdatePlan:
     def test_update_plan_includes_installed_plugins(self):
         cfg = DoctorConfig()
-        s = _make_status_set(plugins_present={"claude-mem": True})
+        s = _make_status_set(
+            plugins_present={"claude-mem": True},
+            plugin_found_marketplace={"claude-mem": "thedotmack"},
+        )
         plan = build_update_plan(cfg, **s)
         labels = [a.label for a in plan.actions]
         assert any("update plugin claude-mem" in label for label in labels)
+
+    def test_update_uses_found_marketplace_when_no_marketplace_configured(self):
+        """v2.21.3 fix: PluginSpec without marketplace must update via the
+        marketplace `claude plugin list` actually reports — `claude plugin
+        update claude-mem` (bare) returns 'Plugin not found'."""
+        cfg = DoctorConfig()
+        s = _make_status_set(
+            plugins_present={"claude-mem": True},
+            plugin_found_marketplace={"claude-mem": "thedotmack"},
+        )
+        plan = build_update_plan(cfg, **s)
+        actions = [a for a in plan.actions if a.component == "plugin:claude-mem"]
+        assert actions, "expected an update action for claude-mem"
+        assert actions[0].cmd == ["claude", "plugin", "update", "claude-mem@thedotmack"]
+        assert actions[0].label == "update plugin claude-mem@thedotmack"
+
+    def test_update_uses_alternative_marketplace_when_configured_marketplace_absent(self):
+        """v2.21.3 fix: when superpowers is installed under
+        `superpowers-marketplace` but the user configured
+        `claude-plugins-official`, the update must hit the marketplace where
+        the plugin actually lives — otherwise `claude plugin update` errors
+        with 'Plugin "superpowers" is not installed'."""
+        cfg = DoctorConfig()
+        s = _make_status_set(
+            plugins_present={"superpowers": True},
+            plugin_found_marketplace={"superpowers": "superpowers-marketplace"},
+            plugin_detection_source={"superpowers": "alternative"},
+        )
+        plan = build_update_plan(cfg, **s)
+        actions = [a for a in plan.actions if a.component == "plugin:superpowers"]
+        assert actions, "expected an update action for superpowers"
+        # NOT spec.install_target ("superpowers@claude-plugins-official"),
+        # which would fail at runtime — must be the actually-installed target.
+        assert actions[0].cmd == [
+            "claude",
+            "plugin",
+            "update",
+            "superpowers@superpowers-marketplace",
+        ]
+
+    def test_update_falls_back_to_install_target_when_no_marketplace_known(self):
+        """Defensive: if neither found_marketplace nor a configured marketplace
+        is available, surface the bare name and let `claude plugin update`
+        produce its own error message rather than silently dropping the action."""
+        cfg = DoctorConfig()
+        # claude-mem default has marketplace=None; simulate `claude plugin list`
+        # output that contained no @marketplace token at all (bare-name match).
+        s = _make_status_set(
+            plugins_present={"claude-mem": True},
+            plugin_found_marketplace={},
+            plugin_detection_source={"claude-mem": "bare"},
+        )
+        plan = build_update_plan(cfg, **s)
+        actions = [a for a in plan.actions if a.component == "plugin:claude-mem"]
+        assert actions
+        assert actions[0].cmd == ["claude", "plugin", "update", "claude-mem"]
 
 
 # --------------------------------------------------------------------------- #

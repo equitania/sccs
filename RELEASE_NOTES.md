@@ -1,5 +1,17 @@
 # Release Notes
 
+## Version 2.21.3 (04.05.2026)
+
+### Fixed
+- **`sccs doctor update` failed for plugins installed under a non-default marketplace.** Two cases observed in the wild:
+  - `claude plugin update superpowers@claude-plugins-official` returned `✘ Failed to update plugin "superpowers@claude-plugins-official": Plugin "superpowers" is not installed`, because `superpowers` was actually installed via `superpowers-marketplace` (correctly classified as `alternative` in v2.21.2 but the update still targeted the configured marketplace).
+  - `claude plugin update claude-mem` returned `✘ Failed to update plugin "claude-mem": Plugin "claude-mem" not found`, because the bundled `PluginSpec(name="claude-mem", marketplace=None)` produced `install_target == "claude-mem"` while the CLI requires `<name>@<marketplace>` even though the install side accepts the bare name.
+- The new helper `installer._effective_update_target(status)` always prefers `PluginStatus.found_marketplace` (what `claude plugin list` actually reports) over the user-configured marketplace; falls back to `spec.install_target` only when no marketplace was detected at all. Update labels and argv now both reflect the effective target.
+
+### Tests
+- 3 new tests in `tests/test_doctor.py::TestBuildUpdatePlan` covering: bare-name spec gets `name@found_marketplace`, alternative-marketplace spec uses `name@found_marketplace` instead of the configured one, and the bare-name fallback when no marketplace is detectable.
+- `_make_status_set` test helper now accepts `plugin_found_marketplace` and `plugin_detection_source` so future plan tests can simulate the alternative-marketplace classification.
+
 ## Version 2.21.2 (04.05.2026)
 
 ### Fixed
