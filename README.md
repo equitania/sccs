@@ -1,6 +1,6 @@
 # SCCS - SkillsCommandsConfigsSync
 
-![SCCS Overview](sccs_gemini.jpg)
+![SCCS Overview](sccs-openai.png)
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
@@ -33,7 +33,7 @@ SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für 
 - **Auto-Expire** — Zeitgesteuerte Archivierung abgelaufener Memory-Items
 - **Antigravity-Integration** — Skills zu Antigravity IDE Prompts migrieren
 - **Claude Desktop-Integration** — Repository als Trusted Folder registrieren
-- **`sccs doctor`** — System & Plugin Health-Check für Node.js, `claude` CLI, Claude-Plugins und npx-Helper-Tools (plattformspezifisch: `brew` / `winget` / NodeSource-Manual)
+- **`sccs doctor`** — System & Plugin Health-Check für Node.js, `claude` CLI, Claude-Plugins und npx-Helper-Tools (plattformspezifisch: `brew` / `winget` / NodeSource-Manual). Doctor-installierte Dateien (z.B. `gsd-*` Skills/Hooks/Agents) werden automatisch vom Sync ausgeschlossen, damit sie keine Konflikte zwischen Maschinen erzeugen.
 
 ### Voraussetzungen
 
@@ -679,7 +679,7 @@ SCCS is a YAML-configured bidirectional synchronization tool for Claude Code fil
 - **Auto-Expire** — Time-based archiving of expired memory items
 - **Antigravity Integration** — Migrate skills to Antigravity IDE prompts
 - **Claude Desktop Integration** — Register repository as trusted folder
-- **`sccs doctor`** — System & plugin health checks for Node.js, the `claude` CLI, configured Claude plugins and npx helper tools (platform-aware: `brew` / `winget` / NodeSource manual)
+- **`sccs doctor`** — System & plugin health checks for Node.js, the `claude` CLI, configured Claude plugins and npx helper tools (platform-aware: `brew` / `winget` / NodeSource manual). Files installed by the doctor (e.g. `gsd-*` skills/hooks/agents) are automatically excluded from sync so they never produce cross-machine conflicts.
 
 ### Prerequisites
 
