@@ -430,6 +430,8 @@ def get_default_settings_ensure(category_name: str) -> dict[str, Any] | None:
     block = cat_default.get("settings_ensure")
     if not block:
         return None
+    if not isinstance(block, dict):
+        return None
     return block
 
 

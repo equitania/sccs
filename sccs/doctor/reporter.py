@@ -81,10 +81,10 @@ def render_doctor_report(
 
     table.add_row(*_node_row(node, min_node_major))
     table.add_row(*_claude_cli_row(claude_cli))
-    for st in plugins:
-        table.add_row(*_plugin_row(st))
-    for st in npx_tools:
-        table.add_row(*_npx_row(st))
+    for plugin_st in plugins:
+        table.add_row(*_plugin_row(plugin_st))
+    for npx_st in npx_tools:
+        table.add_row(*_npx_row(npx_st))
 
     console.print(table)
     console.print(f"[dim]Platform: {node.platform}[/dim]")

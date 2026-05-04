@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.21.4 (04.05.2026)
+
+### Fixed
+- **GitHub Actions `lint` job (mypy step) failed on v2.21.3.** Three errors surfaced:
+  - `sccs/doctor/reporter.py:86,87` — `render_doctor_report` reused the loop variable name `st` for both the `plugins` list (`PluginStatus`) and the `npx_tools` list (`NpxToolStatus`); mypy correctly flagged the implicit type narrowing collision (`Incompatible types in assignment`). Renamed the variables to `plugin_st` / `npx_st` so each loop has its own typed name.
+  - `sccs/config/defaults.py:433` — `get_default_settings_ensure` returned `cat_default.get("settings_ensure")` whose static type is `Any`, while the function is declared as `-> dict[str, Any] | None` (`no-any-return`). Added an explicit `isinstance(block, dict)` narrowing before returning so mypy can prove the return type.
+- All three errors were pre-existing on origin/main but only surfaced now because the CI mypy step compiles the same source set as the local `uv run mypy sccs/` command. Local `pytest` and `ruff` were already clean — this is a strict-type-check fix only, no runtime behaviour change.
+
 ## Version 2.21.3 (04.05.2026)
 
 ### Fixed
