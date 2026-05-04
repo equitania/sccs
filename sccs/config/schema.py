@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from sccs.doctor.schema import DoctorConfig
+
 # Git remote name: alphanumeric start, then alphanumerics/underscore/dot/hyphen.
 # Leading hyphen is forbidden to block option-injection (e.g. "--upload-pack=evil").
 _GIT_REMOTE_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
@@ -174,6 +176,14 @@ class SccsConfig(BaseModel):
 
     repository: RepositoryConfig = Field(description="Repository settings")
     sync_categories: dict[str, SyncCategory] = Field(default_factory=dict, description="Sync category definitions")
+    # Doctor block is fully optional and backwards-compatible: legacy
+    # config.yaml files without a `doctor:` key get the bundled defaults
+    # via Field(default_factory=DoctorConfig).
+    doctor: DoctorConfig = Field(
+        default_factory=DoctorConfig,
+        description="System & plugin health-check configuration (sccs doctor).",
+    )
+
     global_exclude: list[str] = Field(
         default_factory=lambda: [
             # System files

@@ -1486,6 +1486,161 @@ def integrations_trust_repo(ctx: click.Context, dry_run: bool) -> None:
         sys.exit(1)
 
 
+# --- Doctor command group ---
+
+
+def _collect_doctor_statuses(doctor_cfg, state_manager=None):
+    """Build all four detector results once. Returns a dict for reuse."""
+    from sccs.doctor.detectors import (
+        ClaudeCliDetector,
+        ClaudePluginDetector,
+        NodeDetector,
+        NpxToolDetector,
+    )
+    from sccs.doctor.state import DoctorStateManager
+
+    plugin_specs = doctor_cfg.effective_plugins()
+    npx_specs = doctor_cfg.effective_npx_tools()
+    state = state_manager or DoctorStateManager()
+
+    return {
+        "node": NodeDetector().get_status(doctor_cfg.min_node_major),
+        "claude_cli": ClaudeCliDetector().get_status(),
+        "plugins": ClaudePluginDetector().get_statuses(plugin_specs),
+        "npx_tools": NpxToolDetector(state_manager=state).get_statuses(npx_specs),
+    }
+
+
+def _load_doctor_config():
+    """Load DoctorConfig from sccs config.yaml or fall back to bundled defaults."""
+    from sccs.doctor.schema import DoctorConfig
+
+    try:
+        config = load_config()
+        return config.doctor
+    except FileNotFoundError:
+        return DoctorConfig()
+
+
+@cli.group("doctor")
+def doctor_group() -> None:
+    """System & plugin health checks for Claude Code environments.
+
+    \b
+    Detects whether Node.js, the `claude` CLI, the configured Claude
+    plugins and the npx helper tools are installed. Offers platform-aware
+    install/update flows behind explicit confirm prompts.
+
+    \b
+    Examples:
+        sccs doctor check          Read-only status report
+        sccs doctor install        Install missing components (with confirm)
+        sccs doctor update         Refresh plugins + npx tools
+    """
+
+
+@doctor_group.command("check")
+@click.pass_context
+def doctor_check(ctx: click.Context) -> None:
+    """Print a status table of Node.js, claude CLI, plugins and npx tools."""
+    from sccs.doctor.reporter import has_problems, render_doctor_report
+
+    console = ctx.obj["console"]
+    doctor_cfg = _load_doctor_config()
+    statuses = _collect_doctor_statuses(doctor_cfg)
+
+    render_doctor_report(
+        console,
+        node=statuses["node"],
+        claude_cli=statuses["claude_cli"],
+        plugins=statuses["plugins"],
+        npx_tools=statuses["npx_tools"],
+        min_node_major=doctor_cfg.min_node_major,
+    )
+
+    if has_problems(
+        node=statuses["node"],
+        claude_cli=statuses["claude_cli"],
+        plugins=statuses["plugins"],
+        npx_tools=statuses["npx_tools"],
+    ):
+        console.print()
+        console.print_warning("Run `sccs doctor install` to fix missing items.")
+        sys.exit(1)
+
+
+@doctor_group.command("install")
+@click.option("--yes", is_flag=True, default=False, help="Skip confirm prompts (CI use only).")
+@click.pass_context
+def doctor_install(ctx: click.Context, yes: bool) -> None:
+    """Install missing system components after a confirm prompt per action."""
+    from sccs.doctor.installer import build_install_plan, execute_plan
+    from sccs.doctor.reporter import render_execute_result
+    from sccs.doctor.state import DoctorStateManager
+
+    console = ctx.obj["console"]
+    doctor_cfg = _load_doctor_config()
+    state = DoctorStateManager()
+    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state)
+
+    plan = build_install_plan(
+        doctor_cfg,
+        node=statuses["node"],
+        claude_cli=statuses["claude_cli"],
+        plugins=statuses["plugins"],
+        npx_tools=statuses["npx_tools"],
+    )
+
+    if plan.is_empty():
+        console.print_success("Nothing to install — system is up to spec.")
+        return
+
+    console.print_info(f"Planned actions: {len(plan.actions)}")
+    if yes:
+        console.print_warning("--yes given: confirm prompts will be SKIPPED.")
+
+    result = execute_plan(plan, assume_yes=yes, print_fn=console.print, state_manager=state)
+    render_execute_result(console, result)
+    if result.failed:
+        sys.exit(1)
+
+
+@doctor_group.command("update")
+@click.option("--yes", is_flag=True, default=False, help="Skip confirm prompts (CI use only).")
+@click.pass_context
+def doctor_update(ctx: click.Context, yes: bool) -> None:
+    """Update Claude plugins and refresh npx helper tools."""
+    from sccs.doctor.installer import build_update_plan, execute_plan
+    from sccs.doctor.reporter import render_execute_result
+    from sccs.doctor.state import DoctorStateManager
+
+    console = ctx.obj["console"]
+    doctor_cfg = _load_doctor_config()
+    state = DoctorStateManager()
+    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state)
+
+    plan = build_update_plan(
+        doctor_cfg,
+        node=statuses["node"],
+        claude_cli=statuses["claude_cli"],
+        plugins=statuses["plugins"],
+        npx_tools=statuses["npx_tools"],
+    )
+
+    if plan.is_empty():
+        console.print_success("Nothing to update.")
+        return
+
+    console.print_info(f"Planned actions: {len(plan.actions)}")
+    if yes:
+        console.print_warning("--yes given: confirm prompts will be SKIPPED.")
+
+    result = execute_plan(plan, assume_yes=yes, print_fn=console.print, state_manager=state)
+    render_execute_result(console, result)
+    if result.failed:
+        sys.exit(1)
+
+
 def main() -> None:
     """Main entry point."""
     cli(obj={})

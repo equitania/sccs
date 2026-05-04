@@ -12,7 +12,7 @@
 
 SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für Claude Code Dateien und optionale Shell-Konfigurationen. Es hält Skills, Commands, Hooks, Scripts und Shell-Configs zwischen einer lokalen Installation und einem Git-Repository synchron.
 
-**Version:** 2.20.3 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.21.2 · **Lizenz:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Funktionen
 
@@ -33,6 +33,7 @@ SCCS ist ein YAML-konfiguriertes bidirektionales Synchronisierungswerkzeug für 
 - **Auto-Expire** — Zeitgesteuerte Archivierung abgelaufener Memory-Items
 - **Antigravity-Integration** — Skills zu Antigravity IDE Prompts migrieren
 - **Claude Desktop-Integration** — Repository als Trusted Folder registrieren
+- **`sccs doctor`** — System & Plugin Health-Check für Node.js, `claude` CLI, Claude-Plugins und npx-Helper-Tools (plattformspezifisch: `brew` / `winget` / NodeSource-Manual)
 
 ### Voraussetzungen
 
@@ -437,6 +438,12 @@ sccs categories list             # Aktivierte Kategorien
 sccs categories list --all       # Alle (inkl. deaktivierte)
 sccs categories enable fish      # Kategorie aktivieren
 sccs categories disable fish     # Kategorie deaktivieren
+
+# Doctor (System & Plugin Health)
+sccs doctor check                # Read-only Status-Tabelle (Exit 1 bei Problemen)
+sccs doctor install              # Installiert fehlende Komponenten (Confirm pro Action)
+sccs doctor install --yes        # Skip Confirms (CI use only)
+sccs doctor update               # Plugins + npx-Tools aktualisieren
 ```
 
 ### Standard-Kategorien
@@ -651,7 +658,7 @@ AGPL-3.0 — Equitania Software GmbH
 
 SCCS is a YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations. It keeps skills, commands, hooks, scripts, and shell configs in sync between a local installation and a Git repository.
 
-**Version:** 2.20.3 · **License:** AGPL-3.0 · **Python:** ≥3.10
+**Version:** 2.21.2 · **License:** AGPL-3.0 · **Python:** ≥3.10
 
 ### Features
 
@@ -672,6 +679,7 @@ SCCS is a YAML-configured bidirectional synchronization tool for Claude Code fil
 - **Auto-Expire** — Time-based archiving of expired memory items
 - **Antigravity Integration** — Migrate skills to Antigravity IDE prompts
 - **Claude Desktop Integration** — Register repository as trusted folder
+- **`sccs doctor`** — System & plugin health checks for Node.js, the `claude` CLI, configured Claude plugins and npx helper tools (platform-aware: `brew` / `winget` / NodeSource manual)
 
 ### Prerequisites
 
@@ -1076,6 +1084,12 @@ sccs categories list             # List enabled categories
 sccs categories list --all       # All (incl. disabled)
 sccs categories enable fish      # Enable category
 sccs categories disable fish     # Disable category
+
+# Doctor (system & plugin health)
+sccs doctor check                # Read-only status table (exit 1 on problems)
+sccs doctor install              # Install missing components (confirm per action)
+sccs doctor install --yes        # Skip confirms (CI use only)
+sccs doctor update               # Update plugins + refresh npx tools
 ```
 
 ### Default Categories

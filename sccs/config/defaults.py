@@ -401,6 +401,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "log_file": "~/.config/sccs/sync.log",
         "sync_history": "~/.config/sccs/history.yaml",
     },
+    # Doctor — system & plugin health checks (sccs doctor check/install/update).
+    # Only `extra_*` keys are emitted by default so users can extend the
+    # bundled lists without having to copy the full default into their
+    # config.yaml. Set `plugins:` or `npx_tools:` explicitly to fully
+    # override the built-in defaults.
+    "doctor": {
+        "min_node_major": 20,
+        "extra_plugins": [],
+        "extra_npx_tools": [],
+    },
 }
 
 

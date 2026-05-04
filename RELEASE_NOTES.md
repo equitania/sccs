@@ -1,5 +1,47 @@
 # Release Notes
 
+## Version 2.21.2 (04.05.2026)
+
+### Fixed
+- **`sccs doctor check` reported `superpowers@claude-plugins-official` as MISSING when the plugin was actually installed under a different marketplace** (e.g. `superpowers@superpowers-marketplace`). The previous detector did a case-insensitive substring search and a bare-token lookup; neither catches a plugin that is installed under an alternative marketplace, because the only token in `claude plugin list` is the joined `name@marketplace` string. `ClaudePluginDetector._detect_plugin` now uses a regex with explicit word boundaries (`(?<![\w\-])<name>@<marketplace>`) so:
+  - `superpowers@superpowers-marketplace` correctly satisfies a request for `superpowers@<anything>` and is reported as `OUTDATED` with detail `installed via superpowers-marketplace` (not MISSING — the plugin is there, just from a different source);
+  - the longer name `superpowers-developing-for-claude-code@superpowers-marketplace` no longer false-matches a request for the shorter `superpowers` name (regression that the bare-token fallback also missed).
+- New `PluginStatus.detection_source: str` field with values `"exact" | "alternative" | "bare" | "missing"` and `PluginStatus.found_marketplace: str | None` so the reporter can render the alternative-marketplace case explicitly.
+- `sccs doctor check`'s inline-summary line now appends `[yellow]alt marketplace: N[/yellow]` when any plugin was found under a non-configured marketplace, so the user gets a one-line heads-up alongside the existing `plugins missing: N`.
+
+### Tests
+- 4 new tests in `tests/test_doctor.py::TestClaudePluginDetector` covering the alternative-marketplace classification, word-boundary protection against the longer-name false match, exact-match precedence, and the no-marketplace-configured first-match case.
+
+## Version 2.21.1 (04.05.2026)
+
+### Fixed
+- **`sccs doctor check` reported `get-shit-done-cc` as MISSING even right after a successful `sccs doctor install`.** Root cause: the tool only patches `~/.claude/` configuration and never drops a binary on `PATH`, so the previous `shutil.which()`-only detection could never observe a successful install. SCCS now persists per-tool run markers in `~/.config/sccs/.doctor_state.yaml` and the `NpxToolDetector` consults the state file as a fallback for tools that opt in via `detect_via_state=True`. The marker carries a hash of the invocation list, so changing the configured argv (e.g. removing `--force-statusline`) invalidates the state and the tool is reported as missing again until re-installed.
+- The bundled `get-shit-done-cc` default in `sccs/doctor/defaults.py` now sets `detect_via_state=True`. Existing user configs continue to work — the field defaults to False and is therefore opt-in.
+
+### Added
+- New module `sccs/doctor/state.py` (`DoctorStateManager`, `DoctorState`, `NpxToolMark`).
+- `NpxToolStatus.detection_source: str` (`"path" | "state" | "missing"`) so the reporter can distinguish "found on PATH" from "found via state cache".
+- 10 new tests in `tests/test_doctor.py` covering `DoctorStateManager` round-trip, invocation-hash invalidation, corrupt-yaml resilience, the new state-fallback paths in `NpxToolDetector` and the install-success state-write contract.
+
+## Version 2.21.0 (04.05.2026)
+
+### Added
+- **`sccs doctor` — system & plugin health checks** for Claude Code environments. New top-level command group with three subcommands:
+  - `sccs doctor check` — read-only Rich status table for Node.js (>= 20), the `claude` CLI, the configured Claude plugins (`skill-creator`, `superpowers`, `frontend-design`, `context-mode`, `claude-mem`) and the bundled npx helper tool (`get-shit-done-cc`). Exit-code 1 when anything is missing or outdated.
+  - `sccs doctor install` — installs missing components after an explicit `questionary.confirm` per action (default: No). `--yes` skips prompts for CI use only.
+  - `sccs doctor update` — refreshes installed plugins via `claude plugin update` and re-runs each npx tool to fetch the latest release.
+- **Platform-aware Node.js install hints** in `sccs/doctor/defaults.py:NODE_INSTALL`:
+  - macOS → `brew install node` (runnable)
+  - Windows → `winget install OpenJS.NodeJS` (runnable)
+  - Linux → NodeSource `setup_20.x` + `apt-get install` (print-only — SCCS never invokes `sudo`)
+- **Hardcoded defaults with config override.** New `doctor:` block in `~/.config/sccs/config.yaml` lets users append `extra_plugins` / `extra_npx_tools` without losing the bundled defaults, or fully replace them with `plugins:` / `npx_tools:`. Legacy configs without a `doctor:` key keep working — `SccsConfig.doctor` defaults to a fully-populated `DoctorConfig`.
+- New module `sccs/doctor/` (~700 LOC across `defaults.py`, `schema.py`, `runner.py`, `detectors.py`, `installer.py`, `reporter.py`).
+- 40 new tests in `tests/test_doctor.py` covering schema validation, argument-injection guards, all four detectors, install/update plan construction, and the print-only sudo guarantee.
+
+### Security
+- `sccs/doctor/runner.py` mirrors the argument-injection guard from `sccs/git/operations.py`: every command head is validated against an allowlist regex, leading `-` is rejected (no option-injection), and the literal string `sudo` is rejected at the runner *and* schema layers (`NodeInstallSpec` validator). `subprocess.run` is always called with `shell=False`.
+- The Linux Node-install spec uses `runnable=False` so the NodeSource recipe (which requires `sudo`) is rendered as a copy-paste block and *cannot* be auto-executed by accident.
+
 ## Version 2.20.3 (28.04.2026)
 
 ### Fixed
