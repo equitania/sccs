@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.24.0 (05.05.2026)
+
+### Added
+- **`sccs doctor` now manages [Playwright CLI](https://github.com/microsoft/playwright-cli) (`@playwright/cli`).** A second entry has been added to `DEFAULT_NPX_TOOLS`: `playwright-cli` is now installed/updated via `npm install -g @playwright/cli@latest` whenever the user runs `sccs doctor install` or `sccs doctor update`. The detector resolves the binary via `shutil.which("playwright-cli")` (`detect_via_state=False`), so a fresh machine reports `missing` until the install action runs. The previous fish-shell workaround (`pw-update.fish`) is no longer required — both entry points stay compatible because they use the exact same `npm install -g` invocation.
+- **Why `npm install -g` instead of `npx -y`?** Playwright CLI ships a real binary on PATH that is invoked many times per session. A one-shot `npx -y` would re-fetch the package on every call. `npm install -g …@latest` handles both fresh installs and updates because `_npx_update_actions` re-runs the same invocation.
+- **Out of scope (intentional):** SCCS does *not* attempt to copy a `SKILL.md` out of the npm package. `@playwright/cli@0.1.11` does not ship one, so the corresponding step in the fish workaround prints `SKILL.md not found in npm package (non-critical)` and was the source of "skills are not installed correctly" confusion. Skill content for `playwright-cli` belongs in the sccs-sync repo under `.claude/skills/playwright-cli/` and is distributed via `sccs sync`.
+
+### Tests
+- 3 new tests in `tests/test_doctor.py`:
+  - `TestRunnerSecurity::test_default_playwright_cli_uses_npm_install_global` — regression guard against a future refactor that switches to `npx`.
+  - `TestNpxToolDetector::test_playwright_cli_present_when_binary_on_path` — end-to-end check that the new default flows through `NpxToolDetector` with `detect_via_state=False`.
+  - `TestNpxToolDetector::test_playwright_cli_missing_when_binary_absent` — without state-file fallback, missing binary must surface as not-installed so `build_install_plan` picks up the action.
+
 ## Version 2.23.0 (04.05.2026)
 
 ### Added

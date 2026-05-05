@@ -42,6 +42,21 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
         # file once we've recorded a successful run.
         detect_via_state=True,
     ),
+    NpxToolSpec(
+        name="playwright-cli",
+        # Persistent global install — `playwright-cli` ends up on PATH and is
+        # invoked many times per session, so a one-shot `npx -y` would re-fetch
+        # the package every time. `npm install -g …@latest` covers both fresh
+        # installs and updates: _npx_update_actions re-runs the same invocation,
+        # which is exactly what we want here. `npm` is on the runner allowlist
+        # in runner._validate_head.
+        invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+        # Detection uses `shutil.which("playwright-cli")` — the binary is
+        # exposed under that name regardless of whether the package itself is
+        # called `@playwright/cli` (scoped name).
+        detect_command="playwright-cli",
+        detect_via_state=False,
+    ),
 ]
 
 # Filesystem paths whose ownership/writability matters for downstream doctor

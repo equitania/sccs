@@ -120,6 +120,17 @@ class TestRunnerSecurity:
         assert spec.invocation[0] == "npx"
         assert spec.invocation[1] == "-y"
 
+    def test_default_playwright_cli_uses_npm_install_global(self):
+        # Playwright-CLI ships a real binary on PATH (unlike get-shit-done-cc)
+        # and is invoked many times per session, so `npm install -g …@latest`
+        # is preferred over a one-shot `npx -y`. Regression guard against a
+        # future refactor that switches to npx and silently breaks the cached
+        # binary lookup.
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        assert spec.invocation == ["npm", "install", "-g", "@playwright/cli@latest"]
+        assert spec.detect_command == "playwright-cli"
+        assert spec.detect_via_state is False
+
 
 # --------------------------------------------------------------------------- #
 # Node version parsing & detector                                             #
@@ -293,6 +304,27 @@ class TestNpxToolDetector:
         monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
         statuses = NpxToolDetector().get_statuses([NpxToolSpec(name="bar", invocation=["npx", "bar"])])
         assert statuses[0].available is False
+
+    def test_playwright_cli_present_when_binary_on_path(self, monkeypatch):
+        # End-to-end check that the new playwright-cli default flows through
+        # the detector with detect_via_state=False (PATH-only lookup).
+        monkeypatch.setattr(
+            "sccs.doctor.detectors.which",
+            lambda name: "/opt/homebrew/bin/playwright-cli" if name == "playwright-cli" else None,
+        )
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        statuses = NpxToolDetector().get_statuses([spec])
+        assert statuses[0].available is True
+        assert statuses[0].binary_path == "/opt/homebrew/bin/playwright-cli"
+
+    def test_playwright_cli_missing_when_binary_absent(self, monkeypatch):
+        # Without state-file fallback (detect_via_state=False), missing binary
+        # must surface as not-installed so install_plan picks up the action.
+        monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        statuses = NpxToolDetector().get_statuses([spec])
+        assert statuses[0].available is False
+        assert statuses[0].binary_path is None
 
 
 # --------------------------------------------------------------------------- #
