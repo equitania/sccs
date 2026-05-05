@@ -77,6 +77,12 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
             package_subpath="@playwright/cli/skills/playwright-cli",
             target="~/.claude/skills/playwright-cli",
         ),
+        # Names of the browser bundles `playwright-cli install-browser <name>`
+        # extracts into the cache directory. Doctor uses these to detect
+        # missing browsers in `sccs doctor check`. The cache root is resolved
+        # at runtime via `$PLAYWRIGHT_BROWSERS_PATH` or the platform default
+        # (see detectors._resolve_playwright_cache).
+        browser_bundles=["chromium", "firefox"],
     ),
 ]
 

@@ -7,6 +7,8 @@ from __future__ import annotations
 from rich.table import Table
 
 from sccs.doctor.detectors import (
+    BrowserBundleStatus,
+    BundledSkillStatus,
     ClaudeCliStatus,
     NodeStatus,
     NpxToolStatus,
@@ -81,6 +83,24 @@ def _npx_row(status: NpxToolStatus) -> tuple[str, str, str]:
     return (label, _OK, status.binary_path or "found")
 
 
+def _bundled_skill_row(status: BundledSkillStatus) -> tuple[str, str, str]:
+    label = f"skill: {status.spec.name}"
+    if status.skill_md_present:
+        return (label, _OK, f"{status.target_path}/SKILL.md")
+    return (label, _MISSING, f"SKILL.md missing at {status.target_path}")
+
+
+def _browser_bundle_row(status: BrowserBundleStatus) -> tuple[str, str, str]:
+    label = f"browsers: {status.spec.name}"
+    declared = list(status.present.keys())
+    if status.all_present:
+        return (label, _OK, ", ".join(declared))
+    if not status.cache_dir_exists:
+        return (label, _MISSING, f"cache dir not found: {status.cache_dir}")
+    missing = [name for name, ok in status.present.items() if not ok]
+    return (label, _MISSING, f"missing: {', '.join(missing)}")
+
+
 def render_doctor_report(
     console: Console,
     *,
@@ -90,6 +110,8 @@ def render_doctor_report(
     npx_tools: list[NpxToolStatus],
     min_node_major: int,
     permissions: list[PermissionStatus] | None = None,
+    bundled_skills: list[BundledSkillStatus] | None = None,
+    browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -103,6 +125,12 @@ def render_doctor_report(
         table.add_row(*_plugin_row(plugin_st))
     for npx_st in npx_tools:
         table.add_row(*_npx_row(npx_st))
+    if bundled_skills:
+        for skill_st in bundled_skills:
+            table.add_row(*_bundled_skill_row(skill_st))
+    if browser_bundles:
+        for browser_st in browser_bundles:
+            table.add_row(*_browser_bundle_row(browser_st))
     if permissions:
         for perm_st in permissions:
             table.add_row(*_permission_row(perm_st))
@@ -134,6 +162,8 @@ def has_problems(
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
+    bundled_skills: list[BundledSkillStatus] | None = None,
+    browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> bool:
     """Return True if any component is missing/outdated or has a permission issue."""
     if not (node.installed and node.meets_minimum):
@@ -144,7 +174,11 @@ def has_problems(
         return True
     if any(not t.available for t in npx_tools):
         return True
-    return bool(permissions and any(not p.ok for p in permissions))
+    if permissions and any(not p.ok for p in permissions):
+        return True
+    if bundled_skills and any(not s.skill_md_present for s in bundled_skills):
+        return True
+    return bool(browser_bundles and any(not b.all_present for b in browser_bundles))
 
 
 def render_inline_summary(
@@ -155,6 +189,8 @@ def render_inline_summary(
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
+    bundled_skills: list[BundledSkillStatus] | None = None,
+    browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> None:
     """One-line summary used by `sccs status`."""
     parts: list[str] = []
@@ -183,6 +219,16 @@ def render_inline_summary(
         bad = [p for p in permissions if not p.ok]
         if bad:
             parts.append(f"[red]perm issues: {len(bad)}[/red]")
+
+    if bundled_skills:
+        missing_skills = [s.spec.name for s in bundled_skills if not s.skill_md_present]
+        if missing_skills:
+            parts.append(f"[red]skills missing: {len(missing_skills)}[/red]")
+
+    if browser_bundles:
+        missing_browsers = [b.spec.name for b in browser_bundles if not b.all_present]
+        if missing_browsers:
+            parts.append(f"[red]browsers missing: {len(missing_browsers)}[/red]")
 
     console.print(f"[bold]doctor:[/bold] {' · '.join(parts)}")
 

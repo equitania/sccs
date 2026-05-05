@@ -1492,6 +1492,8 @@ def integrations_trust_repo(ctx: click.Context, dry_run: bool) -> None:
 def _collect_doctor_statuses(doctor_cfg, state_manager=None):
     """Build all detector results once. Returns a dict for reuse."""
     from sccs.doctor.detectors import (
+        BrowserBundleDetector,
+        BundledSkillDetector,
         ClaudeCliDetector,
         ClaudePluginDetector,
         NodeDetector,
@@ -1511,6 +1513,8 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
         "plugins": ClaudePluginDetector().get_statuses(plugin_specs),
         "npx_tools": NpxToolDetector(state_manager=state).get_statuses(npx_specs),
         "permissions": PermissionDetector().get_statuses(permission_specs),
+        "bundled_skills": BundledSkillDetector().get_statuses(npx_specs),
+        "browser_bundles": BrowserBundleDetector().get_statuses(npx_specs),
     }
 
 
@@ -1560,6 +1564,8 @@ def doctor_check(ctx: click.Context) -> None:
         npx_tools=statuses["npx_tools"],
         min_node_major=doctor_cfg.min_node_major,
         permissions=statuses.get("permissions"),
+        bundled_skills=statuses.get("bundled_skills"),
+        browser_bundles=statuses.get("browser_bundles"),
     )
 
     if has_problems(
@@ -1568,6 +1574,8 @@ def doctor_check(ctx: click.Context) -> None:
         plugins=statuses["plugins"],
         npx_tools=statuses["npx_tools"],
         permissions=statuses.get("permissions"),
+        bundled_skills=statuses.get("bundled_skills"),
+        browser_bundles=statuses.get("browser_bundles"),
     ):
         console.print()
         console.print_warning("Run `sccs doctor install` to fix missing items.")
@@ -1595,6 +1603,8 @@ def doctor_install(ctx: click.Context, yes: bool) -> None:
         plugins=statuses["plugins"],
         npx_tools=statuses["npx_tools"],
         permissions=statuses.get("permissions"),
+        bundled_skills=statuses.get("bundled_skills"),
+        browser_bundles=statuses.get("browser_bundles"),
     )
 
     if plan.is_empty():
@@ -1632,6 +1642,8 @@ def doctor_update(ctx: click.Context, yes: bool) -> None:
         plugins=statuses["plugins"],
         npx_tools=statuses["npx_tools"],
         permissions=statuses.get("permissions"),
+        bundled_skills=statuses.get("bundled_skills"),
+        browser_bundles=statuses.get("browser_bundles"),
     )
 
     if plan.is_empty():

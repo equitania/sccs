@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.26.0 (05.05.2026)
+
+### Added
+- **`sccs doctor check` now verifies bundled Claude skills and browser bundles, not just the npm tool's binary on PATH.** Two diagnostic gaps from v2.25.x are closed:
+  1. **Bundled skills:** `BundledSkillDetector` checks that each `NpxToolSpec.bundled_skill.target/SKILL.md` exists. Without this, deleting `~/.claude/skills/playwright-cli/` left `check` happily reporting OK while Claude couldn't see the skill anymore.
+  2. **Browser bundles:** `BrowserBundleDetector` scans the resolved Playwright cache (`$PLAYWRIGHT_BROWSERS_PATH` → platform default: `~/.cache/ms-playwright` on Linux, `~/Library/Caches/ms-playwright` on macOS, `%LOCALAPPDATA%\ms-playwright` on Windows) for `<bundle>-*` subdirectories. Missing browsers now surface as `MISSING` rows instead of failing silently at first `pw open`.
+- **New `NpxToolSpec.browser_bundles: list[str]`** — declarative list of bundles a tool downloads via a separate post-install step. Validated with the same safe-name allowlist as `name`. Playwright-CLI default ships `["chromium", "firefox"]`; future tools that mirror this pattern get the diagnostic for free.
+- **Targeted repair actions in `build_install_plan`.** When the npm tool itself is on PATH but a bundled skill or browser is missing, the install plan now queues a single repair action — `_bundled_skill_action` or `<binary> install-browser <name>` — instead of re-running the entire install chain. When the tool itself is missing, the existing install path already covers everything; the new actions are deduplicated to avoid double-runs.
+- **Reporter integration:** `_bundled_skill_row` and `_browser_bundle_row` add two new rows per `NpxToolSpec` that opts in. `has_problems()` and `render_inline_summary()` count them so a missing skill or browser flips the doctor exit code to 1.
+
+### Tests
+- 20 new tests in `tests/test_doctor.py` across 6 classes: `TestBundledSkillDetector` (3), `TestBrowserBundleDetector` (6, incl. env-override + macOS path regression), `TestBundledSkillReporter` (2), `TestBrowserBundleReporter` (3), `TestBuildInstallPlanWithBundles` (3, incl. dedup-guard when tool itself is missing), `TestHasProblemsWithBundles` (3).
+
 ## Version 2.25.1 (05.05.2026)
 
 ### Fixed

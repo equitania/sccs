@@ -150,6 +150,16 @@ class NpxToolSpec(BaseModel):
             "the configured target after a successful install/update."
         ),
     )
+    browser_bundles: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of browser bundles the tool fetches via a separate post-install "
+            "step (e.g. `playwright-cli install-browser <name>` writes "
+            "`<cache>/<name>-<version>/`). Doctor scans the tool's cache "
+            "directory for matching subdirectories so the bundles appear in "
+            "`sccs doctor check` and trigger re-install when missing."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -182,6 +192,17 @@ class NpxToolSpec(BaseModel):
                 raise ValueError(f"post_install head must not start with '-': {head!r}")
             if not _SAFE_NAME_PATTERN.match(head):
                 raise ValueError(f"post_install head contains invalid characters: {head!r}")
+        return v
+
+    @field_validator("browser_bundles")
+    @classmethod
+    def _validate_browser_bundles(cls, v: list[str]) -> list[str]:
+        # Same allowlist as `name`: alphanumeric + `-`, no leading dash. We
+        # don't whitelist specific browser names (chromium/firefox/webkit) —
+        # that's the upstream tool's concern. Doctor only checks for
+        # directories matching `<name>-*` in the tool's cache.
+        for entry in v:
+            _validate_safe_name(entry, "browser_bundles entry")
         return v
 
 

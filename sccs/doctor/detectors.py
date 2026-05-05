@@ -88,6 +88,38 @@ class NpxToolStatus:
 
 
 @dataclass
+class BundledSkillStatus:
+    """Result of checking whether an npm-bundled Claude skill landed in
+    `~/.claude/skills/`. The directory is *managed* by `sccs doctor` (it
+    re-syncs on every install/update), so the diagnostic asks only one
+    question: does the SKILL.md exist at the configured target?
+    """
+
+    spec: NpxToolSpec
+    target_path: str  # expanded absolute path to the skill directory
+    skill_md_present: bool
+
+
+@dataclass
+class BrowserBundleStatus:
+    """Result of scanning a tool's browser cache directory for bundles
+    declared in `spec.browser_bundles` (e.g. ['chromium', 'firefox']).
+
+    `present` maps each declared bundle to True/False. `all_present` is the
+    convenience aggregate the reporter and has_problems() use.
+    `cache_dir_exists` is False when the entire cache directory is missing
+    — useful detail for the reporter (`MISSING (cache empty)` is friendlier
+    than enumerating every bundle).
+    """
+
+    spec: NpxToolSpec
+    cache_dir: str
+    cache_dir_exists: bool
+    present: dict[str, bool]
+    all_present: bool
+
+
+@dataclass
 class PermissionStatus:
     """Result of inspecting filesystem ownership/writability for a path.
 
@@ -366,6 +398,106 @@ class PermissionDetector:
             resolved_path=resolved,
             offending_paths=offenders,
         )
+
+
+class BundledSkillDetector:
+    """Verify each `NpxToolSpec.bundled_skill` landed in its target directory.
+
+    Doctor's install/update path runs `_sync_bundled_skill` to copy the
+    skill out of the npm package into `~/.claude/skills/<name>/`. The
+    directory is then *managed* — `sccs sync` is configured to skip it
+    (see managed.DEFAULT_MANAGED_PATTERNS). This detector closes the
+    inspection loop: if the user removed the directory or starts on a
+    fresh machine, `sccs doctor check` should surface the gap rather than
+    silently report OK because the binary is on PATH.
+    """
+
+    def get_statuses(self, specs: list[NpxToolSpec]) -> list[BundledSkillStatus]:
+        out: list[BundledSkillStatus] = []
+        for spec in specs:
+            if spec.bundled_skill is None:
+                continue
+            target = Path(os.path.expanduser(spec.bundled_skill.target))
+            skill_md = target / "SKILL.md"
+            out.append(
+                BundledSkillStatus(
+                    spec=spec,
+                    target_path=str(target),
+                    skill_md_present=skill_md.is_file(),
+                )
+            )
+        return out
+
+
+def _resolve_playwright_cache() -> Path:
+    """Resolve the directory `playwright-cli install-browser` writes to.
+
+    Resolution order (matches Playwright's own `Browser.install` semantics):
+      1. `$PLAYWRIGHT_BROWSERS_PATH` if set and non-empty.
+      2. Platform default:
+         - Linux:   `~/.cache/ms-playwright`
+         - macOS:   `~/Library/Caches/ms-playwright`
+         - Windows: `%LOCALAPPDATA%/ms-playwright` (falls back to
+                    `~/AppData/Local/ms-playwright`)
+
+    The returned path may not exist — callers must handle that case.
+    """
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "").strip()
+    if override:
+        return Path(os.path.expanduser(override))
+    home = Path.home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Caches" / "ms-playwright"
+    if sys.platform == "win32":
+        local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+        base = Path(local_appdata) if local_appdata else home / "AppData" / "Local"
+        return base / "ms-playwright"
+    return home / ".cache" / "ms-playwright"
+
+
+class BrowserBundleDetector:
+    """Detect browser bundles declared via `NpxToolSpec.browser_bundles`.
+
+    Only `playwright-cli` ships browser bundles today — the detector is
+    intentionally generic so any future tool that downloads runtime assets
+    via a `<binary> install-browser <name>` step gets diagnosed for free.
+    """
+
+    def __init__(self, cache_dir: Path | None = None) -> None:
+        # `cache_dir` is injection-friendly for tests. Production code lets
+        # it default to None so each call resolves the platform-specific
+        # cache root via `_resolve_playwright_cache()`.
+        self._cache_dir = cache_dir
+
+    def _resolve(self) -> Path:
+        return self._cache_dir if self._cache_dir is not None else _resolve_playwright_cache()
+
+    def get_statuses(self, specs: list[NpxToolSpec]) -> list[BrowserBundleStatus]:
+        out: list[BrowserBundleStatus] = []
+        for spec in specs:
+            if not spec.browser_bundles:
+                continue
+            cache_dir = self._resolve()
+            cache_exists = cache_dir.is_dir()
+            present: dict[str, bool] = {}
+            if cache_exists:
+                # `install-browser <name>` writes `<cache>/<name>-<version>/`
+                # so we glob with `<name>-*` and accept any version match.
+                for bundle in spec.browser_bundles:
+                    matches = list(cache_dir.glob(f"{bundle}-*"))
+                    present[bundle] = any(p.is_dir() for p in matches)
+            else:
+                present = dict.fromkeys(spec.browser_bundles, False)
+            out.append(
+                BrowserBundleStatus(
+                    spec=spec,
+                    cache_dir=str(cache_dir),
+                    cache_dir_exists=cache_exists,
+                    present=present,
+                    all_present=all(present.values()) if present else True,
+                )
+            )
+        return out
 
 
 class NpxToolDetector:

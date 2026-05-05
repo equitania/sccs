@@ -1369,3 +1369,375 @@ class TestPluginUpdateScopeMismatchSoftFail:
 
         assert len(result.failed) == 1
         assert len(result.skipped) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Bundled-skill + browser-bundle detectors (v2.26.0)                          #
+# --------------------------------------------------------------------------- #
+
+
+class TestBundledSkillDetector:
+    """Closes the v2.25.x gap: `sccs doctor check` was claiming OK whenever
+    the npm tool's binary was on PATH, even if the bundled skill directory
+    had been deleted. The detector now verifies the SKILL.md target exists.
+    """
+
+    def _spec_with_skill(self, target: str):
+        from sccs.doctor.schema import BundledSkillSpec, NpxToolSpec
+
+        return NpxToolSpec(
+            name="playwright-cli",
+            invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+            bundled_skill=BundledSkillSpec(
+                package_subpath="@playwright/cli/skills/playwright-cli",
+                target=target,
+            ),
+        )
+
+    def test_skill_md_present_reports_ok(self, tmp_path):
+        from sccs.doctor.detectors import BundledSkillDetector
+
+        target = tmp_path / "skills" / "playwright-cli"
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_text("# stub\n", encoding="utf-8")
+
+        statuses = BundledSkillDetector().get_statuses([self._spec_with_skill(str(target))])
+        assert statuses[0].skill_md_present is True
+        assert statuses[0].target_path == str(target)
+
+    def test_missing_skill_md_reports_missing(self, tmp_path):
+        from sccs.doctor.detectors import BundledSkillDetector
+
+        target = tmp_path / "skills" / "playwright-cli"
+        # No mkdir — directory doesn't exist at all
+        statuses = BundledSkillDetector().get_statuses([self._spec_with_skill(str(target))])
+        assert statuses[0].skill_md_present is False
+
+    def test_specs_without_bundled_skill_are_skipped(self):
+        # get-shit-done-cc has no bundled_skill → must not appear in the
+        # status list at all. Otherwise the reporter would print empty rows.
+        from sccs.doctor.detectors import BundledSkillDetector
+        from sccs.doctor.schema import NpxToolSpec
+
+        plain = NpxToolSpec(name="get-shit-done-cc", invocation=["npx", "get-shit-done-cc"])
+        statuses = BundledSkillDetector().get_statuses([plain])
+        assert statuses == []
+
+
+class TestBrowserBundleDetector:
+    """Mirrors the `playwright install-browser` cache layout: bundles land
+    under `<cache>/<name>-<version>/`, so we glob `<name>-*` per declared
+    bundle and report missing ones.
+    """
+
+    def _spec_with_browsers(self, browsers: list[str]):
+        from sccs.doctor.schema import NpxToolSpec
+
+        return NpxToolSpec(
+            name="playwright-cli",
+            invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+            browser_bundles=browsers,
+        )
+
+    def test_all_bundles_present(self, tmp_path):
+        from sccs.doctor.detectors import BrowserBundleDetector
+
+        (tmp_path / "chromium-1234").mkdir()
+        (tmp_path / "firefox-1515").mkdir()
+
+        spec = self._spec_with_browsers(["chromium", "firefox"])
+        statuses = BrowserBundleDetector(cache_dir=tmp_path).get_statuses([spec])
+        assert statuses[0].present == {"chromium": True, "firefox": True}
+        assert statuses[0].all_present is True
+        assert statuses[0].cache_dir_exists is True
+
+    def test_partial_bundles_present(self, tmp_path):
+        from sccs.doctor.detectors import BrowserBundleDetector
+
+        (tmp_path / "chromium-1234").mkdir()
+        # firefox-* missing on purpose
+        spec = self._spec_with_browsers(["chromium", "firefox"])
+        statuses = BrowserBundleDetector(cache_dir=tmp_path).get_statuses([spec])
+        assert statuses[0].present == {"chromium": True, "firefox": False}
+        assert statuses[0].all_present is False
+
+    def test_cache_dir_missing_marks_all_absent(self, tmp_path):
+        from sccs.doctor.detectors import BrowserBundleDetector
+
+        absent = tmp_path / "no-such-cache"
+        spec = self._spec_with_browsers(["chromium", "firefox"])
+        statuses = BrowserBundleDetector(cache_dir=absent).get_statuses([spec])
+        assert statuses[0].cache_dir_exists is False
+        assert all(v is False for v in statuses[0].present.values())
+        assert statuses[0].all_present is False
+
+    def test_env_override_takes_precedence(self, tmp_path, monkeypatch):
+        # PLAYWRIGHT_BROWSERS_PATH must override the platform default. Without
+        # this, users who relocate their cache (e.g. into an XDG-violating
+        # custom path or a Docker volume) get false MISSING reports.
+        from sccs.doctor.detectors import _resolve_playwright_cache
+
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "custom"))
+        resolved = _resolve_playwright_cache()
+        assert str(resolved) == str(tmp_path / "custom")
+
+    def test_macos_default_cache_path(self, monkeypatch):
+        # Regression guard: macOS uses `~/Library/Caches/`, not `~/.cache/`.
+        from sccs.doctor.detectors import _resolve_playwright_cache
+
+        monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+        monkeypatch.setattr("sccs.doctor.detectors.sys.platform", "darwin")
+        resolved = _resolve_playwright_cache()
+        assert str(resolved).endswith("/Library/Caches/ms-playwright")
+
+    def test_specs_without_browser_bundles_are_skipped(self):
+        from sccs.doctor.detectors import BrowserBundleDetector
+        from sccs.doctor.schema import NpxToolSpec
+
+        plain = NpxToolSpec(name="get-shit-done-cc", invocation=["npx", "get-shit-done-cc"])
+        statuses = BrowserBundleDetector().get_statuses([plain])
+        assert statuses == []
+
+
+class TestBundledSkillReporter:
+    def test_row_present(self, tmp_path):
+        from sccs.doctor.detectors import BundledSkillStatus
+        from sccs.doctor.reporter import _bundled_skill_row
+        from sccs.doctor.schema import BundledSkillSpec, NpxToolSpec
+
+        st = BundledSkillStatus(
+            spec=NpxToolSpec(
+                name="playwright-cli",
+                invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+                bundled_skill=BundledSkillSpec(
+                    package_subpath="@playwright/cli/skills/playwright-cli",
+                    target=str(tmp_path),
+                ),
+            ),
+            target_path=str(tmp_path),
+            skill_md_present=True,
+        )
+        label, status, detail = _bundled_skill_row(st)
+        assert label == "skill: playwright-cli"
+        assert "OK" in status
+        assert "SKILL.md" in detail
+
+    def test_row_missing(self, tmp_path):
+        from sccs.doctor.detectors import BundledSkillStatus
+        from sccs.doctor.reporter import _bundled_skill_row
+        from sccs.doctor.schema import BundledSkillSpec, NpxToolSpec
+
+        st = BundledSkillStatus(
+            spec=NpxToolSpec(
+                name="playwright-cli",
+                invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+                bundled_skill=BundledSkillSpec(
+                    package_subpath="@playwright/cli/skills/playwright-cli",
+                    target=str(tmp_path),
+                ),
+            ),
+            target_path=str(tmp_path),
+            skill_md_present=False,
+        )
+        _, status, detail = _bundled_skill_row(st)
+        assert "MISSING" in status
+        assert str(tmp_path) in detail
+
+
+class TestBrowserBundleReporter:
+    def test_row_all_present(self):
+        from sccs.doctor.detectors import BrowserBundleStatus
+        from sccs.doctor.reporter import _browser_bundle_row
+        from sccs.doctor.schema import NpxToolSpec
+
+        st = BrowserBundleStatus(
+            spec=NpxToolSpec(
+                name="playwright-cli",
+                invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+                browser_bundles=["chromium", "firefox"],
+            ),
+            cache_dir="/tmp/cache",
+            cache_dir_exists=True,
+            present={"chromium": True, "firefox": True},
+            all_present=True,
+        )
+        label, status, detail = _browser_bundle_row(st)
+        assert label == "browsers: playwright-cli"
+        assert "OK" in status
+        assert "chromium, firefox" in detail
+
+    def test_row_partial_present(self):
+        from sccs.doctor.detectors import BrowserBundleStatus
+        from sccs.doctor.reporter import _browser_bundle_row
+        from sccs.doctor.schema import NpxToolSpec
+
+        st = BrowserBundleStatus(
+            spec=NpxToolSpec(
+                name="playwright-cli",
+                invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+                browser_bundles=["chromium", "firefox"],
+            ),
+            cache_dir="/tmp/cache",
+            cache_dir_exists=True,
+            present={"chromium": True, "firefox": False},
+            all_present=False,
+        )
+        _, status, detail = _browser_bundle_row(st)
+        assert "MISSING" in status
+        assert "firefox" in detail
+        assert "chromium" not in detail  # only missing bundles listed
+
+    def test_row_cache_dir_missing(self):
+        from sccs.doctor.detectors import BrowserBundleStatus
+        from sccs.doctor.reporter import _browser_bundle_row
+        from sccs.doctor.schema import NpxToolSpec
+
+        st = BrowserBundleStatus(
+            spec=NpxToolSpec(
+                name="playwright-cli",
+                invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+                browser_bundles=["chromium", "firefox"],
+            ),
+            cache_dir="/tmp/no-such-cache",
+            cache_dir_exists=False,
+            present={"chromium": False, "firefox": False},
+            all_present=False,
+        )
+        _, status, detail = _browser_bundle_row(st)
+        assert "MISSING" in status
+        assert "cache dir not found" in detail
+
+
+class TestBuildInstallPlanWithBundles:
+    """When the npm tool itself is on PATH but the skill or browser bundles
+    are missing, build_install_plan must queue targeted repair actions —
+    rather than relying on the user to run `sccs doctor update`.
+    """
+
+    def _make_status_set_with_npx_present(self):
+        # Helper: minimal happy-path status set so build_install_plan only
+        # surfaces the bundle-repair actions we are asserting on.
+        from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
+
+        s = _make_status_set(plugins_present={p.name: True for p in DEFAULT_CLAUDE_PLUGINS})
+        # Override npx_tools so playwright-cli is reported AVAILABLE.
+        from sccs.doctor.detectors import NpxToolStatus
+
+        s["npx_tools"] = [
+            NpxToolStatus(spec=spec, available=True, binary_path="/usr/bin/" + spec.name, detection_source="path")
+            for spec in DEFAULT_NPX_TOOLS
+        ]
+        return s
+
+    def test_missing_skill_appends_repair_action(self, tmp_path):
+        from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
+        from sccs.doctor.detectors import BundledSkillStatus
+        from sccs.doctor.installer import build_install_plan
+
+        playwright_spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        skill_status = BundledSkillStatus(
+            spec=playwright_spec,
+            target_path=str(tmp_path / "skill"),
+            skill_md_present=False,
+        )
+
+        cfg = DoctorConfig()
+        s = self._make_status_set_with_npx_present()
+        plan = build_install_plan(cfg, **s, bundled_skills=[skill_status])
+        labels = [a.label for a in plan.actions]
+        assert any("sync bundled skill playwright-cli" in lab for lab in labels)
+
+    def test_missing_browser_appends_install_browser_action(self):
+        from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
+        from sccs.doctor.detectors import BrowserBundleStatus
+        from sccs.doctor.installer import build_install_plan
+
+        playwright_spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        browser_status = BrowserBundleStatus(
+            spec=playwright_spec,
+            cache_dir="/tmp/cache",
+            cache_dir_exists=True,
+            present={"chromium": True, "firefox": False},
+            all_present=False,
+        )
+
+        cfg = DoctorConfig()
+        s = self._make_status_set_with_npx_present()
+        plan = build_install_plan(cfg, **s, browser_bundles=[browser_status])
+        commands = [a.cmd for a in plan.actions if a.cmd]
+        assert ["playwright-cli", "install-browser", "firefox"] in commands
+        # chromium was already there → no redundant action queued
+        assert ["playwright-cli", "install-browser", "chromium"] not in commands
+
+    def test_no_repair_when_tool_itself_missing(self, tmp_path):
+        # When the npm tool isn't installed, the regular install action
+        # already pulls everything (npm install → post_install → bundled_skill).
+        # Adding repair actions on top would duplicate the work.
+        from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
+        from sccs.doctor.detectors import BundledSkillStatus
+        from sccs.doctor.installer import build_install_plan
+
+        playwright_spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        skill_status = BundledSkillStatus(
+            spec=playwright_spec,
+            target_path=str(tmp_path / "skill"),
+            skill_md_present=False,
+        )
+
+        cfg = DoctorConfig()
+        # Default _make_status_set: npx_tools all unavailable.
+        s = _make_status_set(plugins_present={p.name: True for p in DEFAULT_CLAUDE_PLUGINS})
+        plan = build_install_plan(cfg, **s, bundled_skills=[skill_status])
+        # Skill-sync action is already in the plan via _npx_install_actions
+        # (because the tool is missing). Count occurrences — must be exactly 1.
+        skill_actions = [a for a in plan.actions if "sync bundled skill" in a.label]
+        assert len(skill_actions) == 1
+
+
+class TestHasProblemsWithBundles:
+    def test_missing_skill_marks_problems(self):
+        from sccs.doctor.detectors import BundledSkillStatus
+        from sccs.doctor.reporter import has_problems
+
+        all_plugins = {p.name: True for p in DEFAULT_CLAUDE_PLUGINS}
+        all_tools = {t.name: True for t in DEFAULT_NPX_TOOLS}
+        s = _make_status_set(plugins_present=all_plugins, tools_present=all_tools)
+        skill = BundledSkillStatus(
+            spec=DEFAULT_NPX_TOOLS[0],
+            target_path="/missing",
+            skill_md_present=False,
+        )
+        assert has_problems(**s, bundled_skills=[skill]) is True
+
+    def test_missing_browser_marks_problems(self):
+        from sccs.doctor.detectors import BrowserBundleStatus
+        from sccs.doctor.reporter import has_problems
+
+        all_plugins = {p.name: True for p in DEFAULT_CLAUDE_PLUGINS}
+        all_tools = {t.name: True for t in DEFAULT_NPX_TOOLS}
+        s = _make_status_set(plugins_present=all_plugins, tools_present=all_tools)
+        browser = BrowserBundleStatus(
+            spec=DEFAULT_NPX_TOOLS[0],
+            cache_dir="/tmp",
+            cache_dir_exists=False,
+            present={"chromium": False},
+            all_present=False,
+        )
+        assert has_problems(**s, browser_bundles=[browser]) is True
+
+    def test_all_bundles_ok_does_not_mark_problems(self):
+        from sccs.doctor.detectors import BrowserBundleStatus, BundledSkillStatus
+        from sccs.doctor.reporter import has_problems
+
+        all_plugins = {p.name: True for p in DEFAULT_CLAUDE_PLUGINS}
+        all_tools = {t.name: True for t in DEFAULT_NPX_TOOLS}
+        s = _make_status_set(plugins_present=all_plugins, tools_present=all_tools)
+        skill = BundledSkillStatus(spec=DEFAULT_NPX_TOOLS[0], target_path="/ok", skill_md_present=True)
+        browser = BrowserBundleStatus(
+            spec=DEFAULT_NPX_TOOLS[0],
+            cache_dir="/tmp",
+            cache_dir_exists=True,
+            present={"chromium": True, "firefox": True},
+            all_present=True,
+        )
+        assert has_problems(**s, bundled_skills=[skill], browser_bundles=[browser]) is False

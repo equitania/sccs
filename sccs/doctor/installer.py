@@ -15,6 +15,8 @@ from pathlib import Path
 import questionary
 
 from sccs.doctor.detectors import (
+    BrowserBundleStatus,
+    BundledSkillStatus,
     ClaudeCliStatus,
     NodeStatus,
     NpxToolStatus,
@@ -338,6 +340,61 @@ def _npx_update_actions(statuses: list[NpxToolStatus]) -> list[DoctorAction]:
     return actions
 
 
+def _bundled_skill_repair_actions(
+    statuses: list[BundledSkillStatus],
+    npx_tools: list[NpxToolStatus],
+) -> list[DoctorAction]:
+    """Re-sync skills whose target dir lost its SKILL.md but whose npm tool
+    is still on PATH. (When the npm tool itself is missing, _npx_install_actions
+    already queues the full install + skill-sync chain.)
+    """
+    actions: list[DoctorAction] = []
+    npx_available_by_name = {st.spec.name: st.available for st in npx_tools}
+    for st in statuses:
+        if st.skill_md_present:
+            continue
+        # Tool itself missing → main install path will handle the skill sync.
+        if not npx_available_by_name.get(st.spec.name, False):
+            continue
+        action = _bundled_skill_action(st.spec)
+        if action:
+            actions.append(action)
+    return actions
+
+
+def _browser_bundle_repair_actions(
+    statuses: list[BrowserBundleStatus],
+    npx_tools: list[NpxToolStatus],
+) -> list[DoctorAction]:
+    """Re-fetch missing browser bundles when the tool itself is on PATH.
+
+    Each missing bundle becomes a single `<binary> install-browser <name>`
+    action, mirroring the post_install entries in defaults.py. The command
+    is idempotent on Playwright's side, so re-running it for an already-
+    present bundle is safe — we still skip it here to keep the plan tight.
+    """
+    actions: list[DoctorAction] = []
+    npx_available_by_name = {st.spec.name: st.available for st in npx_tools}
+    for st in statuses:
+        if st.all_present:
+            continue
+        if not npx_available_by_name.get(st.spec.name, False):
+            continue
+        for bundle, present in st.present.items():
+            if present:
+                continue
+            cmd = [st.spec.name, "install-browser", bundle]
+            actions.append(
+                DoctorAction(
+                    label=f"{st.spec.name}: install-browser {bundle}",
+                    cmd=cmd,
+                    runnable=True,
+                    component=f"npx:{st.spec.name}:browser:{bundle}",
+                )
+            )
+    return actions
+
+
 def build_install_plan(
     config: DoctorConfig,  # noqa: ARG001 — kept for symmetry with build_update_plan
     *,
@@ -346,6 +403,8 @@ def build_install_plan(
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
+    bundled_skills: list[BundledSkillStatus] | None = None,
+    browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -361,6 +420,10 @@ def build_install_plan(
         actions.append(cli_action)
     actions.extend(_plugin_install_actions(plugins))
     actions.extend(_npx_install_actions(npx_tools))
+    if bundled_skills:
+        actions.extend(_bundled_skill_repair_actions(bundled_skills, npx_tools))
+    if browser_bundles:
+        actions.extend(_browser_bundle_repair_actions(browser_bundles, npx_tools))
     return InstallPlan(actions=actions)
 
 
@@ -372,8 +435,15 @@ def build_update_plan(
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
+    bundled_skills: list[BundledSkillStatus] | None = None,  # noqa: ARG001 — symmetry
+    browser_bundles: list[BrowserBundleStatus] | None = None,  # noqa: ARG001 — symmetry
 ) -> InstallPlan:
-    """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones."""
+    """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones.
+
+    bundled_skills / browser_bundles are accepted but unused: `_npx_update_actions`
+    already queues the bundled-skill copy and every `post_install` browser-fetch
+    on each tool's update, so adding them here would duplicate the work.
+    """
     actions: list[DoctorAction] = []
     if permissions:
         actions.extend(_permission_actions(permissions))
