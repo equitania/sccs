@@ -591,60 +591,9 @@ Was wird konvertiert:
 
 Nach Edits in `~/.config/fish/` einfach `sccs convert fish-to-pwsh --force` erneut aufrufen — bestehende Zieldateien werden mit `.bak` gesichert.
 
-### Architektur
+### Architektur & Entwicklung
 
-```
-sccs/
-├── cli.py                # Click CLI mit Befehlsgruppen
-├── cli_memory.py         # Memory Command Group
-├── config/               # Konfigurationsmanagement
-│   ├── schema.py         #   Pydantic-Modelle
-│   ├── loader.py         #   YAML-Laden/Speichern
-│   └── defaults.py       #   Standard-Konfiguration
-├── sync/                 # Synchronisierungs-Engine
-│   ├── engine.py         #   Hauptorchestrator
-│   ├── category.py       #   Kategorie-Handler
-│   ├── item.py           #   SyncItem, Scan-Funktionen
-│   ├── actions.py        #   Aktionstypen und -ausführung
-│   ├── state.py          #   State-Persistenz
-│   └── settings.py       #   JSON-Settings-Ensure
-├── transfer/             # Export/Import-Modul
-│   ├── manifest.py       #   ZIP-Manifest (Pydantic)
-│   ├── exporter.py       #   Scan + ZIP-Erstellung
-│   ├── importer.py       #   ZIP-Extraktion + Platzierung
-│   └── ui.py             #   questionary Checkbox-Helpers
-├── git/                  # Git-Operationen
-│   └── operations.py     #   Commit, Push, Pull, Status
-├── memory/               # Memory Bridge Modul
-│   ├── __init__.py       #   Modul-Exports
-│   ├── item.py           #   MemoryItem (Frontmatter + Markdown)
-│   ├── manager.py        #   CRUD-Layer für ~/.claude/memory/
-│   ├── filter.py         #   Filter und Sortierung
-│   ├── bridge.py         #   Import/Export Claude.ai
-│   └── api.py            #   Optionaler Anthropic Files API Layer
-├── output/               # Terminal-Ausgabe
-│   ├── console.py        #   Rich-Console
-│   ├── diff.py           #   Diff-Anzeige
-│   └── merge.py          #   Interaktives Merge
-└── utils/                # Hilfsfunktionen
-    ├── paths.py          #   Pfad-Utilities, atomares Schreiben
-    ├── hashing.py        #   SHA256-Hashing
-    └── platform.py       #   Plattformerkennung
-```
-
-### Entwicklung
-
-```bash
-# Tests
-pytest                            # Alle Tests
-pytest --cov=sccs                 # Mit Coverage (Minimum: 60%)
-
-# Code-Qualität
-ruff check sccs/ tests/           # Linting
-ruff format sccs/ tests/          # Formatierung
-mypy sccs/                        # Typenprüfung
-bandit -r sccs/                   # Security-Scan
-```
+Modul-Layout, Test-Setup und Quality-Gate sind in [docs/architecture.md](docs/architecture.md) dokumentiert.
 
 ### Lizenz
 
@@ -1237,60 +1186,9 @@ Conversion rules:
 
 After editing Fish files, just rerun `sccs convert fish-to-pwsh --force` — existing target files are backed up as `.bak`.
 
-### Architecture
+### Architecture & Development
 
-```
-sccs/
-├── cli.py                # Click CLI with command groups
-├── cli_memory.py         # Memory Command Group
-├── config/               # Configuration management
-│   ├── schema.py         #   Pydantic models
-│   ├── loader.py         #   YAML loading/saving
-│   └── defaults.py       #   Default configuration
-├── sync/                 # Synchronization engine
-│   ├── engine.py         #   Main orchestrator
-│   ├── category.py       #   Category handler
-│   ├── item.py           #   SyncItem, scan functions
-│   ├── actions.py        #   Action types and execution
-│   ├── state.py          #   State persistence
-│   └── settings.py       #   JSON settings ensure
-├── transfer/             # Export/Import module
-│   ├── manifest.py       #   ZIP manifest (Pydantic)
-│   ├── exporter.py       #   Scan + ZIP creation
-│   ├── importer.py       #   ZIP extraction + placement
-│   └── ui.py             #   questionary checkbox helpers
-├── git/                  # Git operations
-│   └── operations.py     #   Commit, push, pull, status
-├── memory/               # Memory Bridge module
-│   ├── __init__.py       #   Module exports
-│   ├── item.py           #   MemoryItem (frontmatter + Markdown)
-│   ├── manager.py        #   CRUD layer for ~/.claude/memory/
-│   ├── filter.py         #   Filtering and sorting
-│   ├── bridge.py         #   Claude.ai import/export
-│   └── api.py            #   Optional Anthropic Files API layer
-├── output/               # Terminal output
-│   ├── console.py        #   Rich console
-│   ├── diff.py           #   Diff display
-│   └── merge.py          #   Interactive merge
-└── utils/                # Utilities
-    ├── paths.py          #   Path utilities, atomic writes
-    ├── hashing.py        #   SHA256 hashing
-    └── platform.py       #   Platform detection
-```
-
-### Development
-
-```bash
-# Tests
-pytest                            # All tests
-pytest --cov=sccs                 # With coverage (minimum: 60%)
-
-# Code quality
-ruff check sccs/ tests/           # Linting
-ruff format sccs/ tests/          # Formatting
-mypy sccs/                        # Type checking
-bandit -r sccs/                   # Security scan
-```
+Module layout, test setup and the quality gate live in [docs/architecture.md](docs/architecture.md).
 
 ### License
 
