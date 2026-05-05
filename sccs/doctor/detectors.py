@@ -12,6 +12,8 @@ from pathlib import Path
 
 from sccs.doctor.defaults import get_node_install_spec
 from sccs.doctor.runner import (
+    DoctorError,
+    _run,
     parse_node_major,
     run_claude_plugin_list,
     run_node_version,
@@ -306,6 +308,24 @@ class ClaudePluginDetector:
         return statuses
 
 
+def _resolve_npm_root_global() -> str | None:
+    """Return the directory `npm root -g` reports, or None if npm is missing.
+
+    Used to spot the Debian-13 failure mode where `/usr/lib/node_modules/` is
+    root-owned and any `npm install -g` dies with EACCES — without having to
+    hardcode the path in defaults.py (it varies across Homebrew, Debian-apt,
+    nvm, NodeSource, etc.).
+    """
+    try:
+        proc = _run(["npm", "root", "-g"], check=True, capture=True, timeout=15)
+    except DoctorError:
+        return None
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        return None
+    return raw.splitlines()[0].strip() or None
+
+
 class PermissionDetector:
     """Verify filesystem ownership + writability for known-fragile paths.
 
@@ -324,7 +344,25 @@ class PermissionDetector:
         return [self._check(spec) for spec in specs]
 
     def _check(self, spec: PermissionCheckSpec) -> PermissionStatus:
-        resolved = os.path.expanduser(spec.path)
+        # Resolve runtime-determined paths (e.g. `npm root -g`) before the
+        # standard ownership/writability scan. Each kind handles the
+        # "couldn't resolve" case as a graceful skip rather than a crash.
+        if spec.path_kind == "npm-root-global":
+            npm_root = _resolve_npm_root_global()
+            if npm_root is None:
+                return PermissionStatus(
+                    spec=spec,
+                    exists=False,
+                    is_user_owned=True,
+                    is_writable=True,
+                    expected_uid=-1,
+                    expected_gid=-1,
+                    resolved_path=spec.path,
+                    skipped_reason="npm not on PATH — cannot resolve global root",
+                )
+            resolved = npm_root
+        else:
+            resolved = os.path.expanduser(spec.path)
 
         # Windows: skip entirely. Doctor still records the spec so the
         # reporter can show "skipped (Windows)" without crashing.

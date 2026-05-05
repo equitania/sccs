@@ -97,6 +97,35 @@ class ExecuteResult:
         return [o for o in self.outcomes if o.status == "printed"]
 
 
+def _npm_root_global_fix_block(st: PermissionStatus) -> list[str]:
+    """Two-option remediation for an unwritable `npm root -g` directory.
+
+    Real Debian incident: system npm installs land in /usr/lib/node_modules/
+    (root-owned), so `npm install -g @playwright/cli@latest` dies with EACCES.
+    Doctor surfaces this *before* the npm action runs and offers both:
+
+      * Preferred: user-local npm prefix (`~/.npm-global`) — no sudo required,
+        survives `apt install nodejs` cleanly.
+      * Alternative: `sudo chown -R` of the existing global root — quicker
+        but reverts on every system-wide nodejs upgrade.
+    """
+    lines: list[str] = []
+    lines.append(f"# Detected: {st.resolved_path} is not writable by uid {st.expected_uid}.")
+    lines.append("# Two fixes — pick ONE:")
+    lines.append("")
+    lines.append("# Option A (recommended): user-local npm prefix, no sudo")
+    lines.append("mkdir -p ~/.npm-global")
+    lines.append("npm config set prefix ~/.npm-global")
+    lines.append("# Add to your shell rc (bash/zsh):")
+    lines.append('export PATH="$HOME/.npm-global/bin:$PATH"')
+    lines.append("# Or fish:")
+    lines.append("set -gx PATH $HOME/.npm-global/bin $PATH")
+    lines.append("")
+    lines.append("# Option B: take ownership of the system npm root")
+    lines.append(st.fix_command or f"sudo chown -R {st.expected_uid}:{st.expected_gid} {st.resolved_path}")
+    return lines
+
+
 def _permission_actions(statuses: list[PermissionStatus]) -> list[DoctorAction]:
     """Surface filesystem permission issues as runnable=False manual blocks.
 
@@ -115,10 +144,13 @@ def _permission_actions(statuses: list[PermissionStatus]) -> list[DoctorAction]:
             block_lines.append(f"# Examples of foreign-owned entries under {st.resolved_path}:")
             for p in st.offending_paths[:3]:
                 block_lines.append(f"#   {p}")
-        if not st.is_writable:
-            block_lines.append(f"# Path is not writable by uid {st.expected_uid}.")
-        block_lines.append("# Fix:")
-        block_lines.append(st.fix_command or "")
+        if st.spec.path_kind == "npm-root-global":
+            block_lines.extend(_npm_root_global_fix_block(st))
+        else:
+            if not st.is_writable:
+                block_lines.append(f"# Path is not writable by uid {st.expected_uid}.")
+            block_lines.append("# Fix:")
+            block_lines.append(st.fix_command or "")
         actions.append(
             DoctorAction(
                 label=f"fix permissions: {st.spec.path}",

@@ -1,5 +1,19 @@
 # Release Notes
 
+## Version 2.27.0 (05.05.2026)
+
+### Added
+- **`sccs doctor` now detects an unwritable `npm root -g` directory and surfaces a two-option fix block before the npm install action runs.** Real-world Debian 13 incident: a system-wide Node.js install puts the global root at `/usr/lib/node_modules/` (root-owned), so `npm install -g @playwright/cli@latest` dies with `EACCES: permission denied, mkdir '/usr/lib/node_modules/@playwright'`. The follow-up actions (`install-browser chromium`, `install-browser firefox`, bundled-skill copy from the same root) all fail downstream. Doctor now catches the bad permission *before* npm gets called.
+- **New `PermissionCheckSpec.path_kind` field** with values `"literal"` (default, existing behaviour) and `"npm-root-global"` (resolved at check-time via `npm root -g`). Default permission checks gain a fourth entry that uses the new kind.
+- **Two-option manual block in `_permission_actions`** for `npm-root-global` issues:
+  - **Option A (recommended):** user-local prefix — `mkdir -p ~/.npm-global; npm config set prefix ~/.npm-global` plus PATH snippets for both bash/zsh and fish. No sudo, survives `apt install nodejs` cleanly.
+  - **Option B (alternative):** `sudo chown -R UID:GID /usr/lib/node_modules` — quicker but reverts on system upgrades.
+- **`_resolve_npm_root_global()`** helper (`sccs/doctor/detectors.py`) reuses the existing `runner._run` machinery (timeout 15s, stdin=DEVNULL hardening from v2.22.1, no shell). Returns `None` when npm is missing → detector emits a `skipped_reason` instead of crashing.
+- **Reporter:** the new check shows up as a regular `perm: npm root -g` row in `sccs doctor check`, identical UX to the existing `~/.npm` / `~/.claude` / `~/.config/sccs` rows.
+
+### Tests
+- 8 new tests in `tests/test_doctor.py` across 2 classes: `TestNpmRootGlobalPermission` (5: default presence, npm-missing skip, user-writable OK, root-owned manual block with both options, regression guard for literal paths) and `TestResolveNpmRootGlobal` (3: missing npm, happy path, empty stdout).
+
 ## Version 2.26.0 (05.05.2026)
 
 ### Added

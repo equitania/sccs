@@ -206,6 +206,9 @@ class NpxToolSpec(BaseModel):
         return v
 
 
+_VALID_PATH_KINDS = {"literal", "npm-root-global"}
+
+
 class PermissionCheckSpec(BaseModel):
     """A filesystem path whose ownership/writability the doctor should verify.
 
@@ -214,10 +217,24 @@ class PermissionCheckSpec(BaseModel):
     silently breaks `npx` / `npm install` with EACCES. The fix is always a
     one-liner `sudo chown -R UID:GID <path>`, but the user has to know to
     run it. Doctor surfaces the issue and prints the exact command.
+
+    `path_kind="npm-root-global"` is a special case: `path` is then a
+    display label only and the detector resolves the actual path via
+    `npm root -g` at check-time. Used to catch the second Debian failure
+    mode where `/usr/lib/node_modules/` is root-owned and `npm install -g`
+    dies with EACCES — caught *before* the npm install action runs.
     """
 
     path: str = Field(
         description="Filesystem path to check. `~` is expanded to the user's home.",
+    )
+    path_kind: str = Field(
+        default="literal",
+        description=(
+            "How `path` is interpreted: 'literal' (filesystem path, default) "
+            "or 'npm-root-global' (resolved at check-time via `npm root -g`). "
+            "For non-literal kinds the `path` field is a display label only."
+        ),
     )
     label: str = Field(
         description="Short human-readable name (e.g. 'npm cache directory').",
@@ -243,6 +260,13 @@ class PermissionCheckSpec(BaseModel):
         # Allow absolute or relative paths but no shell metacharacters.
         if any(ch in body for ch in (";", "|", "&", "$", "`", "\n", "\r")):
             raise ValueError(f"path contains shell metacharacters: {v!r}")
+        return v
+
+    @field_validator("path_kind")
+    @classmethod
+    def _validate_path_kind(cls, v: str) -> str:
+        if v not in _VALID_PATH_KINDS:
+            raise ValueError(f"path_kind must be one of {sorted(_VALID_PATH_KINDS)}, got {v!r}")
         return v
 
 

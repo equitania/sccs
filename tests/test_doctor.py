@@ -1741,3 +1741,155 @@ class TestHasProblemsWithBundles:
             all_present=True,
         )
         assert has_problems(**s, bundled_skills=[skill], browser_bundles=[browser]) is False
+
+
+# --------------------------------------------------------------------------- #
+# `npm root -g` permission check (v2.27.0)                                    #
+# --------------------------------------------------------------------------- #
+
+
+class TestNpmRootGlobalPermission:
+    """Catches the second Debian-13 failure mode: system-wide npm install
+    has its global root at /usr/lib/node_modules/, which is root-owned.
+    `npm install -g @playwright/cli@latest` then dies with EACCES — and
+    the previous SCCS would just report the failure post-hoc instead of
+    surfacing the bad permission *before* attempting the install.
+    """
+
+    def test_default_includes_npm_root_global_check(self):
+        from sccs.doctor.defaults import DEFAULT_PERMISSION_CHECKS
+
+        npm_root_specs = [c for c in DEFAULT_PERMISSION_CHECKS if c.path_kind == "npm-root-global"]
+        assert len(npm_root_specs) == 1
+        assert npm_root_specs[0].path == "npm root -g"
+
+    def test_skipped_when_npm_missing(self, monkeypatch):
+        # `_resolve_npm_root_global` returning None must produce a skipped
+        # PermissionStatus, not crash. Realistic on hosts where Node has not
+        # been installed yet — doctor should still finish cleanly.
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        monkeypatch.setattr("sccs.doctor.detectors._resolve_npm_root_global", lambda: None)
+        spec = PermissionCheckSpec(
+            path="npm root -g",
+            path_kind="npm-root-global",
+            label="npm root",
+            purpose="...",
+        )
+        statuses = PermissionDetector().get_statuses([spec])
+        assert statuses[0].ok is True  # ok because skipped_reason is set
+        assert statuses[0].skipped_reason is not None
+        assert "npm not on PATH" in statuses[0].skipped_reason
+
+    def test_user_writable_npm_root_is_ok(self, monkeypatch, tmp_path):
+        # Happy path: `npm root -g` resolves to a directory owned by current
+        # user. PermissionDetector treats it like any other literal path.
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        monkeypatch.setattr("sccs.doctor.detectors._resolve_npm_root_global", lambda: str(tmp_path))
+        spec = PermissionCheckSpec(
+            path="npm root -g",
+            path_kind="npm-root-global",
+            label="npm root",
+            purpose="...",
+        )
+        statuses = PermissionDetector().get_statuses([spec])
+        assert statuses[0].ok is True
+        assert statuses[0].resolved_path == str(tmp_path)
+
+    def test_root_owned_npm_root_triggers_manual_block_with_two_options(self, monkeypatch, tmp_path):
+        # Simulate root ownership by stubbing PermissionStatus to look bad.
+        # The manual block must contain BOTH fix options (npm prefix +
+        # sudo chown) so the user can pick whichever fits their setup.
+        import sccs.doctor.installer as installer_mod
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        spec = PermissionCheckSpec(
+            path="npm root -g",
+            path_kind="npm-root-global",
+            label="npm global install dir",
+            purpose="`npm install -g` writes here",
+        )
+        bad_status = PermissionStatus(
+            spec=spec,
+            exists=True,
+            is_user_owned=False,
+            is_writable=False,
+            expected_uid=1000,
+            expected_gid=1000,
+            resolved_path="/usr/lib/node_modules",
+            offending_paths=["/usr/lib/node_modules/some-pkg"],
+        )
+        actions = installer_mod._permission_actions([bad_status])
+        assert len(actions) == 1
+        block = actions[0].manual_block or ""
+        # Both fix options must be present
+        assert "npm config set prefix ~/.npm-global" in block
+        assert "sudo chown -R 1000:1000 /usr/lib/node_modules" in block
+        # PATH advice for both bash/zsh and fish must be present
+        assert 'export PATH="$HOME/.npm-global/bin:$PATH"' in block
+        assert "set -gx PATH $HOME/.npm-global/bin $PATH" in block
+        assert actions[0].runnable is False  # manual only — never run by SCCS
+
+    def test_literal_path_keeps_simple_chown_block(self, tmp_path):
+        # Regression: literal paths (e.g. ~/.npm) must keep their old single-
+        # option chown manual block — only npm-root-global gets the two-option
+        # treatment. Otherwise we'd flood every permission issue with npm
+        # advice that doesn't apply.
+        import sccs.doctor.installer as installer_mod
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        spec = PermissionCheckSpec(
+            path="~/.npm",
+            label="npm cache",
+            purpose="npx writes here",
+        )
+        bad_status = PermissionStatus(
+            spec=spec,
+            exists=True,
+            is_user_owned=False,
+            is_writable=False,
+            expected_uid=1000,
+            expected_gid=1000,
+            resolved_path="/home/picard/.npm",
+            offending_paths=["/home/picard/.npm/_cacache/foo"],
+        )
+        actions = installer_mod._permission_actions([bad_status])
+        block = actions[0].manual_block or ""
+        assert "sudo chown -R 1000:1000 /home/picard/.npm" in block
+        assert "npm config set prefix" not in block  # npm advice stays scoped
+
+
+class TestResolveNpmRootGlobal:
+    def test_returns_none_when_npm_missing(self, monkeypatch):
+        from sccs.doctor.detectors import _resolve_npm_root_global
+        from sccs.doctor.runner import DoctorError
+
+        def _raise(*_args, **_kwargs):
+            raise DoctorError("Command not found: npm")
+
+        monkeypatch.setattr("sccs.doctor.detectors._run", _raise)
+        assert _resolve_npm_root_global() is None
+
+    def test_returns_first_line_when_npm_succeeds(self, monkeypatch):
+        from sccs.doctor.detectors import _resolve_npm_root_global
+
+        fake_proc = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="/usr/lib/node_modules\n",
+            stderr="",
+        )
+        monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **kw: fake_proc)
+        assert _resolve_npm_root_global() == "/usr/lib/node_modules"
+
+    def test_returns_none_when_output_empty(self, monkeypatch):
+        from sccs.doctor.detectors import _resolve_npm_root_global
+
+        fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="\n", stderr="")
+        monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **kw: fake_proc)
+        assert _resolve_npm_root_global() is None

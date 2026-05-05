@@ -107,6 +107,24 @@ DEFAULT_PERMISSION_CHECKS: list[PermissionCheckSpec] = [
         label="SCCS config directory",
         purpose="sccs persists doctor state and sync state in this directory",
     ),
+    # Resolved at check-time via `npm root -g`. Catches the second Debian
+    # failure mode (after the ~/.npm/_cacache/ chown one): system-wide npm
+    # installations have their global root under /usr/lib/node_modules/,
+    # which is root-owned, so `npm install -g @playwright/cli@latest` dies
+    # with EACCES. Doctor surfaces this *before* the npm install action
+    # runs and offers two fixes (user-local prefix vs sudo chown) in the
+    # manual block — see installer._permission_actions.
+    PermissionCheckSpec(
+        path="npm root -g",
+        path_kind="npm-root-global",
+        label="npm global install dir",
+        purpose=(
+            "`npm install -g` writes here when installing CLI tools "
+            "(e.g. @playwright/cli). System-wide npm installs put this under "
+            "/usr/lib/node_modules/ (root-owned) — fix with a user-local "
+            "prefix or `sudo chown` so doctor can manage tools without sudo."
+        ),
+    ),
 ]
 
 # Per-platform Node.js install hints. Linux deliberately uses runnable=False
