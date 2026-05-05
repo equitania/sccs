@@ -1172,3 +1172,200 @@ class TestPlaywrightCliBundling:
                 invocation=["npx", "x"],
                 post_install=[["--rm-rf-flag"]],
             )
+
+
+# --------------------------------------------------------------------------- #
+# Plugin scope detection + scope-aware update                                 #
+# --------------------------------------------------------------------------- #
+
+
+class TestPluginScopeDetection:
+    """Real-world bug from Debian 13: `claude plugin list` reports
+    `superpowers@claude-plugins-official` as installed (Scope: project),
+    but `claude plugin update superpowers@claude-plugins-official` defaults
+    to scope=user and dies with "Plugin … is not installed at scope user".
+
+    Detection now reads the Scope: line; update forwards `--scope <value>`.
+    """
+
+    SAMPLE_OUTPUT_USER = """Installed plugins:
+
+  ❯ skill-creator@claude-plugins-official
+    Version: 1.2.3
+    Scope: user
+    Status: ✔ enabled
+"""
+
+    SAMPLE_OUTPUT_PROJECT = """Installed plugins:
+
+  ❯ superpowers@claude-plugins-official
+    Version: 3.4.1
+    Scope: project
+    Status: ✔ enabled
+"""
+
+    SAMPLE_OUTPUT_NO_SCOPE_LINE = """Installed plugins:
+
+  ❯ legacy-plugin@some-marketplace
+    Version: 0.1.0
+"""
+
+    SAMPLE_OUTPUT_TWO_PLUGINS = """Installed plugins:
+
+  ❯ first-plugin@market-a
+    Version: 1.0.0
+    Scope: user
+    Status: ✔ enabled
+
+  ❯ second-plugin@market-b
+    Version: 2.0.0
+    Scope: project
+    Status: ✔ enabled
+"""
+
+    def test_user_scope_extracted(self):
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE_OUTPUT_USER)
+        statuses = detector.get_statuses([PluginSpec(name="skill-creator", marketplace="claude-plugins-official")])
+        assert statuses[0].installed is True
+        assert statuses[0].scope == "user"
+
+    def test_project_scope_extracted(self):
+        # The Debian 13 case: scope reported correctly so update doesn't
+        # default to scope=user.
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE_OUTPUT_PROJECT)
+        statuses = detector.get_statuses([PluginSpec(name="superpowers", marketplace="claude-plugins-official")])
+        assert statuses[0].installed is True
+        assert statuses[0].scope == "project"
+
+    def test_missing_scope_line_is_none(self):
+        # Older CLI / odd outputs may omit the line entirely. None is fine —
+        # update will fall through to its own default behaviour.
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE_OUTPUT_NO_SCOPE_LINE)
+        statuses = detector.get_statuses([PluginSpec(name="legacy-plugin")])
+        assert statuses[0].installed is True
+        assert statuses[0].scope is None
+
+    def test_scope_does_not_bleed_across_neighbours(self):
+        # Regression: the slice that follows the matched header must stop at
+        # the next plugin block, otherwise we'd attribute neighbour scopes.
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE_OUTPUT_TWO_PLUGINS)
+        statuses = detector.get_statuses(
+            [
+                PluginSpec(name="first-plugin", marketplace="market-a"),
+                PluginSpec(name="second-plugin", marketplace="market-b"),
+            ]
+        )
+        assert statuses[0].scope == "user"
+        assert statuses[1].scope == "project"
+
+
+class TestPluginUpdateActionScopeForwarding:
+    @staticmethod
+    def _status_with_scope(name: str, marketplace: str, scope: str | None):
+        from sccs.doctor.detectors import PluginStatus
+
+        return PluginStatus(
+            spec=PluginSpec(name=name, marketplace=marketplace),
+            installed=True,
+            update_available=None,
+            detection_source="exact",
+            found_marketplace=marketplace,
+            scope=scope,
+        )
+
+    def test_update_action_appends_scope_flag_when_known(self):
+        from sccs.doctor.installer import _plugin_update_actions
+
+        st = self._status_with_scope("superpowers", "claude-plugins-official", "project")
+        actions = _plugin_update_actions([st])
+        assert actions[0].cmd == [
+            "claude",
+            "plugin",
+            "update",
+            "superpowers@claude-plugins-official",
+            "--scope",
+            "project",
+        ]
+        assert "scope: project" in actions[0].label
+
+    def test_update_action_omits_scope_when_unknown(self):
+        # Scope=None preserves prior behaviour: no flag, claude defaults to user.
+        from sccs.doctor.installer import _plugin_update_actions
+
+        st = self._status_with_scope("foo", "bar", None)
+        actions = _plugin_update_actions([st])
+        assert actions[0].cmd == ["claude", "plugin", "update", "foo@bar"]
+
+    def test_update_action_drops_unknown_scope_value(self):
+        # Defensive: only the four documented scope values get forwarded.
+        # A future Claude CLI release that introduces a new scope is therefore
+        # caught at our argv boundary instead of being passed through blindly.
+        from sccs.doctor.installer import _plugin_update_actions
+
+        st = self._status_with_scope("foo", "bar", "weirdscope")
+        actions = _plugin_update_actions([st])
+        assert actions[0].cmd == ["claude", "plugin", "update", "foo@bar"]
+
+
+class TestPluginUpdateScopeMismatchSoftFail:
+    """When `claude plugin update` reports the plugin as not installed at the
+    chosen scope but our detection said it WAS installed, that's a list/update
+    mismatch — not a real failure. Doctor classifies the action as `skipped`
+    (not `failed`) so the overall report stays green for users whose plugins
+    are installed under an unusual scope.
+    """
+
+    def test_not_installed_at_scope_user_is_skipped_not_failed(self):
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+        from sccs.doctor.runner import DoctorError
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="update plugin superpowers@claude-plugins-official",
+                    cmd=["claude", "plugin", "update", "superpowers@claude-plugins-official"],
+                    runnable=True,
+                    component="plugin:superpowers",
+                )
+            ]
+        )
+        err = DoctorError(
+            "Command failed: claude plugin update superpowers@claude-plugins-official",
+            returncode=1,
+            stderr=(
+                '✘ Failed to update plugin "superpowers@claude-plugins-official": '
+                'Plugin "superpowers" is not installed at scope user'
+            ),
+        )
+        with patch("sccs.doctor.installer._run", side_effect=err):
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+
+        assert len(result.failed) == 0
+        assert len(result.skipped) == 1
+        assert "scope mismatch" in result.skipped[0].detail.lower()
+
+    def test_other_plugin_failures_remain_failed(self):
+        # Soft-fail is targeted: any other update error keeps its FAILED status.
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+        from sccs.doctor.runner import DoctorError
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="update plugin foo@bar",
+                    cmd=["claude", "plugin", "update", "foo@bar"],
+                    runnable=True,
+                    component="plugin:foo",
+                )
+            ]
+        )
+        err = DoctorError(
+            "Command failed: claude plugin update foo@bar",
+            returncode=2,
+            stderr="network unreachable",
+        )
+        with patch("sccs.doctor.installer._run", side_effect=err):
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+
+        assert len(result.failed) == 1
+        assert len(result.skipped) == 0

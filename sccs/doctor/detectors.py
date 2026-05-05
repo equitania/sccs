@@ -69,6 +69,12 @@ class PluginStatus:
     # The marketplace under which the plugin was actually found (only set
     # when detection_source is "exact" or "alternative").
     found_marketplace: str | None = None
+    # The installation scope reported by `claude plugin list` — one of
+    # user|project|local|managed (or None if the parser couldn't extract it).
+    # Forwarded as `--scope <value>` to `claude plugin update`, which would
+    # otherwise default to `user` and fail with "Plugin … is not installed
+    # at scope user" for plugins installed under a different scope.
+    scope: str | None = None
 
 
 @dataclass
@@ -167,18 +173,42 @@ class ClaudePluginDetector:
         return self._raw_output
 
     @staticmethod
+    def _extract_scope_from_block(output: str, match_end: int) -> str | None:
+        """Read the `Scope: <value>` line that follows a plugin header match.
+
+        `claude plugin list` formats each plugin as a 4-line block:
+
+            ❯ <name>@<marketplace>
+              Version: <ver>
+              Scope: <user|project|local|managed>
+              Status: <enabled|disabled>
+
+        We slice ~300 chars after the matched header and stop at the next
+        `❯ ` to avoid bleeding into the neighbouring plugin's metadata
+        block.
+        """
+        block = output[match_end : match_end + 300]
+        next_header = re.search(r"\n\s*❯", block)
+        if next_header:
+            block = block[: next_header.start()]
+        m = re.search(r"\bScope:\s*(\S+)", block, re.IGNORECASE)
+        return m.group(1) if m else None
+
+    @staticmethod
     def _detect_plugin(
         name: str,
         marketplace: str | None,
         output: str,
-    ) -> tuple[str, str | None]:
+    ) -> tuple[str, str | None, str | None]:
         """Classify a single plugin against the raw `claude plugin list` output.
 
-        Returns (detection_source, found_marketplace). detection_source is one
-        of "exact", "alternative", "bare", "missing".
+        Returns (detection_source, found_marketplace, scope). detection_source
+        is one of "exact", "alternative", "bare", "missing". `scope` is the
+        value of the `Scope:` line in the matched plugin's metadata block, or
+        None if no match or no scope line was found.
         """
         if not output:
-            return ("missing", None)
+            return ("missing", None, None)
 
         escaped_name = re.escape(name)
         # Pattern matches "<name>@<some-marketplace>" with a word boundary in
@@ -195,8 +225,10 @@ class ClaudePluginDetector:
                 rf"(?<![\w\-]){escaped_name}@{re.escape(marketplace)}\b",
                 re.IGNORECASE,
             )
-            if exact_re.search(output):
-                return ("exact", marketplace)
+            m = exact_re.search(output)
+            if m:
+                scope = ClaudePluginDetector._extract_scope_from_block(output, m.end())
+                return ("exact", marketplace, scope)
 
         # Plugin name found under *some* marketplace — installed via a
         # different source than the user configured (or any source at all
@@ -204,9 +236,10 @@ class ClaudePluginDetector:
         match = any_market_re.search(output)
         if match:
             found = match.group(1)
+            scope = ClaudePluginDetector._extract_scope_from_block(output, match.end())
             if marketplace and found.lower() != marketplace.lower():
-                return ("alternative", found)
-            return ("exact", found)
+                return ("alternative", found, scope)
+            return ("exact", found, scope)
 
         # Plugin name appears as a bare token (rare CLI format that omits
         # the '@marketplace' suffix).
@@ -214,16 +247,18 @@ class ClaudePluginDetector:
             rf"(?<![\w\-]){escaped_name}(?![\w\-@])",
             re.IGNORECASE,
         )
-        if bare_re.search(output):
-            return ("bare", None)
+        bare = bare_re.search(output)
+        if bare:
+            scope = ClaudePluginDetector._extract_scope_from_block(output, bare.end())
+            return ("bare", None, scope)
 
-        return ("missing", None)
+        return ("missing", None, None)
 
     def get_statuses(self, specs: list[PluginSpec]) -> list[PluginStatus]:
         output = self._output()
         statuses: list[PluginStatus] = []
         for spec in specs:
-            source, found = self._detect_plugin(spec.name, spec.marketplace, output)
+            source, found, scope = self._detect_plugin(spec.name, spec.marketplace, output)
             statuses.append(
                 PluginStatus(
                     spec=spec,
@@ -233,6 +268,7 @@ class ClaudePluginDetector:
                     update_available=None,
                     detection_source=source,
                     found_marketplace=found,
+                    scope=scope,
                 )
             )
         return statuses

@@ -195,6 +195,12 @@ def _effective_update_target(status: PluginStatus) -> str:
     return status.spec.install_target
 
 
+# Scope values accepted by `claude plugin update --scope <value>` — anything
+# else gets dropped silently rather than passed through, so a future Claude
+# CLI release that introduces an additional scope cannot break our argv.
+_VALID_PLUGIN_SCOPES = frozenset({"user", "project", "local", "managed"})
+
+
 def _plugin_update_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
     actions: list[DoctorAction] = []
     for st in statuses:
@@ -202,10 +208,19 @@ def _plugin_update_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
             # Skip — install plan covers missing plugins.
             continue
         target = _effective_update_target(st)
+        cmd = ["claude", "plugin", "update", target]
+        # Forward the scope detected in `claude plugin list` so update doesn't
+        # default to scope=user and fail with "Plugin … is not installed at
+        # scope user" for plugins installed under project/local/managed (real
+        # incident on Debian 13 with `superpowers@claude-plugins-official`).
+        scope_label = ""
+        if st.scope and st.scope.lower() in _VALID_PLUGIN_SCOPES:
+            cmd.extend(["--scope", st.scope.lower()])
+            scope_label = f" (scope: {st.scope.lower()})"
         actions.append(
             DoctorAction(
-                label=f"update plugin {target}",
-                cmd=["claude", "plugin", "update", target],
+                label=f"update plugin {target}{scope_label}",
+                cmd=cmd,
                 runnable=True,
                 component=f"plugin:{st.spec.name}",
             )
@@ -441,8 +456,27 @@ def execute_plan(
                         state_err,
                     )
         except DoctorError as err:
-            result.outcomes.append(ActionOutcome(label=action.label, status="failed", detail=err.stderr or str(err)))
-            logger.warning("doctor action failed: %s — %s", action.label, err)
+            # Soft-fail when a plugin update reports "not installed at scope X" —
+            # detection said the plugin was there, so this is a list/update
+            # mismatch in the Claude CLI rather than a genuine install problem.
+            # Without this guard the user sees a red FAILED row for a plugin
+            # that is in fact installed and working — just under a scope the
+            # detector either didn't read or that update doesn't accept.
+            err_text = (err.stderr or str(err)).lower()
+            if "not installed at scope" in err_text and action.component.startswith("plugin:"):
+                result.outcomes.append(
+                    ActionOutcome(
+                        label=action.label,
+                        status="skipped",
+                        detail=f"scope mismatch — plugin already installed elsewhere: {err.stderr or err}",
+                    )
+                )
+                logger.warning("doctor plugin update skipped (scope mismatch): %s — %s", action.label, err)
+            else:
+                result.outcomes.append(
+                    ActionOutcome(label=action.label, status="failed", detail=err.stderr or str(err))
+                )
+                logger.warning("doctor action failed: %s — %s", action.label, err)
         except OSError as err:
             # Python-callable filesystem error (copytree etc.)
             result.outcomes.append(ActionOutcome(label=action.label, status="failed", detail=str(err)))

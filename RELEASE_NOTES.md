@@ -1,5 +1,19 @@
 # Release Notes
 
+## Version 2.25.1 (05.05.2026)
+
+### Fixed
+- **`sccs doctor update` failed for plugins installed under a non-`user` scope.** Real-world incident on Debian 13: `claude plugin list` reported `superpowers@claude-plugins-official` as installed, but `claude plugin update superpowers@claude-plugins-official` (which defaults to `--scope user`) responded with `Plugin "superpowers" is not installed at scope user`. The plugin was installed under a different scope (e.g. `project` or `local`), so the default-`user` lookup never found it. Fix has two parts:
+  1. `ClaudePluginDetector` now reads the `Scope: <value>` line from each plugin's metadata block in `claude plugin list` and stores it on `PluginStatus.scope`.
+  2. `_plugin_update_actions` forwards the detected scope as `--scope <user|project|local|managed>` so `claude plugin update` looks in the correct place. Unknown scope values are silently dropped (defensive against a future Claude CLI release that introduces a new scope).
+- **Generic soft-fail for `not installed at scope X` errors during plugin updates.** When the detector classified a plugin as installed but `claude plugin update` still rejects it as "not installed at scope X", `execute_plan` now records the action as `skipped` (with the original stderr in `detail`) rather than `failed`. Detection said the plugin is there — this is a list/update mismatch in the Claude CLI, not a real install problem, so it shouldn't turn the doctor report red.
+
+### Tests
+- 9 new tests in `tests/test_doctor.py`:
+  - `TestPluginScopeDetection` (4): `Scope: user`/`Scope: project` extraction, `None` when missing, no scope-bleed across neighbouring plugin blocks in the list output.
+  - `TestPluginUpdateActionScopeForwarding` (3): `--scope project` appended when known, omitted when `None`, dropped silently when value is unknown (e.g. `weirdscope`).
+  - `TestPluginUpdateScopeMismatchSoftFail` (2): "not installed at scope user" is reclassified `skipped`; unrelated update errors still surface as `failed`.
+
 ## Version 2.25.0 (05.05.2026)
 
 ### Added
