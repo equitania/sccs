@@ -118,70 +118,7 @@ sccs sync -c claude_skills
 
 ### Export/Import (Kundendeployment)
 
-Konfigurationen selektiv als ZIP-Archiv exportieren und auf anderen Systemen importieren — ideal fuer Kundendeployments, bei denen nicht das gesamte Repository uebertragen werden soll.
-
-#### Export
-
-```bash
-# Interaktive Auswahl per Checkbox
-sccs export
-
-# Alles exportieren (ohne Auswahl)
-sccs export --all
-
-# Eigenen Ausgabepfad angeben
-sccs export -o ~/Desktop/kunde-config.zip
-
-# Nur bestimmte Kategorien
-sccs export -c claude_skills
-sccs export -c claude_skills -c claude_agents
-
-# Kombiniert: Nur Skills, ohne Interaktion
-sccs export -c claude_skills --all -o skills.zip
-```
-
-Die interaktive Auswahl zeigt alle verfuegbaren Items gruppiert nach Kategorie mit Checkboxen:
-
-```
-? Select items to export (42 available):
-  ── Claude Code Skills ──
-  [✔] code-review
-  [✔] git-workflow
-  [ ] internal-tool
-  ── Claude Agents ──
-  [✔] code-reviewer
-  ── Fish Shell (macos only) ──
-  [✔] config.fish  (macos only)
-```
-
-#### Import
-
-```bash
-# Interaktive Auswahl, was importiert werden soll
-sccs import config.zip
-
-# Alles importieren
-sccs import config.zip --all
-
-# Vorschau ohne Schreiben
-sccs import config.zip --dry-run
-
-# Bestehende Dateien ueberschreiben (mit automatischem Backup)
-sccs import config.zip --overwrite
-
-# Ohne Backup ueberschreiben
-sccs import config.zip --overwrite --no-backup
-```
-
-#### Einsatzbereiche
-
-| Szenario | Empfohlener Befehl |
-|----------|-------------------|
-| Skills an Kunden liefern | `sccs export -c claude_skills -o kunde.zip` |
-| Fish-Config fuer Linux-Server | `sccs export -c fish_config -c fish_functions --all` |
-| Komplett-Setup fuer neues System | `sccs export --all -o full-setup.zip` |
-| Vorschau vor dem Import | `sccs import setup.zip --dry-run` |
-| Sicheres Update bestehender Configs | `sccs import setup.zip --overwrite` |
+ZIP-basierter Export/Import einzelner Kategorien für gezielte Kundendeployments. Vollständige Beispiele und Use-Cases siehe [docs/usage/transfer.md](docs/usage/transfer.md).
 
 ### Konfiguration
 
@@ -560,70 +497,7 @@ sccs sync -c claude_skills
 
 ### Export/Import (Customer Deployment)
 
-Selectively export configurations as ZIP archives and import them on other systems — ideal for customer deployments where the full repository should not be transferred.
-
-#### Export
-
-```bash
-# Interactive checkbox selection
-sccs export
-
-# Export everything (no prompt)
-sccs export --all
-
-# Custom output path
-sccs export -o ~/Desktop/customer-config.zip
-
-# Specific categories only
-sccs export -c claude_skills
-sccs export -c claude_skills -c claude_agents
-
-# Combined: only skills, non-interactive
-sccs export -c claude_skills --all -o skills.zip
-```
-
-The interactive selection shows all available items grouped by category with checkboxes:
-
-```
-? Select items to export (42 available):
-  ── Claude Code Skills ──
-  [✔] code-review
-  [✔] git-workflow
-  [ ] internal-tool
-  ── Claude Agents ──
-  [✔] code-reviewer
-  ── Fish Shell (macos only) ──
-  [✔] config.fish  (macos only)
-```
-
-#### Import
-
-```bash
-# Interactive selection of what to import
-sccs import config.zip
-
-# Import everything
-sccs import config.zip --all
-
-# Preview without writing
-sccs import config.zip --dry-run
-
-# Overwrite existing files (with automatic backup)
-sccs import config.zip --overwrite
-
-# Overwrite without backup
-sccs import config.zip --overwrite --no-backup
-```
-
-#### Use Cases
-
-| Scenario | Recommended Command |
-|----------|-------------------|
-| Deliver skills to customer | `sccs export -c claude_skills -o customer.zip` |
-| Fish config for Linux server | `sccs export -c fish_config -c fish_functions --all` |
-| Full setup for new system | `sccs export --all -o full-setup.zip` |
-| Preview before import | `sccs import setup.zip --dry-run` |
-| Safe update of existing configs | `sccs import setup.zip --overwrite` |
+ZIP-based export/import of individual categories for targeted customer deployments. Full command reference and use cases live in [docs/usage/transfer.md](docs/usage/transfer.md).
 
 ### Configuration
 
