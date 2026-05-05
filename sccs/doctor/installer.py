@@ -7,7 +7,10 @@
 
 from __future__ import annotations
 
+import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import questionary
 
@@ -19,7 +22,7 @@ from sccs.doctor.detectors import (
     PluginStatus,
 )
 from sccs.doctor.runner import DoctorError, _run
-from sccs.doctor.schema import DoctorConfig
+from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec
 from sccs.doctor.state import DoctorStateManager
 from sccs.utils.logging import get_logger
 
@@ -40,9 +43,14 @@ class DoctorAction:
     # so future `sccs doctor check` calls can still report it as installed.
     npx_tool_name: str | None = None
     npx_invocation: list[str] | None = None
+    # In-process callable used instead of subprocess. Needed for actions
+    # that involve filesystem operations (e.g. copying a skill out of the
+    # npm global root): keeps everything Python-side so we don't have to
+    # whitelist `cp` in the runner or shell out for path resolution.
+    python_callable: Callable[[], None] | None = None
 
     def is_print_only(self) -> bool:
-        return not self.runnable or self.cmd is None
+        return not self.runnable or (self.cmd is None and self.python_callable is None)
 
 
 @dataclass
@@ -205,6 +213,66 @@ def _plugin_update_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
     return actions
 
 
+def _post_install_actions(spec: NpxToolSpec) -> list[DoctorAction]:
+    """Action list for `spec.post_install` (e.g. `playwright-cli install-browser …`).
+
+    These run after the main invocation succeeds. They are intentionally
+    treated as regular runnable actions so the user sees the confirm prompt
+    and the result lands in `ExecuteResult` like every other step.
+    """
+    return [
+        DoctorAction(
+            label=f"{spec.name}: {' '.join(cmd)}",
+            cmd=list(cmd),
+            runnable=True,
+            component=f"npx:{spec.name}:post",
+        )
+        for cmd in spec.post_install
+    ]
+
+
+def _bundled_skill_action(spec: NpxToolSpec) -> DoctorAction | None:
+    """Action that copies the npm-bundled skill into `~/.claude/skills/`."""
+    if spec.bundled_skill is None:
+        return None
+    bs = spec.bundled_skill
+
+    def _run_skill_sync() -> None:
+        _sync_bundled_skill(bs)
+
+    return DoctorAction(
+        label=f"sync bundled skill {spec.name} → {bs.target}",
+        runnable=True,
+        component=f"npx:{spec.name}:skill",
+        python_callable=_run_skill_sync,
+    )
+
+
+def _sync_bundled_skill(bs: BundledSkillSpec) -> None:
+    """Copy `<npm root -g>/<package_subpath>` to `<target>` (overwriting).
+
+    Resolved at execute-time because the npm global root differs across
+    Homebrew, NodeSource, nvm and Windows installations. Whole-directory
+    overwrite is intentional: the target is also added to the doctor-
+    managed exclude registry so `sccs sync` ignores it; the npm package is
+    therefore the single source of truth.
+    """
+    proc = _run(["npm", "root", "-g"], check=True, capture=True, timeout=30)
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        raise DoctorError("Could not resolve `npm root -g` (empty output)")
+    npm_root = Path(raw.splitlines()[0].strip())
+    source = npm_root / bs.package_subpath
+    if not source.is_dir():
+        raise DoctorError(f"bundled skill source not found: {source}")
+    target = Path(bs.target).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
+    logger.info("doctor copied bundled skill: %s → %s", source, target)
+
+
 def _npx_install_actions(statuses: list[NpxToolStatus]) -> list[DoctorAction]:
     actions: list[DoctorAction] = []
     for st in statuses:
@@ -221,11 +289,20 @@ def _npx_install_actions(statuses: list[NpxToolStatus]) -> list[DoctorAction]:
                 npx_invocation=list(spec.invocation) if spec.detect_via_state else None,
             )
         )
+        actions.extend(_post_install_actions(spec))
+        skill_action = _bundled_skill_action(spec)
+        if skill_action:
+            actions.append(skill_action)
     return actions
 
 
 def _npx_update_actions(statuses: list[NpxToolStatus]) -> list[DoctorAction]:
-    """Re-run the `npx ...` invocation; npx will fetch the latest version."""
+    """Re-run the `npx ...` invocation; npx will fetch the latest version.
+
+    Always re-runs `post_install` and `bundled_skill` so an npm update that
+    bumps the bundled browser drivers or skill content propagates to the
+    user's machine without manual intervention.
+    """
     actions: list[DoctorAction] = []
     for st in statuses:
         spec = st.spec
@@ -239,6 +316,10 @@ def _npx_update_actions(statuses: list[NpxToolStatus]) -> list[DoctorAction]:
                 npx_invocation=list(spec.invocation) if spec.detect_via_state else None,
             )
         )
+        actions.extend(_post_install_actions(spec))
+        skill_action = _bundled_skill_action(spec)
+        if skill_action:
+            actions.append(skill_action)
     return actions
 
 
@@ -335,8 +416,16 @@ def execute_plan(
             result.outcomes.append(ActionOutcome(label=action.label, status="skipped"))
             continue
 
-        assert action.cmd is not None  # narrowed by is_print_only above
         try:
+            if action.python_callable is not None:
+                # In-process action (e.g. bundled-skill copy). Errors are
+                # surfaced as DoctorError just like subprocess failures.
+                action.python_callable()
+                result.outcomes.append(ActionOutcome(label=action.label, status="executed"))
+                logger.info("doctor action ok: %s", action.label)
+                continue
+
+            assert action.cmd is not None  # narrowed by is_print_only above
             proc = _run(action.cmd, check=True, capture=True, timeout=300)
             detail = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout else ""
             result.outcomes.append(ActionOutcome(label=action.label, status="executed", detail=detail))
@@ -353,6 +442,10 @@ def execute_plan(
                     )
         except DoctorError as err:
             result.outcomes.append(ActionOutcome(label=action.label, status="failed", detail=err.stderr or str(err)))
+            logger.warning("doctor action failed: %s — %s", action.label, err)
+        except OSError as err:
+            # Python-callable filesystem error (copytree etc.)
+            result.outcomes.append(ActionOutcome(label=action.label, status="failed", detail=str(err)))
             logger.warning("doctor action failed: %s — %s", action.label, err)
 
     return result

@@ -1018,3 +1018,157 @@ class TestPermissionInstallPlan:
         assert "~/.npm" in paths
         assert "~/.claude" in paths
         assert "~/.config/sccs" in paths
+
+
+# --------------------------------------------------------------------------- #
+# Playwright-CLI: post_install + bundled_skill                                #
+# --------------------------------------------------------------------------- #
+
+
+class TestPlaywrightCliBundling:
+    """Covers the post_install (browser bundles) and bundled_skill (SKILL.md
+    sync from the npm package) features added for `playwright-cli`.
+
+    The same generic mechanism backs any future npm-tool spec that wants to
+    run follow-up commands or ship a Claude skill — the tests intentionally
+    use the playwright-cli default to lock in the real-world contract.
+    """
+
+    def test_default_playwright_cli_has_browser_post_install(self):
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        assert ["playwright-cli", "install-browser", "chromium"] in spec.post_install
+        assert ["playwright-cli", "install-browser", "firefox"] in spec.post_install
+
+    def test_default_playwright_cli_has_bundled_skill(self):
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        assert spec.bundled_skill is not None
+        assert spec.bundled_skill.package_subpath == "@playwright/cli/skills/playwright-cli"
+        assert spec.bundled_skill.target == "~/.claude/skills/playwright-cli"
+
+    def test_playwright_cli_managed_pattern_excludes_skill_from_sync(self):
+        # `~/.claude/skills/playwright-cli/` must be auto-excluded so two
+        # machines that both run `sccs doctor` don't fight over the tree.
+        from sccs.doctor.managed import get_doctor_managed_excludes
+
+        cfg = DoctorConfig()  # bundled defaults
+        patterns = get_doctor_managed_excludes(cfg)
+        assert "playwright-cli" in patterns
+
+    def test_install_plan_appends_post_install_for_missing_tool(self):
+        """Missing playwright-cli → install + 2 browsers + skill-sync."""
+        from sccs.doctor.detectors import NpxToolStatus
+        from sccs.doctor.installer import _npx_install_actions
+
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        status = NpxToolStatus(spec=spec, available=False, binary_path=None, detection_source="missing")
+        actions = _npx_install_actions([status])
+        labels = [a.label for a in actions]
+        # Order must be: main install → browser:chromium → browser:firefox → skill-sync
+        assert labels[0] == "install npx tool playwright-cli"
+        assert "install-browser chromium" in labels[1]
+        assert "install-browser firefox" in labels[2]
+        assert labels[3].startswith("sync bundled skill playwright-cli")
+        # The skill action is python_callable, not subprocess.
+        assert actions[3].cmd is None
+        assert actions[3].python_callable is not None
+
+    def test_update_plan_always_re_runs_post_install_and_skill(self):
+        """Update path must re-run browser fetch + skill sync even when the
+        main tool is already on PATH — that's how doctor catches new browser
+        bundles and refreshed SKILL.md content shipping in npm updates."""
+        from sccs.doctor.detectors import NpxToolStatus
+        from sccs.doctor.installer import _npx_update_actions
+
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        status = NpxToolStatus(
+            spec=spec,
+            available=True,
+            binary_path="/opt/homebrew/bin/playwright-cli",
+            detection_source="path",
+        )
+        actions = _npx_update_actions([status])
+        labels = [a.label for a in actions]
+        assert any("install-browser chromium" in lab for lab in labels)
+        assert any("install-browser firefox" in lab for lab in labels)
+        assert any(lab.startswith("sync bundled skill playwright-cli") for lab in labels)
+
+    def test_sync_bundled_skill_copies_directory_into_target(self, tmp_path, monkeypatch):
+        """End-to-end: fake `npm root -g` → fake source tree → expect copy."""
+        from sccs.doctor.installer import _sync_bundled_skill
+        from sccs.doctor.schema import BundledSkillSpec
+
+        # Fake npm global root with a skill payload
+        fake_npm_root = tmp_path / "npm_global"
+        skill_src = fake_npm_root / "@vendor/cli/skills/my-skill"
+        (skill_src / "references").mkdir(parents=True)
+        (skill_src / "SKILL.md").write_text("# my skill\n", encoding="utf-8")
+        (skill_src / "references" / "ref.md").write_text("ref\n", encoding="utf-8")
+
+        target = tmp_path / "claude_home" / "skills" / "my-skill"
+        bs = BundledSkillSpec(package_subpath="@vendor/cli/skills/my-skill", target=str(target))
+
+        fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=f"{fake_npm_root}\n", stderr="")
+        with patch("sccs.doctor.installer._run", return_value=fake_proc):
+            _sync_bundled_skill(bs)
+
+        assert (target / "SKILL.md").read_text(encoding="utf-8") == "# my skill\n"
+        assert (target / "references" / "ref.md").read_text(encoding="utf-8") == "ref\n"
+
+    def test_sync_bundled_skill_overwrites_existing_target(self, tmp_path):
+        """A second run replaces the directory — npm package is the source of truth."""
+        from sccs.doctor.installer import _sync_bundled_skill
+        from sccs.doctor.schema import BundledSkillSpec
+
+        fake_npm_root = tmp_path / "npm_global"
+        skill_src = fake_npm_root / "p/skills/s"
+        skill_src.mkdir(parents=True)
+        (skill_src / "SKILL.md").write_text("v2\n", encoding="utf-8")
+
+        target = tmp_path / "skills" / "s"
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_text("v1-stale\n", encoding="utf-8")
+        (target / "stray.md").write_text("should be removed\n", encoding="utf-8")
+
+        bs = BundledSkillSpec(package_subpath="p/skills/s", target=str(target))
+        fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=f"{fake_npm_root}\n", stderr="")
+        with patch("sccs.doctor.installer._run", return_value=fake_proc):
+            _sync_bundled_skill(bs)
+
+        assert (target / "SKILL.md").read_text(encoding="utf-8") == "v2\n"
+        assert not (target / "stray.md").exists()  # full replace, not merge
+
+    def test_sync_bundled_skill_raises_on_missing_source(self, tmp_path):
+        from sccs.doctor.installer import _sync_bundled_skill
+        from sccs.doctor.runner import DoctorError
+        from sccs.doctor.schema import BundledSkillSpec
+
+        bs = BundledSkillSpec(package_subpath="does/not/exist", target=str(tmp_path / "s"))
+        fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=f"{tmp_path}\n", stderr="")
+        with (
+            patch("sccs.doctor.installer._run", return_value=fake_proc),
+            pytest.raises(DoctorError, match="bundled skill source not found"),
+        ):
+            _sync_bundled_skill(bs)
+
+    def test_execute_plan_runs_python_callable(self, tmp_path):
+        """python_callable actions execute in-process and report success."""
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+
+        marker = tmp_path / "marker"
+
+        def _do() -> None:
+            marker.write_text("done", encoding="utf-8")
+
+        plan = InstallPlan(actions=[DoctorAction(label="custom", runnable=True, python_callable=_do)])
+        result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        assert marker.exists()
+        assert result.executed[0].label == "custom"
+
+    def test_post_install_spec_validation_rejects_dash_head(self):
+        # Same security guard as `invocation`: argv[0] must not start with '-'
+        with pytest.raises(ValidationError):
+            NpxToolSpec(
+                name="x",
+                invocation=["npx", "x"],
+                post_install=[["--rm-rf-flag"]],
+            )

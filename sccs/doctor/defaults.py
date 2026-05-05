@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from sccs.doctor.schema import (
+    BundledSkillSpec,
     NodeInstallSpec,
     NpxToolSpec,
     PermissionCheckSpec,
@@ -56,6 +57,26 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
         # called `@playwright/cli` (scoped name).
         detect_command="playwright-cli",
         detect_via_state=False,
+        # Browser bundles are downloaded separately. `playwright-cli
+        # install-browser <name>` is idempotent: it skips when the requested
+        # version is already in `~/.cache/ms-playwright/`, and downloads
+        # otherwise — so the same command doubles as the update check on
+        # every `sccs doctor update`. Without these, users hit "browser not
+        # found" the first time they run any `pw open` / `pw snap` command.
+        post_install=[
+            ["playwright-cli", "install-browser", "chromium"],
+            ["playwright-cli", "install-browser", "firefox"],
+        ],
+        # `@playwright/cli` ships a Claude skill at `skills/playwright-cli/`
+        # (SKILL.md + 11 reference docs). Claude only discovers skills that
+        # live under `~/.claude/skills/`, so doctor resolves npm's global
+        # root and copies the directory into place. The target is auto-
+        # excluded from `sccs sync` via DEFAULT_MANAGED_PATTERNS so two
+        # machines that both run `sccs doctor` don't fight over the tree.
+        bundled_skill=BundledSkillSpec(
+            package_subpath="@playwright/cli/skills/playwright-cli",
+            target="~/.claude/skills/playwright-cli",
+        ),
     ),
 ]
 

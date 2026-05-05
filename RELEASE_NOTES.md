@@ -1,5 +1,20 @@
 # Release Notes
 
+## Version 2.25.0 (05.05.2026)
+
+### Added
+- **`sccs doctor` now installs browser bundles and the bundled Claude skill for `playwright-cli` automatically.** Two reproducibility issues from v2.24.0 are addressed:
+  1. **"Browser not found" on first use:** `npm install -g @playwright/cli@latest` ships only the CLI — Chromium and Firefox bundles are downloaded separately via `playwright-cli install-browser <name>`. Doctor now appends both calls as `post_install` actions on every install/update. The command is idempotent (skips when the requested version is already in the local cache, downloads otherwise), so the same calls double as the automated update check.
+  2. **Skill missing from Claude:** `@playwright/cli` ships a Claude skill at `<npm root -g>/@playwright/cli/skills/playwright-cli/` (SKILL.md + 11 reference docs), but Claude only discovers skills under `~/.claude/skills/`. Doctor now resolves the npm global root at execute-time and copies the directory into place. The destination is auto-excluded from `sccs sync` via `DEFAULT_MANAGED_PATTERNS` so two machines that both run `sccs doctor` cannot fight over the tree.
+- **Generic mechanism, not a special case.** Two new fields on `NpxToolSpec` carry the heavy lifting:
+  - `post_install: list[list[str]]` — argv lists executed sequentially after the main `invocation` succeeds. Same security validation as `invocation` (head must not start with `-`, must match the safe-name pattern). Idempotent commands here also serve as the automated update probe.
+  - `bundled_skill: BundledSkillSpec | None` — declarative pointer to a directory inside the npm package; doctor resolves `npm root -g` at runtime, copies into the configured target.
+- `DoctorAction.python_callable: Callable[[], None] | None` — in-process action backing the bundled-skill copy. Avoids whitelisting `cp` in the runner and keeps path resolution Python-side. `execute_plan` runs callables under the same confirm-prompt + error-handling flow as subprocess actions.
+- `managed.DEFAULT_MANAGED_PATTERNS` gains `playwright-cli` → `["playwright-cli"]` so the skill directory is silently skipped by `sccs sync`.
+
+### Tests
+- 10 new tests in `tests/test_doctor.py::TestPlaywrightCliBundling`: defaults presence, schema validation, install-plan composition (main + chromium + firefox + skill-sync ordering), update-plan re-run guarantee, `_sync_bundled_skill` happy path + overwrite + missing-source error, `execute_plan` with `python_callable`, post-install argv-injection guard.
+
 ## Version 2.24.0 (05.05.2026)
 
 ### Added

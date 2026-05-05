@@ -72,6 +72,43 @@ class PluginSpec(BaseModel):
         return self.name
 
 
+class BundledSkillSpec(BaseModel):
+    """A Claude skill bundled inside an npm package.
+
+    Some npm packages (e.g. `@playwright/cli`) ship a `skills/<name>/SKILL.md`
+    directory intended for Claude Code consumption. Claude only discovers
+    skills under `~/.claude/skills/`, so doctor resolves the npm global root
+    at runtime and copies the bundled directory into place. The target
+    directory is added to `DEFAULT_MANAGED_PATTERNS` so it is automatically
+    excluded from `sccs sync` — otherwise two machines that both run
+    `sccs doctor` produce conflicting trees.
+    """
+
+    package_subpath: str = Field(
+        description=(
+            "Path inside `npm root -g` to the bundled skill directory (e.g. '@playwright/cli/skills/playwright-cli')."
+        ),
+    )
+    target: str = Field(
+        description=(
+            "Target directory the skill is copied to. `~` is expanded to the "
+            "user's home (e.g. '~/.claude/skills/playwright-cli')."
+        ),
+    )
+
+    @field_validator("package_subpath", "target")
+    @classmethod
+    def _validate_path(cls, v: str) -> str:
+        if not v or v.isspace():
+            raise ValueError("path must not be empty")
+        if v.startswith("-"):
+            raise ValueError(f"path must not start with '-': {v!r}")
+        body = v[1:] if v.startswith("~") else v
+        if any(ch in body for ch in (";", "|", "&", "$", "`", "\n", "\r")):
+            raise ValueError(f"path contains shell metacharacters: {v!r}")
+        return v
+
+
 class NpxToolSpec(BaseModel):
     """A helper tool that runs via `npx` (e.g. statusline installer)."""
 
@@ -93,6 +130,26 @@ class NpxToolSpec(BaseModel):
             "records successful runs."
         ),
     )
+    post_install: list[list[str]] = Field(
+        default_factory=list,
+        description=(
+            "Argv lists executed sequentially AFTER the main `invocation` succeeds. "
+            "Used for tools that need a second step the wrapper itself owns "
+            "(e.g. `playwright-cli install-browser chromium` to fetch a browser bundle). "
+            "Each entry must be a non-empty argv list whose head passes the same "
+            "safe-name validation as `invocation`. The same actions are appended "
+            "in `sccs doctor update`, so idempotent commands also serve as "
+            "automated update checks."
+        ),
+    )
+    bundled_skill: BundledSkillSpec | None = Field(
+        default=None,
+        description=(
+            "Optional Claude skill that ships inside the npm package. If set, "
+            "doctor resolves the npm global root and copies the directory into "
+            "the configured target after a successful install/update."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -112,6 +169,19 @@ class NpxToolSpec(BaseModel):
             raise ValueError(f"Invocation head must not start with '-': {head!r}")
         if not _SAFE_NAME_PATTERN.match(head):
             raise ValueError(f"Invocation head contains invalid characters: {head!r}")
+        return v
+
+    @field_validator("post_install")
+    @classmethod
+    def _validate_post_install(cls, v: list[list[str]]) -> list[list[str]]:
+        for cmd in v:
+            if not cmd:
+                raise ValueError("post_install entries must contain at least one argv element")
+            head = cmd[0]
+            if head.startswith("-"):
+                raise ValueError(f"post_install head must not start with '-': {head!r}")
+            if not _SAFE_NAME_PATTERN.match(head):
+                raise ValueError(f"post_install head contains invalid characters: {head!r}")
         return v
 
 
