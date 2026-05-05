@@ -114,7 +114,10 @@ def _npm_root_global_fix_block(st: PermissionStatus) -> list[str]:
     lines.append("# Two fixes — pick ONE:")
     lines.append("")
     lines.append("# Option A (recommended): user-local npm prefix, no sudo")
-    lines.append("mkdir -p ~/.npm-global")
+    # Pre-create lib/ and bin/ — without them, the next `npx -y <tool>` will
+    # die with ENOENT on `<prefix>/lib` because npx lstat's the dir before the
+    # first npm install -g would have created it. Real Debian incident.
+    lines.append("mkdir -p ~/.npm-global/lib ~/.npm-global/bin")
     lines.append("npm config set prefix ~/.npm-global")
     lines.append("# Add to your shell rc (bash/zsh):")
     lines.append('export PATH="$HOME/.npm-global/bin:$PATH"')

@@ -1,5 +1,10 @@
 # Release Notes
 
+## Version 2.27.1 (05.05.2026)
+
+### Fixed
+- **Manual block for `npm-root-global` permission issues now pre-creates `~/.npm-global/lib` and `~/.npm-global/bin`.** Real-world Debian 13 follow-up: after `npm config set prefix ~/.npm-global` (the recommended Option A from v2.27.0) the next `npx -y get-shit-done-cc …` died with `ENOENT: lstat '/home/user/.npm-global/lib'` because npx lstats the directory *before* any `npm install -g` would have created it. Pre-creating both subdirs in the manual block eliminates the stumbling block on a fresh prefix relocation.
+
 ## Version 2.27.0 (05.05.2026)
 
 ### Added

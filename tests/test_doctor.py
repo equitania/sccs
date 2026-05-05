@@ -1832,6 +1832,9 @@ class TestNpmRootGlobalPermission:
         # PATH advice for both bash/zsh and fish must be present
         assert 'export PATH="$HOME/.npm-global/bin:$PATH"' in block
         assert "set -gx PATH $HOME/.npm-global/bin $PATH" in block
+        # mkdir for lib/ + bin/ — guards against the ENOENT-on-first-npx
+        # quirk we hit on Debian 13 right after `npm config set prefix`.
+        assert "mkdir -p ~/.npm-global/lib ~/.npm-global/bin" in block
         assert actions[0].runnable is False  # manual only — never run by SCCS
 
     def test_literal_path_keeps_simple_chown_block(self, tmp_path):
