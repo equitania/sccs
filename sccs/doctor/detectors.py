@@ -15,6 +15,7 @@ from sccs.doctor.runner import (
     DoctorError,
     _run,
     parse_node_major,
+    run_claude_marketplace_list,
     run_claude_plugin_list,
     run_node_version,
     which,
@@ -146,6 +147,34 @@ class PathPrefixStatus:
 
 
 @dataclass
+class MarketplaceStatus:
+    """Result of checking whether a Claude plugin marketplace is registered.
+
+    Built by `ClaudeMarketplaceDetector` against `claude plugin marketplace
+    list`. Used by the installer to decide whether to queue plugin installs
+    for that marketplace at all — installing into a non-existent marketplace
+    can never succeed, so the install is reported as `⊘ skipped` instead of
+    spawning a guaranteed-failed subprocess.
+
+    `suggested_source` is the `marketplace_source` (`owner/repo` or URL)
+    learned from the user's PluginSpec list, surfaced in the manual block
+    so the user can copy-paste a `claude plugin marketplace add …` command.
+    None when no spec for this marketplace carries a source.
+    """
+
+    name: str
+    registered: bool
+    suggested_source: str | None = None
+    skipped_reason: str | None = None  # set when claude CLI is missing
+
+    @property
+    def ok(self) -> bool:
+        if self.skipped_reason is not None:
+            return True
+        return self.registered
+
+
+@dataclass
 class PermissionStatus:
     """Result of inspecting filesystem ownership/writability for a path.
 
@@ -162,6 +191,14 @@ class PermissionStatus:
     expected_gid: int
     resolved_path: str
     offending_paths: list[str] = field(default_factory=list)
+    # UIDs of any non-root, non-current-user owners found among the scanned
+    # offenders. Triggered by the Debian-13 terminal-server incident: a
+    # multi-user box has packages installed by *several* users under
+    # `/usr/local/lib/node_modules/`. Recommending `sudo chown -R <me>:<me>`
+    # there would silently destroy the other users' installs. Populated by
+    # `PermissionDetector._check`; consumed by `_npm_root_global_fix_block`
+    # to suppress Option B when ≥2 distinct foreign uids are present.
+    foreign_uids: set[int] = field(default_factory=set)
     skipped_reason: str | None = None  # set on Windows / fallback platforms
 
     @property
@@ -171,6 +208,18 @@ class PermissionStatus:
         if not self.exists:
             return True
         return self.is_user_owned and self.is_writable
+
+    @property
+    def is_multi_user(self) -> bool:
+        """True when the path is owned by ≥2 distinct non-root users.
+
+        Heuristic for the terminal-server scenario: if more than one foreign
+        non-root uid is present in the offenders, this is a shared resource
+        and `sudo chown -R` is unsafe. Root-only ownership (single uid 0)
+        is the single-admin case where chown is fine.
+        """
+        non_root = {uid for uid in self.foreign_uids if uid != 0}
+        return len(non_root) >= 2
 
     @property
     def fix_command(self) -> str | None:
@@ -330,6 +379,120 @@ class ClaudePluginDetector:
                 )
             )
         return statuses
+
+
+class ClaudeMarketplaceDetector:
+    """Detect which Claude plugin marketplaces are registered locally.
+
+    Real-world failure mode (Debian 13 terminal server, 2026-05-06):
+    `/usr/local/lib/node_modules/` was root-owned with packages from
+    multiple users, so the user switched to a per-user setup. The
+    `claude-plugins-official` marketplace was *never registered* on that
+    box (it is not a built-in default — the user's home machine had it
+    because someone added it once). Every `claude plugin install
+    <name>@claude-plugins-official` then died with "Plugin not found in
+    marketplace …", yet doctor's auto-update step couldn't help because
+    you cannot UPDATE a marketplace that does not exist; you must ADD it.
+
+    The detector reads `claude plugin marketplace list` once and reports a
+    `MarketplaceStatus` per configured marketplace. The installer uses the
+    `registered=False` rows to:
+      1. Emit a manual_block with `blocks_downstream=True` per missing
+         marketplace (component `plugin-marketplace:<name>:exists`).
+      2. Skip every plugin install for that marketplace (instead of
+         spawning a guaranteed-failed `claude plugin install …`).
+    """
+
+    def __init__(self, raw_output: str | None = None) -> None:
+        # Test-friendly injection. Production lazy-loads via the runner.
+        self._raw_output = raw_output
+
+    def _output(self) -> str:
+        if self._raw_output is None:
+            self._raw_output = run_claude_marketplace_list()
+        return self._raw_output
+
+    @staticmethod
+    def _parse_registered(output: str) -> set[str]:
+        """Return the set of marketplace names present in
+        `claude plugin marketplace list` output.
+
+        The CLI formats each marketplace block roughly as:
+
+            ❯ <name>
+              Source: <owner/repo>
+              Plugins: <count>
+
+        We extract the leading `❯ <name>` tokens. If the CLI later changes
+        format we silently fall back to scanning every word that matches the
+        plugin/marketplace allowlist — better to over-report (treating a
+        marketplace as registered when it isn't) than under-report (false
+        manual_blocks blocking installs unnecessarily).
+        """
+        if not output:
+            return set()
+        names: set[str] = set()
+        for line in output.splitlines():
+            stripped = line.strip()
+            # Primary format: `❯ <name>` header.
+            m = re.match(r"^[❯>]\s+([A-Za-z0-9_.\-]+)\s*$", stripped)
+            if m:
+                names.add(m.group(1))
+                continue
+            # Secondary format: lines like "Name: <name>" or
+            # "<name> (<n> plugins)" — defensive fallback.
+            m2 = re.match(r"^Name:\s*([A-Za-z0-9_.\-]+)\s*$", stripped, re.IGNORECASE)
+            if m2:
+                names.add(m2.group(1))
+        return names
+
+    def get_statuses(
+        self,
+        plugin_specs: list[PluginSpec],
+        *,
+        claude_cli_installed: bool = True,
+    ) -> list[MarketplaceStatus]:
+        """Return one status per distinct configured marketplace.
+
+        `claude_cli_installed=False` causes every status to come back with a
+        `skipped_reason` so doctor doesn't queue marketplace manual blocks
+        on a host that hasn't even installed `claude` yet — the missing
+        CLI is reported elsewhere.
+        """
+        # Aggregate the list of {marketplace → suggested_source} from the
+        # plugin specs, dropping plugins without a marketplace (they install
+        # by bare name and don't need a marketplace registration).
+        sources: dict[str, str | None] = {}
+        for spec in plugin_specs:
+            if not spec.marketplace:
+                continue
+            sources.setdefault(spec.marketplace, None)
+            if spec.marketplace_source and not sources[spec.marketplace]:
+                sources[spec.marketplace] = spec.marketplace_source
+
+        if not sources:
+            return []
+
+        if not claude_cli_installed:
+            return [
+                MarketplaceStatus(
+                    name=name,
+                    registered=False,
+                    suggested_source=src,
+                    skipped_reason="claude CLI not installed",
+                )
+                for name, src in sources.items()
+            ]
+
+        registered = self._parse_registered(self._output())
+        return [
+            MarketplaceStatus(
+                name=name,
+                registered=name in registered,
+                suggested_source=src,
+            )
+            for name, src in sources.items()
+        ]
 
 
 def _resolve_npm_root_global() -> str | None:
@@ -514,6 +677,12 @@ class PermissionDetector:
 
         is_writable = os.access(path, os.W_OK)
         offenders: list[str] = []
+        # Track every non-self uid seen during the scan — needed for the
+        # multi-user heuristic (`is_multi_user`). We deliberately do *not*
+        # cap this set at `_MAX_OFFENDERS_REPORTED`: knowing whether two
+        # vs. three foreign uids own the tree changes the remediation,
+        # while the offender path list can be capped for display.
+        foreign_uids: set[int] = set()
 
         # Check the root path itself first — its ownership is the most
         # diagnostic signal.
@@ -521,12 +690,14 @@ class PermissionDetector:
             root_st = path.stat()
             if root_st.st_uid != current_uid:
                 offenders.append(resolved)
+                foreign_uids.add(root_st.st_uid)
         except OSError:
             pass
 
-        # Recursive sample. Bail out early on cap or once we have enough
-        # offenders to convince the user.
+        # Recursive sample. Cap path collection for display, but keep
+        # scanning to populate `foreign_uids` until the path-scan cap.
         scanned = 0
+        offender_cap_hit = False
         try:
             for entry in path.rglob("*"):
                 scanned += 1
@@ -537,11 +708,19 @@ class PermissionDetector:
                 except OSError:
                     continue
                 if st.st_uid != current_uid:
-                    s = str(entry)
-                    if s not in offenders:
-                        offenders.append(s)
-                        if len(offenders) >= _MAX_OFFENDERS_REPORTED:
-                            break
+                    foreign_uids.add(st.st_uid)
+                    if not offender_cap_hit:
+                        s = str(entry)
+                        if s not in offenders:
+                            offenders.append(s)
+                            if len(offenders) >= _MAX_OFFENDERS_REPORTED:
+                                offender_cap_hit = True
+                    # Two distinct non-root foreign uids → multi-user
+                    # already proven. Stop early to avoid scanning the rest
+                    # of a huge tree just to confirm a heuristic that
+                    # already flipped.
+                    if len({u for u in foreign_uids if u != 0}) >= 2 and offender_cap_hit:
+                        break
         except OSError:
             pass
 
@@ -554,6 +733,7 @@ class PermissionDetector:
             expected_gid=current_gid,
             resolved_path=resolved,
             offending_paths=offenders,
+            foreign_uids=foreign_uids,
         )
 
 

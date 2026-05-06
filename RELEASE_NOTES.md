@@ -1,5 +1,19 @@
 # Release Notes
 
+## Version 2.28.1 (06.05.2026)
+
+### Added
+- **Marketplace-existence detector** (`ClaudeMarketplaceDetector`) reads `claude plugin marketplace list` and reports per-marketplace `registered`/`missing` status. Real failure mode (Debian 13 multi-user terminal server, 2026-05-06): `claude-plugins-official` was not registered locally, so every `claude plugin install <name>@claude-plugins-official` died with "Plugin not found in marketplace …" — a different mode from the stale-cache one v2.28.0 covers via `marketplace update`. The auto-`update` path cannot help here: you cannot UPDATE a marketplace that does not exist; you must ADD it.
+- **`_marketplace_missing_actions`** emits a `manual_block` (`blocks_downstream=True`, component `plugin-marketplace:<name>:exists`) per missing marketplace with a copy-paste `claude plugin marketplace add <owner/repo>` snippet — using the `marketplace_source` from the user's `PluginSpec` when available, or otherwise pointing the user at `~/.config/sccs/config.yaml` to add one. Plugin installs whose marketplace is missing now list this component as a dependency, so the cascade engine reports them as `⊘ skipped` instead of queuing three guaranteed-failed `claude plugin install` subprocesses (the exact symptom from the Debian session).
+- **Multi-user-aware `_npm_root_global_fix_block`.** Real failure mode: `/usr/local/lib/node_modules/` on a multi-user terminal server held packages from several non-root users (bun, @fission-ai). Recommending `sudo chown -R <me>:<me>` would have silently destroyed those installs. `PermissionStatus` now collects every distinct foreign uid during the recursive scan; `is_multi_user` is True when ≥2 distinct non-root uids own the tree. The fix-block then suppresses Option B (`sudo chown`) entirely, lists the offending uids, and shows Option A (user-local prefix) as the only safe path with a "DO NOT use chown" warning.
+- **Reporter:** new `marketplace: <name>` rows in `sccs doctor check` between Claude CLI and plugin rows; `has_problems()` flips on missing marketplaces so the doctor exit code is 1.
+
+### Tests
+- 14 new tests in `tests/test_doctor.py` across 3 classes:
+  - `TestClaudeMarketplaceDetector` (4): registered marketplace, missing marketplace, claude-CLI-missing skip, no-marketplace-in-specs returns empty.
+  - `TestPluginInstallSkipsWhenMarketplaceMissing` (5): install gains `plugin-marketplace:<name>:exists` dependency when missing; install has no extra dep when registered (and the marketplace-update step IS queued); manual block surfaces `marketplace add <suggestion>` when source is known and the config-file pointer otherwise; end-to-end install plan with three plugins on a missing marketplace yields three skipped rows + one printed manual block + zero subprocess calls.
+  - `TestMultiUserPermission` (5): `is_multi_user` True for ≥2 non-root uids; root-only and single-foreign-user are NOT multi-user; multi-user block suppresses Option B (no runnable `chown` command remains) and lists the foreign uids; single-admin block keeps both options unchanged.
+
 ## Version 2.28.0 (06.05.2026)
 
 ### Added

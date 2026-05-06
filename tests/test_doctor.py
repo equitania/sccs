@@ -2384,3 +2384,322 @@ class TestDiagnoseHint:
         from sccs.doctor.installer import _diagnose_hint
 
         assert _diagnose_hint("some unrelated error message") is None
+
+
+# --------------------------------------------------------------------------- #
+# v2.28.1 — Marketplace-Existenz + Multi-User                                 #
+# --------------------------------------------------------------------------- #
+
+
+class TestClaudeMarketplaceDetector:
+    """Parses `claude plugin marketplace list` and reports per-marketplace
+    registered/missing status. Real failure mode: `claude-plugins-official`
+    was never registered on a Debian terminal server, so every plugin
+    install for that marketplace died with "Plugin not found in marketplace".
+    """
+
+    def test_registered_marketplace_detected(self):
+        from sccs.doctor.detectors import ClaudeMarketplaceDetector
+
+        raw = (
+            "❯ claude-plugins-official\n"
+            "  Source: anthropics/claude-plugins-official\n"
+            "  Plugins: 12\n"
+            "❯ context-mode\n"
+            "  Source: mksglu/context-mode\n"
+        )
+        det = ClaudeMarketplaceDetector(raw_output=raw)
+        specs = [
+            PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
+            PluginSpec(
+                name="context-mode",
+                marketplace="context-mode",
+                marketplace_source="mksglu/context-mode",
+            ),
+        ]
+        statuses = {st.name: st for st in det.get_statuses(specs)}
+        assert statuses["claude-plugins-official"].registered is True
+        assert statuses["claude-plugins-official"].ok is True
+        assert statuses["context-mode"].registered is True
+        # `suggested_source` carried through from PluginSpec.marketplace_source.
+        assert statuses["context-mode"].suggested_source == "mksglu/context-mode"
+
+    def test_missing_marketplace_reported(self):
+        from sccs.doctor.detectors import ClaudeMarketplaceDetector
+
+        # Only `context-mode` is registered.
+        raw = "❯ context-mode\n  Source: mksglu/context-mode\n"
+        det = ClaudeMarketplaceDetector(raw_output=raw)
+        specs = [
+            PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
+            PluginSpec(
+                name="context-mode",
+                marketplace="context-mode",
+                marketplace_source="mksglu/context-mode",
+            ),
+        ]
+        statuses = {st.name: st for st in det.get_statuses(specs)}
+        assert statuses["claude-plugins-official"].registered is False
+        assert statuses["claude-plugins-official"].ok is False
+        assert statuses["claude-plugins-official"].suggested_source is None
+
+    def test_skipped_when_claude_cli_missing(self):
+        from sccs.doctor.detectors import ClaudeMarketplaceDetector
+
+        det = ClaudeMarketplaceDetector(raw_output="")  # would otherwise be empty=missing
+        specs = [PluginSpec(name="skill-creator", marketplace="claude-plugins-official")]
+        statuses = det.get_statuses(specs, claude_cli_installed=False)
+        assert statuses[0].skipped_reason == "claude CLI not installed"
+        # `ok` is True so doctor doesn't double-count the missing CLI as a
+        # marketplace failure (the missing CLI is reported elsewhere).
+        assert statuses[0].ok is True
+
+    def test_no_marketplace_in_specs_returns_empty(self):
+        from sccs.doctor.detectors import ClaudeMarketplaceDetector
+
+        det = ClaudeMarketplaceDetector(raw_output="")
+        specs = [PluginSpec(name="claude-mem", marketplace=None, marketplace_source="thedotmack/claude-mem")]
+        assert det.get_statuses(specs) == []
+
+
+class TestPluginInstallSkipsWhenMarketplaceMissing:
+    """When the configured marketplace is not registered, the matching
+    `claude plugin install <name>@<marketplace>` step gains a dependency
+    on `plugin-marketplace:<name>:exists`. The companion
+    `_marketplace_missing_actions` provides a manual_block with the
+    `marketplace add` command and `blocks_downstream=True`, so the cascade
+    engine skips the install rather than queuing a guaranteed-failed
+    subprocess.
+    """
+
+    def test_install_depends_on_marketplace_exists_when_missing(self):
+        from sccs.doctor.detectors import MarketplaceStatus, PluginStatus
+        from sccs.doctor.installer import _plugin_install_actions
+
+        spec = PluginSpec(name="skill-creator", marketplace="claude-plugins-official")
+        plugin_status = PluginStatus(spec=spec, installed=False, update_available=None)
+        market_missing = MarketplaceStatus(
+            name="claude-plugins-official", registered=False, suggested_source=None
+        )
+        actions = _plugin_install_actions([plugin_status], marketplaces=[market_missing])
+        # No marketplace UPDATE step (cannot update a non-existent marketplace).
+        assert not any(a.label.startswith("sync plugin marketplace") for a in actions)
+        install = next(a for a in actions if a.label.startswith("install plugin"))
+        assert "plugin-marketplace:claude-plugins-official:exists" in install.depends_on_components
+
+    def test_install_has_no_marketplace_dep_when_registered(self):
+        from sccs.doctor.detectors import MarketplaceStatus, PluginStatus
+        from sccs.doctor.installer import _plugin_install_actions
+
+        spec = PluginSpec(name="skill-creator", marketplace="claude-plugins-official")
+        plugin_status = PluginStatus(spec=spec, installed=False, update_available=None)
+        market_ok = MarketplaceStatus(name="claude-plugins-official", registered=True)
+        actions = _plugin_install_actions([plugin_status], marketplaces=[market_ok])
+        install = next(a for a in actions if a.label.startswith("install plugin"))
+        assert install.depends_on_components == ()
+        # Marketplace update IS queued (registered marketplace, stale-cache safety).
+        assert any(a.label.startswith("sync plugin marketplace") for a in actions)
+
+    def test_marketplace_missing_actions_emits_manual_block_with_source_hint(self):
+        from sccs.doctor.detectors import MarketplaceStatus
+        from sccs.doctor.installer import _marketplace_missing_actions
+
+        statuses = [
+            MarketplaceStatus(
+                name="claude-plugins-official",
+                registered=False,
+                suggested_source="anthropics/claude-plugins-official",
+            ),
+        ]
+        actions = _marketplace_missing_actions(statuses)
+        assert len(actions) == 1
+        action = actions[0]
+        assert action.runnable is False
+        assert action.blocks_downstream is True
+        assert action.component == "plugin-marketplace:claude-plugins-official:exists"
+        assert "claude plugin marketplace add anthropics/claude-plugins-official" in (action.manual_block or "")
+
+    def test_marketplace_missing_block_without_source_hints_at_config(self):
+        from sccs.doctor.detectors import MarketplaceStatus
+        from sccs.doctor.installer import _marketplace_missing_actions
+
+        statuses = [
+            MarketplaceStatus(name="claude-plugins-official", registered=False, suggested_source=None),
+        ]
+        actions = _marketplace_missing_actions(statuses)
+        block = actions[0].manual_block or ""
+        assert "marketplace_source" in block
+        assert "config.yaml" in block
+
+    def test_end_to_end_install_skipped_when_marketplace_missing(self):
+        """Exact reproduction of the Debian-13 multi-user incident:
+        `claude-plugins-official` not registered → 3 plugin installs for it
+        end up `skipped`, NOT failed."""
+        from sccs.doctor.detectors import (
+            ClaudeCliStatus,
+            MarketplaceStatus,
+            NodeStatus,
+            PluginStatus,
+        )
+        from sccs.doctor.installer import build_install_plan, execute_plan
+        from sccs.doctor.schema import DoctorConfig, NodeInstallSpec
+
+        plugin_specs = [
+            PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
+            PluginSpec(name="superpowers", marketplace="claude-plugins-official"),
+            PluginSpec(name="frontend-design", marketplace="claude-plugins-official"),
+        ]
+        plugin_statuses = [
+            PluginStatus(spec=s, installed=False, update_available=None) for s in plugin_specs
+        ]
+        market_missing = [
+            MarketplaceStatus(name="claude-plugins-official", registered=False, suggested_source=None)
+        ]
+        plan = build_install_plan(
+            DoctorConfig(),
+            node=NodeStatus(
+                installed=True,
+                version="20.10.0",
+                major=20,
+                meets_minimum=True,
+                install_hint=NodeInstallSpec(runnable=False, label="x"),
+                platform="linux",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            plugins=plugin_statuses,
+            npx_tools=[],
+            marketplaces=market_missing,
+        )
+        with patch("sccs.doctor.installer._run") as run_mock:
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        # Manual block printed once for the marketplace; three install
+        # actions all reported as skipped; ZERO `claude plugin install`
+        # subprocesses spawned.
+        run_mock.assert_not_called()
+        assert len(result.printed) == 1
+        assert len(result.skipped) == 3
+        assert all("plugin-marketplace:claude-plugins-official:exists" in o.detail for o in result.skipped)
+        assert not result.failed
+
+
+class TestMultiUserPermission:
+    """`PermissionStatus.is_multi_user` and the `_npm_root_global_fix_block`
+    that suppresses Option B on terminal-server boxes.
+
+    Real failure mode: `/usr/local/lib/node_modules/` on a multi-user
+    Debian terminal server held packages from several non-root users.
+    Recommending `sudo chown -R <me>:<me>` would have silently destroyed
+    those installs.
+    """
+
+    def test_is_multi_user_when_two_distinct_non_root_uids(self):
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        st = PermissionStatus(
+            spec=PermissionCheckSpec(path="x", label="x", purpose="x"),
+            exists=True,
+            is_user_owned=False,
+            is_writable=False,
+            expected_uid=1009,
+            expected_gid=1011,
+            resolved_path="/usr/local/lib/node_modules",
+            offending_paths=["/usr/local/lib/node_modules/bun"],
+            foreign_uids={1001, 1002},  # two non-root uids ≠ self
+        )
+        assert st.is_multi_user is True
+
+    def test_root_only_ownership_is_not_multi_user(self):
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        st = PermissionStatus(
+            spec=PermissionCheckSpec(path="x", label="x", purpose="x"),
+            exists=True,
+            is_user_owned=False,
+            is_writable=False,
+            expected_uid=1009,
+            expected_gid=1011,
+            resolved_path="/usr/lib/node_modules",
+            offending_paths=["/usr/lib/node_modules/foo"],
+            foreign_uids={0},  # root only
+        )
+        assert st.is_multi_user is False
+
+    def test_single_foreign_user_is_not_multi_user(self):
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        st = PermissionStatus(
+            spec=PermissionCheckSpec(path="x", label="x", purpose="x"),
+            exists=True,
+            is_user_owned=False,
+            is_writable=False,
+            expected_uid=1009,
+            expected_gid=1011,
+            resolved_path="/usr/local/lib/node_modules",
+            offending_paths=["/usr/local/lib/node_modules/foo"],
+            foreign_uids={0, 1001},  # root + one user
+        )
+        assert st.is_multi_user is False
+
+    def test_multi_user_block_suppresses_option_b(self):
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.installer import _npm_root_global_fix_block
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        st = PermissionStatus(
+            spec=PermissionCheckSpec(
+                path="npm root -g",
+                path_kind="npm-root-global",
+                label="npm global install dir",
+                purpose="x",
+            ),
+            exists=True,
+            is_user_owned=False,
+            is_writable=False,
+            expected_uid=1009,
+            expected_gid=1011,
+            resolved_path="/usr/local/lib/node_modules",
+            offending_paths=["/usr/local/lib/node_modules/bun"],
+            foreign_uids={1001, 1002},
+        )
+        block = "\n".join(_npm_root_global_fix_block(st))
+        # Option B suppressed; warning + uid list visible; Option A still there.
+        assert "DO NOT" in block.upper() or "do not" in block.lower()
+        assert "1001" in block and "1002" in block
+        # The ACTUAL chown command (with uid:gid) must not be present, but
+        # the prose warning *can* mention `sudo chown` to explain why.
+        assert f"sudo chown -R 1009:1011 {st.resolved_path}" not in block
+        assert "npm config set prefix ~/.npm-global" in block
+        # The "Option B" *header* line must be gone — the warning doesn't
+        # need to use the literal label. We check absence of the runnable
+        # block by ensuring no chown command remains.
+        for line in block.splitlines():
+            assert not line.startswith("sudo chown -R"), f"runnable chown leaked: {line}"
+
+    def test_single_admin_block_keeps_both_options(self):
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.installer import _npm_root_global_fix_block
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        st = PermissionStatus(
+            spec=PermissionCheckSpec(
+                path="npm root -g",
+                path_kind="npm-root-global",
+                label="npm global install dir",
+                purpose="x",
+            ),
+            exists=True,
+            is_user_owned=False,
+            is_writable=False,
+            expected_uid=1009,
+            expected_gid=1011,
+            resolved_path="/usr/lib/node_modules",
+            offending_paths=["/usr/lib/node_modules/foo"],
+            foreign_uids={0},  # root only — single admin host
+        )
+        block = "\n".join(_npm_root_global_fix_block(st))
+        assert "Option A" in block
+        assert "Option B" in block
+        assert "sudo chown" in block

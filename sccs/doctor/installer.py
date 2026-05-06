@@ -18,6 +18,7 @@ from sccs.doctor.detectors import (
     BrowserBundleStatus,
     BundledSkillStatus,
     ClaudeCliStatus,
+    MarketplaceStatus,
     NodeStatus,
     NpxToolStatus,
     PathPrefixStatus,
@@ -169,9 +170,32 @@ def _npm_root_global_fix_block(st: PermissionStatus) -> list[str]:
         survives `apt install nodejs` cleanly.
       * Alternative: `sudo chown -R` of the existing global root — quicker
         but reverts on every system-wide nodejs upgrade.
+
+    Multi-user-aware (v2.28.1): when the offending paths are owned by ≥2
+    distinct non-root users (terminal-server case), Option B would silently
+    destroy the other users' installs. The block then suppresses Option B
+    in favor of a strong Option-A-only recommendation with an explicit
+    "do NOT chown" warning.
     """
     lines: list[str] = []
     lines.append(f"# Detected: {st.resolved_path} is not writable by uid {st.expected_uid}.")
+    if st.is_multi_user:
+        # Foreign uids → list them so the user can verify the heuristic.
+        foreign = sorted(uid for uid in st.foreign_uids if uid not in (0, st.expected_uid))
+        uid_list = ", ".join(str(u) for u in foreign)
+        lines.append(f"# WARNING: directory owned by multiple non-root users (uids: {uid_list}).")
+        lines.append("# This is a multi-user / terminal-server setup. `sudo chown -R` would")
+        lines.append("# DESTROY the other users' installs — DO NOT use Option B here.")
+        lines.append("# Use Option A (user-local prefix) only.")
+        lines.append("")
+        lines.append("# Option A (REQUIRED on multi-user systems): user-local npm prefix, no sudo")
+        lines.append("mkdir -p ~/.npm-global/lib ~/.npm-global/bin")
+        lines.append("npm config set prefix ~/.npm-global")
+        lines.append("# Add to your shell rc (bash/zsh):")
+        lines.append('export PATH="$HOME/.npm-global/bin:$PATH"')
+        lines.append("# Or fish:")
+        lines.append("set -gx PATH $HOME/.npm-global/bin $PATH")
+        return lines
     lines.append("# Two fixes — pick ONE:")
     lines.append("")
     lines.append("# Option A (recommended): user-local npm prefix, no sudo")
@@ -225,6 +249,55 @@ def _permission_actions(statuses: list[PermissionStatus]) -> list[DoctorAction]:
                 # Manual block fences off any downstream work that would
                 # otherwise hit the same EACCES — see execute_plan() for the
                 # blocked_components handling.
+                blocks_downstream=True,
+            )
+        )
+    return actions
+
+
+def _marketplace_missing_actions(statuses: list[MarketplaceStatus]) -> list[DoctorAction]:
+    """Surface configured-but-not-registered plugin marketplaces as manual blocks.
+
+    Real failure mode (Debian-13 multi-user terminal server): the
+    `claude-plugins-official` marketplace was never registered locally, so
+    every `claude plugin install <name>@claude-plugins-official` died with
+    "Plugin not found in marketplace …" — and `claude plugin marketplace
+    update` (the v2.28.0 auto-step) cannot help because you cannot UPDATE
+    a marketplace that does not exist; you must ADD it. This action prints
+    a copy-paste `claude plugin marketplace add …` snippet and fences off
+    every install for the same marketplace via `blocks_downstream=True`.
+    """
+    actions: list[DoctorAction] = []
+    for st in statuses:
+        if st.ok:
+            continue
+        block_lines: list[str] = []
+        block_lines.append(f"# Marketplace '{st.name}' is not registered locally.")
+        block_lines.append(
+            "# `claude plugin install <name>@" + st.name + "` cannot succeed until the marketplace is added."
+        )
+        if st.suggested_source:
+            block_lines.append("# Run:")
+            block_lines.append(f"claude plugin marketplace add {st.suggested_source}")
+        else:
+            block_lines.append(
+                "# No `marketplace_source` is configured for this marketplace in your sccs config."
+            )
+            block_lines.append(
+                "# Find the source (e.g. `owner/repo` or full URL) and run:"
+            )
+            block_lines.append(f"claude plugin marketplace add <owner/repo>   # for marketplace '{st.name}'")
+            block_lines.append(
+                "# Then add `marketplace_source: '<owner/repo>'` to the matching plugin entry"
+            )
+            block_lines.append("# under `doctor.plugins:` in `~/.config/sccs/config.yaml`.")
+        actions.append(
+            DoctorAction(
+                label=f"register marketplace: {st.name}",
+                cmd=None,
+                manual_block="\n".join(block_lines),
+                runnable=False,
+                component=f"plugin-marketplace:{st.name}:exists",
                 blocks_downstream=True,
             )
         )
@@ -296,7 +369,11 @@ def _claude_cli_action(status: ClaudeCliStatus) -> DoctorAction | None:
     )
 
 
-def _plugin_install_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
+def _plugin_install_actions(
+    statuses: list[PluginStatus],
+    *,
+    marketplaces: list[MarketplaceStatus] | None = None,
+) -> list[DoctorAction]:
     """Plan claude-plugin install steps.
 
     For plugins shipped via a registered marketplace but without an explicit
@@ -308,18 +385,47 @@ def _plugin_install_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
     marketplace update claude-plugins-official`". v2.28.0 queues that step
     automatically. Marked `soft_fail=True`: if the refresh itself fails
     (network blip, marketplace gone), we still try the install.
+
+    v2.28.1: when `marketplaces` is supplied, plugins whose marketplace is
+    NOT registered list `plugin-marketplace:<name>:exists` as a dependency
+    so the cascade engine reports them as `⊘ skipped` rather than queuing
+    a guaranteed-failed `claude plugin install`. The companion
+    `_marketplace_missing_actions` provides the manual block that fences
+    those installs off.
     """
+    # Map marketplace name → registered? Only used to inject the dependency
+    # for plugins whose source we cannot install on the current host.
+    market_registered: dict[str, bool] = {}
+    if marketplaces:
+        for m in marketplaces:
+            market_registered[m.name] = m.ok
+
     actions: list[DoctorAction] = []
     seen_marketplace_updates: set[str] = set()
     for st in statuses:
         if st.installed:
             continue
         spec = st.spec
+
+        # Build per-plugin extra dependencies. Only relevant when the
+        # plugin uses a marketplace that doctor knows is missing.
+        extra_deps: tuple[str, ...] = ()
+        if (
+            spec.marketplace
+            and spec.marketplace in market_registered
+            and not market_registered[spec.marketplace]
+        ):
+            extra_deps = (f"plugin-marketplace:{spec.marketplace}:exists",)
+
         # Auto-refresh stale marketplace metadata before the install attempt.
+        # Skipped when the marketplace is known to be missing (the manual
+        # block from `_marketplace_missing_actions` is the only correct fix
+        # there — `update` cannot succeed for a non-existent marketplace).
         if (
             spec.marketplace
             and not spec.marketplace_source
             and spec.marketplace not in seen_marketplace_updates
+            and market_registered.get(spec.marketplace, True)
         ):
             seen_marketplace_updates.add(spec.marketplace)
             actions.append(
@@ -346,6 +452,7 @@ def _plugin_install_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
                 cmd=["claude", "plugin", "install", spec.install_target],
                 runnable=True,
                 component=f"plugin:{spec.name}",
+                depends_on_components=extra_deps,
             )
         )
     return actions
@@ -646,6 +753,7 @@ def build_install_plan(
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
     path_prefixes: list[PathPrefixStatus] | None = None,
+    marketplaces: list[MarketplaceStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> InstallPlan:
@@ -659,6 +767,8 @@ def build_install_plan(
         actions.extend(_permission_actions(permissions))
     if path_prefixes:
         actions.extend(_path_prefix_actions(path_prefixes))
+    if marketplaces:
+        actions.extend(_marketplace_missing_actions(marketplaces))
     install_deps, use_deps = _blocking_components(permissions, path_prefixes)
     node_action = _node_action(node)
     if node_action:
@@ -666,7 +776,7 @@ def build_install_plan(
     cli_action = _claude_cli_action(claude_cli)
     if cli_action:
         actions.append(cli_action)
-    actions.extend(_plugin_install_actions(plugins))
+    actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
     actions.extend(_npx_install_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
     if bundled_skills:
         actions.extend(_bundled_skill_repair_actions(bundled_skills, npx_tools))
@@ -684,6 +794,7 @@ def build_update_plan(
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
     path_prefixes: list[PathPrefixStatus] | None = None,
+    marketplaces: list[MarketplaceStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,  # noqa: ARG001 — symmetry
     browser_bundles: list[BrowserBundleStatus] | None = None,  # noqa: ARG001 — symmetry
 ) -> InstallPlan:
@@ -698,6 +809,8 @@ def build_update_plan(
         actions.extend(_permission_actions(permissions))
     if path_prefixes:
         actions.extend(_path_prefix_actions(path_prefixes))
+    if marketplaces:
+        actions.extend(_marketplace_missing_actions(marketplaces))
     install_deps, use_deps = _blocking_components(permissions, path_prefixes)
     node_action = _node_action(node)
     if node_action:
@@ -706,7 +819,7 @@ def build_update_plan(
     if cli_action:
         actions.append(cli_action)
     # First install anything missing, then update everything that's there.
-    actions.extend(_plugin_install_actions(plugins))
+    actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
     actions.extend(_plugin_update_actions(plugins))
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
     return InstallPlan(actions=actions)

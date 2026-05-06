@@ -10,6 +10,7 @@ from sccs.doctor.detectors import (
     BrowserBundleStatus,
     BundledSkillStatus,
     ClaudeCliStatus,
+    MarketplaceStatus,
     NodeStatus,
     NpxToolStatus,
     PathPrefixStatus,
@@ -54,6 +55,17 @@ def _plugin_row(status: PluginStatus) -> tuple[str, str, str]:
     if status.detection_source == "bare":
         return (f"plugin: {label}", _OK, "installed (no marketplace shown)")
     return (f"plugin: {label}", _OK, "installed")
+
+
+def _marketplace_row(status: MarketplaceStatus) -> tuple[str, str, str]:
+    label = f"marketplace: {status.name}"
+    if status.skipped_reason:
+        return (label, _UNKNOWN, status.skipped_reason)
+    if status.registered:
+        return (label, _OK, "registered")
+    if status.suggested_source:
+        return (label, _MISSING, f"not registered — try `claude plugin marketplace add {status.suggested_source}`")
+    return (label, _MISSING, "not registered — no marketplace_source configured")
 
 
 def _path_prefix_row(status: PathPrefixStatus) -> tuple[str, str, str]:
@@ -121,6 +133,7 @@ def render_doctor_report(
     min_node_major: int,
     permissions: list[PermissionStatus] | None = None,
     path_prefixes: list[PathPrefixStatus] | None = None,
+    marketplaces: list[MarketplaceStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> None:
@@ -132,6 +145,9 @@ def render_doctor_report(
 
     table.add_row(*_node_row(node, min_node_major))
     table.add_row(*_claude_cli_row(claude_cli))
+    if marketplaces:
+        for market_st in marketplaces:
+            table.add_row(*_marketplace_row(market_st))
     for plugin_st in plugins:
         table.add_row(*_plugin_row(plugin_st))
     for npx_st in npx_tools:
@@ -177,6 +193,7 @@ def has_problems(
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
     path_prefixes: list[PathPrefixStatus] | None = None,
+    marketplaces: list[MarketplaceStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> bool:
@@ -192,6 +209,8 @@ def has_problems(
     if permissions and any(not p.ok for p in permissions):
         return True
     if path_prefixes and any(not p.ok for p in path_prefixes):
+        return True
+    if marketplaces and any(not m.ok for m in marketplaces):
         return True
     if bundled_skills and any(not s.skill_md_present for s in bundled_skills):
         return True

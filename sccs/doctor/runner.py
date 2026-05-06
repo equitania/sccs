@@ -102,6 +102,23 @@ def run_claude_plugin_list() -> str:
     return proc.stdout or ""
 
 
+def run_claude_marketplace_list() -> str:
+    """Return raw stdout of `claude plugin marketplace list`. Empty on failure.
+
+    Used by ClaudeMarketplaceDetector to spot the Debian-13 multi-user case:
+    a configured marketplace (e.g. `claude-plugins-official`) is not present
+    in the local list, so any subsequent `claude plugin install <name>@<market>`
+    dies with "Plugin not found in marketplace" — a different failure mode
+    from the stale-cache one v2.28.0 already covers via
+    `claude plugin marketplace update`.
+    """
+    try:
+        proc = _run(["claude", "plugin", "marketplace", "list"], timeout=15, check=False)
+    except DoctorError:
+        return ""
+    return proc.stdout or ""
+
+
 def parse_node_major(version: str | None) -> int | None:
     """Extract the major version integer from a 'X.Y.Z' string."""
     if not version:
