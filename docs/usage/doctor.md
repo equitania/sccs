@@ -35,6 +35,7 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 | **Bundled Skills** (z.B. `playwright-cli`-Skill) | `SKILL.md` im konfigurierten Target-Verzeichnis existiert | Kopiert das Skill-Verzeichnis aus dem npm-Paket nach `~/.claude/skills/<name>/` |
 | **Browser-Bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` Verzeichnisse vorhanden | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem-Permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` user-owned + writable | Manual-Block — SCCS ruft niemals `sudo` auf |
+| **PATH-Prefixes** (v2.28.0) | `<npm config get prefix>/bin` ist auf `$PATH` der aktuellen Shell | Manual-Block mit Snippets für bash/zsh/fish — neue Shell starten und `sccs doctor install` erneut ausführen |
 
 ### Beispiel-Tabelle (`sccs doctor check`)
 
@@ -56,6 +57,31 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 │ perm: npm root -g               │ OK     │ user-owned, writable              │
 └─────────────────────────────────┴────────┴───────────────────────────────────┘
 ```
+
+### Cascade-Resilience (ab v2.28.0)
+
+`sccs doctor install` modelliert seit v2.28.0 Abhängigkeiten zwischen
+Plan-Aktionen, damit ein einziger Wurzelfehler nicht in fünf identische
+Folgefehler kaskadiert. Beispiel-Szenario aus einer realen Debian-13-Session:
+
+1. Manual-Block `permission:npm root -g` wird gedruckt (root-owned
+   `/usr/local/lib/node_modules/`).
+2. Nachfolgende Actions (`npm install -g @playwright/cli`,
+   `playwright-cli install-browser chromium/firefox`,
+   `sync bundled skill playwright-cli`) listen `perm:npm root -g` als
+   `depends_on_components` — sie werden als `⊘ skipped (depends on
+   perm:npm root -g)` ausgegeben statt blind ausgeführt zu werden und mit
+   ihren eigenen `EACCES`/`Command not found`-Fehlern zu sterben.
+3. Plugin-Installs erhalten automatisch ein vorgelagertes
+   `claude plugin marketplace update <name>` (deduped pro Marketplace) mit
+   `soft_fail=True`. Schlägt der Refresh selbst fehl (Netzwerk-Hickser),
+   erscheint er als gelbe **Warning**-Zeile, der eigentliche Install läuft
+   trotzdem.
+4. Erkennt der `path:npm-prefix-bin`-Detector, dass `<npm config get prefix>/bin`
+   nicht auf `$PATH` ist (typisch nach `npm config set prefix ~/.npm-global`
+   ohne Shell-Reload), fenced er nur die Folge-Steps die das Tool *nutzen*
+   (Browser-Fetch, Bundled-Skill-Sync) — der `npm install -g`-Step selbst
+   läuft weiter, weil er das Tool nicht via PATH aufruft.
 
 ### Manual-Blöcke statt sudo
 
@@ -140,6 +166,7 @@ sccs doctor update               # Update plugins + refresh npx tools
 | **Bundled skills** (e.g. the `playwright-cli` skill) | `SKILL.md` exists in the configured target directory | Copies the skill directory out of the npm package into `~/.claude/skills/<name>/` |
 | **Browser bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` directories present | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` user-owned + writable | manual block — SCCS never invokes `sudo` |
+| **PATH prefixes** (v2.28.0) | `<npm config get prefix>/bin` is on `$PATH` for the current shell | manual block with bash/zsh/fish snippets — start a new shell and re-run `sccs doctor install` |
 
 ### Sample `sccs doctor check` table
 
@@ -161,6 +188,32 @@ sccs doctor update               # Update plugins + refresh npx tools
 │ perm: npm root -g               │ OK     │ user-owned, writable              │
 └─────────────────────────────────┴────────┴───────────────────────────────────┘
 ```
+
+### Cascade resilience (since v2.28.0)
+
+`sccs doctor install` models dependencies between plan actions so a single
+root-cause failure no longer cascades into five identical follow-up errors.
+Real-world Debian 13 scenario:
+
+1. The `permission:npm root -g` manual block is printed (root-owned
+   `/usr/local/lib/node_modules/`).
+2. Subsequent actions (`npm install -g @playwright/cli`,
+   `playwright-cli install-browser chromium/firefox`,
+   `sync bundled skill playwright-cli`) declare `perm:npm root -g` in their
+   `depends_on_components` — they are reported as
+   `⊘ skipped (depends on perm:npm root -g)` rather than spawned blindly
+   only to fail with their own redundant `EACCES` / `Command not found`.
+3. Plugin installs gain an automatic preceding
+   `claude plugin marketplace update <name>` step (deduplicated per
+   marketplace), marked `soft_fail=True`. If the refresh itself fails (a
+   network blip, an offline marketplace), it surfaces as a yellow
+   **Warning** row and the install still runs.
+4. When `path:npm-prefix-bin` detects that `<npm config get prefix>/bin` is
+   not on `$PATH` (typical after `npm config set prefix ~/.npm-global`
+   without a shell reload), only the steps that *use* the binary
+   (browser-bundle fetch, bundled-skill sync) are fenced — the
+   `npm install -g` itself still runs because it does not invoke the tool
+   via `$PATH`.
 
 ### Manual blocks instead of sudo
 

@@ -12,6 +12,7 @@ from sccs.doctor.detectors import (
     ClaudeCliStatus,
     NodeStatus,
     NpxToolStatus,
+    PathPrefixStatus,
     PermissionStatus,
     PluginStatus,
 )
@@ -53,6 +54,15 @@ def _plugin_row(status: PluginStatus) -> tuple[str, str, str]:
     if status.detection_source == "bare":
         return (f"plugin: {label}", _OK, "installed (no marketplace shown)")
     return (f"plugin: {label}", _OK, "installed")
+
+
+def _path_prefix_row(status: PathPrefixStatus) -> tuple[str, str, str]:
+    label = f"path: {status.spec.identifier}"
+    if status.skipped_reason:
+        return (label, _UNKNOWN, status.skipped_reason)
+    if status.in_path:
+        return (label, _OK, status.expected_path)
+    return (label, _MISSING, f"{status.expected_path} not on $PATH")
 
 
 def _permission_row(status: PermissionStatus) -> tuple[str, str, str]:
@@ -110,6 +120,7 @@ def render_doctor_report(
     npx_tools: list[NpxToolStatus],
     min_node_major: int,
     permissions: list[PermissionStatus] | None = None,
+    path_prefixes: list[PathPrefixStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> None:
@@ -134,6 +145,9 @@ def render_doctor_report(
     if permissions:
         for perm_st in permissions:
             table.add_row(*_permission_row(perm_st))
+    if path_prefixes:
+        for path_st in path_prefixes:
+            table.add_row(*_path_prefix_row(path_st))
 
     console.print(table)
     console.print(f"[dim]Platform: {node.platform}[/dim]")
@@ -162,6 +176,7 @@ def has_problems(
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
+    path_prefixes: list[PathPrefixStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> bool:
@@ -176,6 +191,8 @@ def has_problems(
         return True
     if permissions and any(not p.ok for p in permissions):
         return True
+    if path_prefixes and any(not p.ok for p in path_prefixes):
+        return True
     if bundled_skills and any(not s.skill_md_present for s in bundled_skills):
         return True
     return bool(browser_bundles and any(not b.all_present for b in browser_bundles))
@@ -189,6 +206,7 @@ def render_inline_summary(
     plugins: list[PluginStatus],
     npx_tools: list[NpxToolStatus],
     permissions: list[PermissionStatus] | None = None,
+    path_prefixes: list[PathPrefixStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
 ) -> None:
@@ -220,6 +238,11 @@ def render_inline_summary(
         if bad:
             parts.append(f"[red]perm issues: {len(bad)}[/red]")
 
+    if path_prefixes:
+        bad_paths = [p for p in path_prefixes if not p.ok]
+        if bad_paths:
+            parts.append(f"[red]PATH issues: {len(bad_paths)}[/red]")
+
     if bundled_skills:
         missing_skills = [s.spec.name for s in bundled_skills if not s.skill_md_present]
         if missing_skills:
@@ -234,11 +257,22 @@ def render_inline_summary(
 
 
 def render_execute_result(console: Console, result: ExecuteResult) -> None:
-    """Print the outcome summary of an executed plan."""
+    """Print the outcome summary of an executed plan.
+
+    Five buckets: executed (green), warned (yellow soft-fails), printed
+    (manual blocks the user must act on), skipped (cascade-skip + user
+    declined), failed (red unrecovered errors). Skipped rows include the
+    blocking dependency so users can trace the cascade back to its root
+    cause without scrolling through subprocess output.
+    """
     if result.executed:
         console.print_success(f"Executed: {len(result.executed)}")
         for o in result.executed:
             console.print(f"  [green]+[/green] {o.label}")
+    if result.warned:
+        console.print(f"[yellow]Warnings:[/yellow] {len(result.warned)}")
+        for o in result.warned:
+            console.print(f"  [yellow]![/yellow] {o.label} — {o.detail}")
     if result.printed:
         console.print(f"[blue]Manual blocks shown:[/blue] {len(result.printed)}")
         for o in result.printed:
@@ -246,7 +280,8 @@ def render_execute_result(console: Console, result: ExecuteResult) -> None:
     if result.skipped:
         console.print(f"[dim]Skipped: {len(result.skipped)}[/dim]")
         for o in result.skipped:
-            console.print(f"  [dim]·[/dim] {o.label}")
+            suffix = f" — {o.detail}" if o.detail else ""
+            console.print(f"  [dim]⊘[/dim] {o.label}{suffix}")
     if result.failed:
         console.print_error(f"Failed: {len(result.failed)}")
         for o in result.failed:

@@ -22,6 +22,7 @@ from sccs.doctor.runner import (
 from sccs.doctor.schema import (
     NodeInstallSpec,
     NpxToolSpec,
+    PathPrefixCheckSpec,
     PermissionCheckSpec,
     PluginSpec,
 )
@@ -119,6 +120,29 @@ class BrowserBundleStatus:
     cache_dir_exists: bool
     present: dict[str, bool]
     all_present: bool
+
+
+@dataclass
+class PathPrefixStatus:
+    """Result of checking whether a resolved directory is on $PATH.
+
+    Resolved at check-time so a freshly switched npm prefix is reflected
+    immediately. `expected_path` is the directory we expect on $PATH;
+    `in_path` is the boolean check. `skipped_reason` is set when the
+    resolution itself failed (e.g. npm not installed) — in that case the
+    rest of the doctor pass should treat the check as "ok, not applicable".
+    """
+
+    spec: PathPrefixCheckSpec
+    expected_path: str
+    in_path: bool
+    skipped_reason: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        if self.skipped_reason is not None:
+            return True
+        return self.in_path
 
 
 @dataclass
@@ -324,6 +348,101 @@ def _resolve_npm_root_global() -> str | None:
     if not raw:
         return None
     return raw.splitlines()[0].strip() or None
+
+
+def _resolve_npm_prefix_bin() -> str | None:
+    """Return `<npm config get prefix>/bin`, or None if npm is missing.
+
+    Used by PathPrefixDetector to spot the Debian 13 follow-up failure mode:
+    user fixes ownership by switching the prefix to `~/.npm-global`, but
+    that bin directory is not yet on $PATH for the current shell — so the
+    next `playwright-cli install-browser …` dies with `command not found`
+    even though `npm install -g @playwright/cli` succeeded one second earlier.
+    """
+    try:
+        proc = _run(["npm", "config", "get", "prefix"], check=True, capture=True, timeout=15)
+    except DoctorError:
+        return None
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        return None
+    prefix = raw.splitlines()[0].strip()
+    if not prefix:
+        return None
+    return str(Path(prefix) / "bin")
+
+
+class PathPrefixDetector:
+    """Verify that key directories are on $PATH for the current process.
+
+    Currently single-purpose (`npm-prefix-bin`) but kept generic so future
+    PATH-mismatches (e.g. a Python user-site bin dir) can plug in without
+    rewriting the detector. Checks `os.environ["PATH"]` rather than calling
+    out to a shell so the result reflects what doctor's own subprocesses
+    will actually see when they shell out.
+    """
+
+    def __init__(self, env: dict[str, str] | None = None) -> None:
+        # Test-friendly: pass a custom env mapping to avoid mutating
+        # os.environ during unit tests.
+        self._env = env
+
+    def _path_entries(self) -> list[str]:
+        path = (self._env or os.environ).get("PATH", "")
+        return [p for p in path.split(os.pathsep) if p]
+
+    def get_statuses(self, specs: list[PathPrefixCheckSpec]) -> list[PathPrefixStatus]:
+        out: list[PathPrefixStatus] = []
+        entries = self._path_entries()
+        for spec in specs:
+            if spec.path_kind == "npm-prefix-bin":
+                expected = _resolve_npm_prefix_bin()
+                if expected is None:
+                    out.append(
+                        PathPrefixStatus(
+                            spec=spec,
+                            expected_path="",
+                            in_path=False,
+                            skipped_reason="npm not on PATH — cannot resolve prefix",
+                        )
+                    )
+                    continue
+                # Compare resolved paths to handle symlinks (e.g. /usr/local
+                # vs /opt/homebrew on macOS) consistently. Fall back to a
+                # literal string match if resolution fails.
+                normalized_expected = _normalize_path(expected)
+                normalized_entries = {_normalize_path(p) for p in entries}
+                in_path = normalized_expected in normalized_entries
+                out.append(
+                    PathPrefixStatus(
+                        spec=spec,
+                        expected_path=expected,
+                        in_path=in_path,
+                    )
+                )
+            else:  # pragma: no cover — schema validation forbids other values
+                out.append(
+                    PathPrefixStatus(
+                        spec=spec,
+                        expected_path="",
+                        in_path=False,
+                        skipped_reason=f"unsupported path_kind: {spec.path_kind}",
+                    )
+                )
+        return out
+
+
+def _normalize_path(p: str) -> str:
+    """Best-effort path normalization for $PATH comparisons.
+
+    `os.path.realpath` resolves symlinks; if the directory does not exist
+    yet (fresh `~/.npm-global`), realpath still returns a normalized
+    absolute string we can compare.
+    """
+    try:
+        return os.path.realpath(os.path.expanduser(p))
+    except OSError:
+        return os.path.normpath(os.path.expanduser(p))
 
 
 class PermissionDetector:

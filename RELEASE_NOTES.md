@@ -1,5 +1,24 @@
 # Release Notes
 
+## Version 2.28.0 (06.05.2026)
+
+### Added
+- **Doctor cascade-resilience: failed and blocked components now fence off downstream actions.** Real-world Debian 13 incident: `sccs doctor install --yes` printed a manual block for the `npm root -g` permission issue, then ran the npm install anyway, which died with `EACCES`, after which `playwright-cli install-browser chromium`/`firefox` and the bundled-skill copy each failed with their own redundant errors — five identical-root-cause failures stacked on top of one another. v2.28.0 turns that pile into one `[manual]` block plus four quiet `⊘ skipped` rows, each citing the blocking component (`depends on perm:npm root -g` / `depends on npx:playwright-cli`) so users can trace cause without reading subprocess output.
+- **`DoctorAction` gains three cascade-engine fields:** `blocks_downstream` marks manual blocks that should fence off subsequent actions citing the same `component`; `depends_on_components` lists components whose failure or block turns this action into a `skipped` outcome; `soft_fail` downgrades `DoctorError` to a yellow `warned` row so opportunistic steps (marketplace refreshes) cannot fail the whole pass.
+- **Auto-marketplace-update before plugin installs.** Real failure mode: `claude plugin install skill-creator@claude-plugins-official` died with `Plugin not found in marketplace` because the local marketplace cache was stale; the CLI's own remediation hint is `try claude plugin marketplace update claude-plugins-official`. v2.28.0 queues exactly that step (deduplicated per marketplace) before the first install of any plugin spec that has a `marketplace` but no explicit `marketplace_source`. The update is `soft_fail=True`: a network blip warns but does not block the install retry.
+- **New `PathPrefixCheckSpec` + `PathPrefixDetector`** verify that `<npm config get prefix>/bin` is on `$PATH`. Triggered by the Debian 13 follow-up: `npm config set prefix ~/.npm-global` fixed the EACCES block, but `~/.npm-global/bin` wasn't on `$PATH` for the current shell — so `npm install -g @playwright/cli` succeeded yet every `playwright-cli install-browser …` died with `Command not found`. The detector emits a manual block with bash/zsh/fish snippets and a "start a new shell, then re-run" instruction; the block is `blocks_downstream=True` so post-install browser fetches and the bundled-skill sync are reported as `skipped`, not failed.
+- **`_diagnose_hint()` adds one-line guidance** to common stderr signatures: stale-marketplace → "marketplace update is queued automatically in v2.28.0", `EACCES on node_modules` → "see the manual block above, pick Option A or B", `command not found / spawn ENOENT` → "confirm `$(npm config get prefix)/bin` is in `$PATH` and reload your shell".
+- **Reporter:** new `path: npm-prefix-bin` row in `sccs doctor check`; new yellow `Warnings:` bucket in `sccs doctor install` output for soft-failed steps; skipped rows now render as `⊘ <label> — depends on <component>` so the cascade chain is visible at a glance.
+
+### Tests
+- 17 new tests in `tests/test_doctor.py` across 6 classes:
+  - `TestCascadeSkip` (2): dependency failure cascades cleanly into `skipped`; success allows downstream to run normally.
+  - `TestManualBlockBlocksDownstream` (2): `blocks_downstream=True` fences `--yes` flow; legacy `blocks_downstream=False` does not break existing call-sites.
+  - `TestNpxInstallCascade` (2): `_npx_install_actions` wires post-install + bundled-skill to depend on the install component; failed install yields one failure + N skipped (no spurious "command not found").
+  - `TestMarketplaceUpdateBeforePluginInstall` (3): one update step per marketplace dedup'd; explicit `marketplace_source` skips auto-update; soft-fail update with successful install renders as `warned` + `executed`.
+  - `TestNpmPrefixInPathDetection` (4): in-PATH OK, missing-from-PATH not-OK, npm-missing skip, end-to-end install plan renders manual block + skips post-install fetches.
+  - `TestDiagnoseHint` (4): three known signatures map to actionable hints; unknown errors return `None`.
+
 ## Version 2.27.1 (05.05.2026)
 
 ### Fixed

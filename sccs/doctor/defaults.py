@@ -9,6 +9,7 @@ from sccs.doctor.schema import (
     BundledSkillSpec,
     NodeInstallSpec,
     NpxToolSpec,
+    PathPrefixCheckSpec,
     PermissionCheckSpec,
     PluginSpec,
 )
@@ -123,6 +124,29 @@ DEFAULT_PERMISSION_CHECKS: list[PermissionCheckSpec] = [
             "(e.g. @playwright/cli). System-wide npm installs put this under "
             "/usr/lib/node_modules/ (root-owned) — fix with a user-local "
             "prefix or `sudo chown` so doctor can manage tools without sudo."
+        ),
+    ),
+]
+
+# PATH-prefix checks: directories that must be on $PATH for downstream
+# doctor actions to find their binaries. Triggered by the second Debian 13
+# follow-up: after the user runs `npm config set prefix ~/.npm-global` to
+# fix the npm-root-global ownership block, the new bin directory still isn't
+# on $PATH for the current shell — so `npm install -g @playwright/cli`
+# succeeds but every subsequent `playwright-cli install-browser <name>`
+# step dies with "Command not found". Doctor surfaces this as a single
+# manual block (with bash/zsh/fish snippets) and fences off downstream
+# post_install + browser-bundle actions via blocks_downstream.
+DEFAULT_PATH_PREFIX_CHECKS: list[PathPrefixCheckSpec] = [
+    PathPrefixCheckSpec(
+        identifier="npm-prefix-bin",
+        path_kind="npm-prefix-bin",
+        label="npm global bin in PATH",
+        purpose=(
+            "Tools installed via `npm install -g` land in `<npm config get prefix>/bin`. "
+            "Without that directory on $PATH, doctor's post_install steps "
+            "(e.g. `playwright-cli install-browser chromium`) fail with "
+            "'Command not found' even though the binary itself is on disk."
         ),
     ),
 ]

@@ -1498,6 +1498,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
         ClaudePluginDetector,
         NodeDetector,
         NpxToolDetector,
+        PathPrefixDetector,
         PermissionDetector,
     )
     from sccs.doctor.state import DoctorStateManager
@@ -1505,6 +1506,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
     plugin_specs = doctor_cfg.effective_plugins()
     npx_specs = doctor_cfg.effective_npx_tools()
     permission_specs = doctor_cfg.effective_permission_checks()
+    path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
     state = state_manager or DoctorStateManager()
 
     return {
@@ -1513,6 +1515,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
         "plugins": ClaudePluginDetector().get_statuses(plugin_specs),
         "npx_tools": NpxToolDetector(state_manager=state).get_statuses(npx_specs),
         "permissions": PermissionDetector().get_statuses(permission_specs),
+        "path_prefixes": PathPrefixDetector().get_statuses(path_prefix_specs),
         "bundled_skills": BundledSkillDetector().get_statuses(npx_specs),
         "browser_bundles": BrowserBundleDetector().get_statuses(npx_specs),
     }
@@ -1564,6 +1567,7 @@ def doctor_check(ctx: click.Context) -> None:
         npx_tools=statuses["npx_tools"],
         min_node_major=doctor_cfg.min_node_major,
         permissions=statuses.get("permissions"),
+        path_prefixes=statuses.get("path_prefixes"),
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
     )
@@ -1574,6 +1578,7 @@ def doctor_check(ctx: click.Context) -> None:
         plugins=statuses["plugins"],
         npx_tools=statuses["npx_tools"],
         permissions=statuses.get("permissions"),
+        path_prefixes=statuses.get("path_prefixes"),
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
     ):
@@ -1603,6 +1608,7 @@ def doctor_install(ctx: click.Context, yes: bool) -> None:
         plugins=statuses["plugins"],
         npx_tools=statuses["npx_tools"],
         permissions=statuses.get("permissions"),
+        path_prefixes=statuses.get("path_prefixes"),
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
     )
@@ -1642,6 +1648,7 @@ def doctor_update(ctx: click.Context, yes: bool) -> None:
         plugins=statuses["plugins"],
         npx_tools=statuses["npx_tools"],
         permissions=statuses.get("permissions"),
+        path_prefixes=statuses.get("path_prefixes"),
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
     )

@@ -207,6 +207,7 @@ class NpxToolSpec(BaseModel):
 
 
 _VALID_PATH_KINDS = {"literal", "npm-root-global"}
+_VALID_PATH_PREFIX_KINDS = {"npm-prefix-bin"}
 
 
 class PermissionCheckSpec(BaseModel):
@@ -267,6 +268,59 @@ class PermissionCheckSpec(BaseModel):
     def _validate_path_kind(cls, v: str) -> str:
         if v not in _VALID_PATH_KINDS:
             raise ValueError(f"path_kind must be one of {sorted(_VALID_PATH_KINDS)}, got {v!r}")
+        return v
+
+
+class PathPrefixCheckSpec(BaseModel):
+    """A directory that must be on $PATH for downstream doctor actions to work.
+
+    Triggered by the Debian 13 follow-up incident: after the user fixes
+    `npm root -g` permissions by switching the prefix to `~/.npm-global`,
+    the new bin directory still isn't on $PATH for the current shell —
+    so `npm install -g @playwright/cli` succeeds but every subsequent
+    `playwright-cli install-browser …` step dies with "Command not found".
+    The mismatch turns into noise; this check makes it a single explicit
+    manual block.
+
+    `path_kind="npm-prefix-bin"` resolves `<npm config get prefix>/bin` at
+    check-time and verifies it appears in `os.environ["PATH"]`. The
+    `path` field is therefore a display label, not a literal filesystem
+    path — same convention as `PermissionCheckSpec.path_kind="npm-root-global"`.
+    """
+
+    identifier: str = Field(
+        description=(
+            "Stable component-string slug used by the doctor cascade engine. "
+            "Doctor uses `path:<identifier>` as the component key; downstream "
+            "actions list this in `depends_on_components` to opt into "
+            "skip-on-mismatch behaviour."
+        ),
+    )
+    path_kind: str = Field(
+        default="npm-prefix-bin",
+        description=(
+            "Resolution rule: 'npm-prefix-bin' resolves `npm config get prefix`/bin "
+            "at check-time."
+        ),
+    )
+    label: str = Field(description="Short human-readable name (e.g. 'npm global bin in PATH').")
+    purpose: str = Field(
+        description=(
+            "Why doctor cares about this PATH entry — surfaced to the user "
+            "when an issue is found."
+        ),
+    )
+
+    @field_validator("identifier")
+    @classmethod
+    def _validate_identifier(cls, v: str) -> str:
+        return _validate_safe_name(v, "PathPrefix identifier")
+
+    @field_validator("path_kind")
+    @classmethod
+    def _validate_path_kind(cls, v: str) -> str:
+        if v not in _VALID_PATH_PREFIX_KINDS:
+            raise ValueError(f"path_kind must be one of {sorted(_VALID_PATH_PREFIX_KINDS)}, got {v!r}")
         return v
 
 
@@ -358,6 +412,17 @@ class DoctorConfig(BaseModel):
         default_factory=list,
         description="Additional permission checks appended to the default list.",
     )
+    path_prefix_checks: list[PathPrefixCheckSpec] | None = Field(
+        default=None,
+        description=(
+            "Override list of $PATH-prefix checks. None (default) keeps "
+            "DEFAULT_PATH_PREFIX_CHECKS."
+        ),
+    )
+    extra_path_prefix_checks: list[PathPrefixCheckSpec] = Field(
+        default_factory=list,
+        description="Additional PATH-prefix checks appended to the default list.",
+    )
 
     def effective_plugins(self) -> list[PluginSpec]:
         """Return plugins to check: override or default, plus extras."""
@@ -379,3 +444,14 @@ class DoctorConfig(BaseModel):
 
         base = list(self.permission_checks) if self.permission_checks is not None else list(DEFAULT_PERMISSION_CHECKS)
         return base + list(self.extra_permission_checks)
+
+    def effective_path_prefix_checks(self) -> list[PathPrefixCheckSpec]:
+        """Return PATH-prefix checks to run: override or default, plus extras."""
+        from sccs.doctor.defaults import DEFAULT_PATH_PREFIX_CHECKS
+
+        base = (
+            list(self.path_prefix_checks)
+            if self.path_prefix_checks is not None
+            else list(DEFAULT_PATH_PREFIX_CHECKS)
+        )
+        return base + list(self.extra_path_prefix_checks)

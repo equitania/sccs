@@ -1896,3 +1896,491 @@ class TestResolveNpmRootGlobal:
         fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="\n", stderr="")
         monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **kw: fake_proc)
         assert _resolve_npm_root_global() is None
+
+
+# --------------------------------------------------------------------------- #
+# v2.28.0 — Cascade-Resilience & Marketplace Auto-Update                      #
+# --------------------------------------------------------------------------- #
+
+
+class TestCascadeSkip:
+    """An action listing a failed component in `depends_on_components` is
+    reported as `skipped` (not `failed`) and never spawns a subprocess.
+
+    Real failure mode this guards against: `npm install -g @playwright/cli`
+    dies with EACCES, then `playwright-cli install-browser chromium` runs
+    anyway and fails with a redundant `Command not found`. v2.28.0 marks the
+    second action as cascade-skipped instead of executing it blind.
+    """
+
+    def test_skipped_when_dependency_failed(self):
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="install npx tool playwright-cli",
+                    cmd=["npm", "install", "-g", "@playwright/cli@latest"],
+                    runnable=True,
+                    component="npx:playwright-cli",
+                ),
+                DoctorAction(
+                    label="playwright-cli: install-browser chromium",
+                    cmd=["playwright-cli", "install-browser", "chromium"],
+                    runnable=True,
+                    component="npx:playwright-cli:post:0",
+                    depends_on_components=("npx:playwright-cli",),
+                ),
+            ]
+        )
+        with patch(
+            "sccs.doctor.installer._run",
+            side_effect=DoctorError("EACCES", returncode=13, stderr="EACCES on node_modules"),
+        ) as run_mock:
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        # First action ran (and failed). Second was skipped — exactly one
+        # subprocess call total.
+        assert run_mock.call_count == 1
+        assert len(result.failed) == 1
+        assert len(result.skipped) == 1
+        assert result.skipped[0].label.startswith("playwright-cli: install-browser")
+        assert "depends on npx:playwright-cli" in result.skipped[0].detail
+
+    def test_runs_normally_when_dependency_succeeded(self):
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="install npx tool playwright-cli",
+                    cmd=["npm", "install", "-g", "@playwright/cli@latest"],
+                    runnable=True,
+                    component="npx:playwright-cli",
+                ),
+                DoctorAction(
+                    label="playwright-cli: install-browser chromium",
+                    cmd=["playwright-cli", "install-browser", "chromium"],
+                    runnable=True,
+                    component="npx:playwright-cli:post:0",
+                    depends_on_components=("npx:playwright-cli",),
+                ),
+            ]
+        )
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok\n", stderr="")
+        with patch("sccs.doctor.installer._run", return_value=ok):
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        assert len(result.executed) == 2
+        assert not result.skipped
+        assert not result.failed
+
+
+class TestManualBlockBlocksDownstream:
+    """A `manual_block` action with `blocks_downstream=True` fences off any
+    subsequent action that lists the same component in
+    `depends_on_components` — even when `--yes` would otherwise green-light
+    the next subprocess.
+
+    Real failure mode: doctor printed the npm-root-global remediation block,
+    then `--yes` ran the npm install anyway, which died with EACCES because
+    the block hadn't been actioned. v2.28.0 reports the install as `skipped`
+    with the manual block as the reason.
+    """
+
+    def test_manual_block_marks_component_blocked_for_downstream(self):
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="fix permissions: npm root -g",
+                    cmd=None,
+                    manual_block="npm config set prefix ~/.npm-global",
+                    runnable=False,
+                    component="perm:npm root -g",
+                    blocks_downstream=True,
+                ),
+                DoctorAction(
+                    label="install npx tool playwright-cli",
+                    cmd=["npm", "install", "-g", "@playwright/cli@latest"],
+                    runnable=True,
+                    component="npx:playwright-cli",
+                    depends_on_components=("perm:npm root -g",),
+                ),
+            ]
+        )
+        with patch("sccs.doctor.installer._run") as run_mock:
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        # Manual block printed, npm install never spawned.
+        run_mock.assert_not_called()
+        assert len(result.printed) == 1
+        assert len(result.skipped) == 1
+        assert result.skipped[0].label.startswith("install npx tool")
+        assert "depends on perm:npm root -g" in result.skipped[0].detail
+
+    def test_runnable_manual_block_without_flag_does_not_block(self):
+        """A manual block WITHOUT `blocks_downstream=True` (legacy behaviour)
+        still prints, but downstream actions are not auto-skipped.
+        """
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="manual note",
+                    cmd=None,
+                    manual_block="just a note",
+                    runnable=False,
+                    component="note:foo",
+                    blocks_downstream=False,
+                ),
+                DoctorAction(
+                    label="run something",
+                    cmd=["echo", "hi"],
+                    runnable=True,
+                    component="run:hi",
+                    depends_on_components=("note:foo",),
+                ),
+            ]
+        )
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="hi\n", stderr="")
+        with patch("sccs.doctor.installer._run", return_value=ok) as run_mock:
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        run_mock.assert_called_once()
+        assert len(result.executed) == 1
+
+
+class TestNpxInstallCascade:
+    """`_npx_install_actions()` wires `post_install` and `bundled_skill`
+    actions to depend on the install component, so a failed install
+    cascades cleanly into `skipped` rows for everything downstream.
+    """
+
+    def test_post_install_and_skill_depend_on_install(self):
+        from sccs.doctor.detectors import NpxToolStatus
+        from sccs.doctor.installer import _npx_install_actions
+        from sccs.doctor.schema import BundledSkillSpec
+
+        spec = NpxToolSpec(
+            name="playwright-cli",
+            invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+            detect_command="playwright-cli",
+            post_install=[
+                ["playwright-cli", "install-browser", "chromium"],
+                ["playwright-cli", "install-browser", "firefox"],
+            ],
+            bundled_skill=BundledSkillSpec(
+                package_subpath="@playwright/cli/skills/playwright-cli",
+                target="~/.claude/skills/playwright-cli",
+            ),
+        )
+        status = NpxToolStatus(spec=spec, available=False, binary_path=None)
+        actions = _npx_install_actions([status])
+        # 1 install + 2 post + 1 skill
+        assert len(actions) == 4
+        install, post0, post1, skill = actions
+        assert install.component == "npx:playwright-cli"
+        assert install.depends_on_components == ()
+        assert "npx:playwright-cli" in post0.depends_on_components
+        assert "npx:playwright-cli" in post1.depends_on_components
+        assert "npx:playwright-cli" in skill.depends_on_components
+
+    def test_install_failure_skips_post_install_and_skill(self):
+        from sccs.doctor.detectors import NpxToolStatus
+        from sccs.doctor.installer import InstallPlan, _npx_install_actions
+        from sccs.doctor.schema import BundledSkillSpec
+
+        spec = NpxToolSpec(
+            name="playwright-cli",
+            invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+            detect_command="playwright-cli",
+            post_install=[["playwright-cli", "install-browser", "chromium"]],
+            bundled_skill=BundledSkillSpec(
+                package_subpath="@playwright/cli/skills/playwright-cli",
+                target="~/.claude/skills/playwright-cli",
+            ),
+        )
+        status = NpxToolStatus(spec=spec, available=False, binary_path=None)
+        plan = InstallPlan(actions=_npx_install_actions([status]))
+        with patch(
+            "sccs.doctor.installer._run",
+            side_effect=DoctorError("EACCES", returncode=13, stderr="EACCES"),
+        ) as run_mock:
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        # Only the install was attempted; post_install and skill were skipped.
+        assert run_mock.call_count == 1
+        assert len(result.failed) == 1
+        assert len(result.skipped) == 2  # post_install + bundled_skill
+
+
+class TestMarketplaceUpdateBeforePluginInstall:
+    """For PluginSpecs with `marketplace` but no `marketplace_source`, the
+    install plan inserts a single `claude plugin marketplace update <name>`
+    step per marketplace, marked `soft_fail=True`. Real failure mode:
+    `claude plugin install skill-creator@claude-plugins-official` died with
+    "Plugin not found in marketplace" because the local cache was stale.
+    """
+
+    def test_one_update_step_per_marketplace_before_first_install(self):
+        from sccs.doctor.detectors import PluginStatus
+        from sccs.doctor.installer import _plugin_install_actions
+
+        spec_a = PluginSpec(name="skill-creator", marketplace="claude-plugins-official")
+        spec_b = PluginSpec(name="superpowers", marketplace="claude-plugins-official")
+        spec_c = PluginSpec(name="other", marketplace="other-market")
+
+        statuses = [
+            PluginStatus(spec=spec_a, installed=False, update_available=None),
+            PluginStatus(spec=spec_b, installed=False, update_available=None),
+            PluginStatus(spec=spec_c, installed=False, update_available=None),
+        ]
+        actions = _plugin_install_actions(statuses)
+        # Expected order: update(claude-plugins-official), install(skill-creator),
+        # install(superpowers), update(other-market), install(other).
+        labels = [a.label for a in actions]
+        assert labels == [
+            "sync plugin marketplace: claude-plugins-official",
+            "install plugin skill-creator@claude-plugins-official",
+            "install plugin superpowers@claude-plugins-official",
+            "sync plugin marketplace: other-market",
+            "install plugin other@other-market",
+        ]
+        # Only the marketplace-update steps are soft-fail.
+        soft = [a.label for a in actions if a.soft_fail]
+        assert soft == [
+            "sync plugin marketplace: claude-plugins-official",
+            "sync plugin marketplace: other-market",
+        ]
+
+    def test_marketplace_source_skips_auto_update(self):
+        """Plugins with an explicit `marketplace_source` already register the
+        marketplace via `marketplace add` — no separate update step."""
+        from sccs.doctor.detectors import PluginStatus
+        from sccs.doctor.installer import _plugin_install_actions
+
+        spec = PluginSpec(
+            name="context-mode",
+            marketplace="context-mode",
+            marketplace_source="mksglu/context-mode",
+        )
+        actions = _plugin_install_actions(
+            [PluginStatus(spec=spec, installed=False, update_available=None)]
+        )
+        labels = [a.label for a in actions]
+        # No "sync plugin marketplace" step — the `marketplace add` covers it.
+        assert "sync plugin marketplace: context-mode" not in labels
+        assert any(lbl.startswith("register marketplace") for lbl in labels)
+        assert any(lbl.startswith("install plugin") for lbl in labels)
+
+    def test_soft_fail_marketplace_update_records_warned_status(self):
+        """When the auto-update step itself fails, the install still runs and
+        the user sees a `warned` row instead of red FAILED."""
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="sync plugin marketplace: claude-plugins-official",
+                    cmd=["claude", "plugin", "marketplace", "update", "claude-plugins-official"],
+                    runnable=True,
+                    component="plugin-marketplace:claude-plugins-official:update",
+                    soft_fail=True,
+                ),
+                DoctorAction(
+                    label="install plugin skill-creator@claude-plugins-official",
+                    cmd=["claude", "plugin", "install", "skill-creator@claude-plugins-official"],
+                    runnable=True,
+                    component="plugin:skill-creator",
+                ),
+            ]
+        )
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="installed\n", stderr="")
+
+        def _fake_run(cmd, *args, **kwargs):
+            if "marketplace" in cmd:
+                raise DoctorError("network error", returncode=1, stderr="ECONNRESET")
+            return ok
+
+        with patch("sccs.doctor.installer._run", side_effect=_fake_run):
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        # Update step warned, install still ran.
+        assert len(result.warned) == 1
+        assert "ECONNRESET" in result.warned[0].detail
+        assert len(result.executed) == 1
+        assert not result.failed
+
+
+class TestNpmPrefixInPathDetection:
+    """`PathPrefixDetector` resolves `<npm config get prefix>/bin` and
+    verifies it is on $PATH. Triggered by the Debian 13 follow-up incident:
+    user runs `npm config set prefix ~/.npm-global` to fix the EACCES
+    block, but `~/.npm-global/bin` isn't yet in $PATH for the current shell,
+    so every subsequent `playwright-cli install-browser …` step dies with
+    "Command not found".
+    """
+
+    def test_in_path_returns_ok(self, monkeypatch):
+        from sccs.doctor.detectors import PathPrefixDetector
+        from sccs.doctor.schema import PathPrefixCheckSpec
+
+        fake_proc = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="/home/u/.npm-global\n", stderr=""
+        )
+        monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **kw: fake_proc)
+        # Build env with the expected bin on PATH (use realpath to mirror
+        # the detector's normalization).
+        import os
+
+        expected = os.path.realpath("/home/u/.npm-global/bin")
+        env = {"PATH": f"{expected}:/usr/bin"}
+        spec = PathPrefixCheckSpec(
+            identifier="npm-prefix-bin",
+            label="npm global bin in PATH",
+            purpose="test",
+        )
+        statuses = PathPrefixDetector(env=env).get_statuses([spec])
+        assert len(statuses) == 1
+        assert statuses[0].in_path is True
+        assert statuses[0].ok is True
+
+    def test_missing_from_path_reports_not_ok(self, monkeypatch):
+        from sccs.doctor.detectors import PathPrefixDetector
+        from sccs.doctor.schema import PathPrefixCheckSpec
+
+        fake_proc = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="/home/u/.npm-global\n", stderr=""
+        )
+        monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **kw: fake_proc)
+        env = {"PATH": "/usr/bin:/bin"}
+        spec = PathPrefixCheckSpec(
+            identifier="npm-prefix-bin",
+            label="npm global bin in PATH",
+            purpose="test",
+        )
+        statuses = PathPrefixDetector(env=env).get_statuses([spec])
+        assert statuses[0].in_path is False
+        assert statuses[0].ok is False
+        assert statuses[0].expected_path.endswith(".npm-global/bin")
+
+    def test_npm_missing_results_in_skipped_ok(self, monkeypatch):
+        from sccs.doctor.detectors import PathPrefixDetector
+        from sccs.doctor.schema import PathPrefixCheckSpec
+
+        def _raise(*_args, **_kwargs):
+            raise DoctorError("Command not found: npm")
+
+        monkeypatch.setattr("sccs.doctor.detectors._run", _raise)
+        spec = PathPrefixCheckSpec(
+            identifier="npm-prefix-bin",
+            label="npm global bin in PATH",
+            purpose="test",
+        )
+        statuses = PathPrefixDetector(env={"PATH": ""}).get_statuses([spec])
+        # Skipped → treated as OK so doctor doesn't loop on a missing-npm host.
+        assert statuses[0].ok is True
+        assert statuses[0].skipped_reason
+
+    def test_install_plan_renders_manual_block_and_skips_post_install(self, monkeypatch):
+        """End-to-end: PATH mismatch → manual block printed → npx
+        post_install actions are reported as `skipped` instead of failing
+        with `command not found`."""
+        from sccs.doctor.detectors import (
+            ClaudeCliStatus,
+            NodeStatus,
+            NpxToolStatus,
+            PathPrefixStatus,
+        )
+        from sccs.doctor.installer import build_install_plan, execute_plan
+        from sccs.doctor.schema import (
+            BundledSkillSpec,
+            DoctorConfig,
+            NodeInstallSpec,
+            PathPrefixCheckSpec,
+        )
+
+        spec = NpxToolSpec(
+            name="playwright-cli",
+            invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+            detect_command="playwright-cli",
+            post_install=[["playwright-cli", "install-browser", "chromium"]],
+            bundled_skill=BundledSkillSpec(
+                package_subpath="@playwright/cli/skills/playwright-cli",
+                target="~/.claude/skills/playwright-cli",
+            ),
+        )
+        path_st = PathPrefixStatus(
+            spec=PathPrefixCheckSpec(
+                identifier="npm-prefix-bin",
+                label="npm global bin in PATH",
+                purpose="test",
+            ),
+            expected_path="/home/u/.npm-global/bin",
+            in_path=False,
+        )
+        plan = build_install_plan(
+            DoctorConfig(),
+            node=NodeStatus(
+                installed=True,
+                version="20.10.0",
+                major=20,
+                meets_minimum=True,
+                install_hint=NodeInstallSpec(runnable=False, label="x"),
+                platform="linux",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            plugins=[],
+            npx_tools=[NpxToolStatus(spec=spec, available=False, binary_path=None)],
+            permissions=None,
+            path_prefixes=[path_st],
+        )
+        labels = [a.label for a in plan.actions]
+        assert any("add to PATH" in lbl for lbl in labels)
+
+        # Execute: the install itself is allowed (writable npm root assumed),
+        # but `playwright-cli install-browser chromium` should be skipped
+        # because path:npm-prefix-bin is fenced off by the manual block.
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok\n", stderr="")
+        with patch("sccs.doctor.installer._run", return_value=ok) as run_mock:
+            result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
+        # 1 install attempted; post_install (browser) skipped because PATH
+        # check fenced the use_deps.
+        ran_cmds = [str(call.args[0]) for call in run_mock.call_args_list]
+        assert any("npm" in c and "install" in c for c in ran_cmds)
+        assert not any("install-browser" in c for c in ran_cmds)
+        skipped_labels = [o.label for o in result.skipped]
+        assert any("install-browser chromium" in lbl for lbl in skipped_labels)
+
+
+class TestDiagnoseHint:
+    """`_diagnose_hint()` returns one-line user guidance for known stderr
+    patterns. Verified to map the three failure modes from the Debian 13
+    session (Plugin not found, EACCES on node_modules, command not found)
+    to actionable next steps.
+    """
+
+    def test_plugin_not_found_hint(self):
+        from sccs.doctor.installer import _diagnose_hint
+
+        hint = _diagnose_hint("Plugin not found in marketplace 'claude-plugins-official'")
+        assert hint is not None
+        assert "marketplace update" in hint.lower()
+
+    def test_eacces_node_modules_hint(self):
+        from sccs.doctor.installer import _diagnose_hint
+
+        hint = _diagnose_hint(
+            "npm ERR! Error: EACCES: permission denied, mkdir '/usr/local/lib/node_modules/@playwright'"
+        )
+        assert hint is not None
+        assert "manual block" in hint.lower()
+
+    def test_command_not_found_hint(self):
+        from sccs.doctor.installer import _diagnose_hint
+
+        hint = _diagnose_hint("Command not found: playwright-cli")
+        assert hint is not None
+        assert "path" in hint.lower()
+
+    def test_unknown_error_returns_none(self):
+        from sccs.doctor.installer import _diagnose_hint
+
+        assert _diagnose_hint("some unrelated error message") is None
