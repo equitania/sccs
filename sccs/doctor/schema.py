@@ -208,6 +208,7 @@ class NpxToolSpec(BaseModel):
 
 _VALID_PATH_KINDS = {"literal", "npm-root-global"}
 _VALID_PATH_PREFIX_KINDS = {"npm-prefix-bin"}
+_VALID_STATUS_LINE_REQUIRED_MODES = {"always", "never", "smart"}
 
 
 class PermissionCheckSpec(BaseModel):
@@ -298,17 +299,11 @@ class PathPrefixCheckSpec(BaseModel):
     )
     path_kind: str = Field(
         default="npm-prefix-bin",
-        description=(
-            "Resolution rule: 'npm-prefix-bin' resolves `npm config get prefix`/bin "
-            "at check-time."
-        ),
+        description=("Resolution rule: 'npm-prefix-bin' resolves `npm config get prefix`/bin at check-time."),
     )
     label: str = Field(description="Short human-readable name (e.g. 'npm global bin in PATH').")
     purpose: str = Field(
-        description=(
-            "Why doctor cares about this PATH entry — surfaced to the user "
-            "when an issue is found."
-        ),
+        description=("Why doctor cares about this PATH entry — surfaced to the user when an issue is found."),
     )
 
     @field_validator("identifier")
@@ -321,6 +316,83 @@ class PathPrefixCheckSpec(BaseModel):
     def _validate_path_kind(cls, v: str) -> str:
         if v not in _VALID_PATH_PREFIX_KINDS:
             raise ValueError(f"path_kind must be one of {sorted(_VALID_PATH_PREFIX_KINDS)}, got {v!r}")
+        return v
+
+
+class StatusLineCheckSpec(BaseModel):
+    """Verify that ~/.claude/settings.json `statusLine.command` is invokable.
+
+    Triggered by the 2026-05-11 incident: a user's settings.json contained a
+    hardcoded Homebrew Cellar path
+    (`/opt/homebrew/Cellar/node/25.9.0_3/bin/node`). Homebrew bumped Node to
+    26.0.0 and pruned the old Cellar directory; the statusline silently
+    disappeared because the binary path no longer existed. `sccs doctor check`
+    showed all-green because nothing inspected settings.json.
+
+    The detector parses `statusLine.command` and classifies it into states:
+      - ok / missing / missing_binary / missing_script / stale_cellar
+      - opaque (pipelines, env-prefixes — not parsed, not faulted)
+      - no_settings_file
+
+    `required_mode` controls how a missing `statusLine` key is treated:
+      - 'always': missing key → MISSING (FAIL)
+      - 'never':  missing key → OK (statusline is opt-in)
+      - 'smart':  required iff the `claude_statusline` sync category is
+                  enabled AND a statusline script exists at one of the
+                  conventional paths (statusline.sh/.py/.ps1/.fish or
+                  hooks/gsd-statusline.js). Default — avoids nagging users
+                  who never wanted a statusline.
+    """
+
+    identifier: str = Field(
+        description=(
+            "Stable component-string slug used by the doctor cascade engine. "
+            "Doctor uses `statusline:<identifier>` as the component key."
+        ),
+    )
+    settings_path: str = Field(
+        default="~/.claude/settings.json",
+        description="Settings file to inspect (tilde-expanded at check-time).",
+    )
+    required_mode: str = Field(
+        default="smart",
+        description=(
+            "How a missing statusLine key is treated: 'always' (FAIL), 'never' "
+            "(OK), or 'smart' (FAIL only when claude_statusline sync category "
+            "is enabled and a statusline script is present)."
+        ),
+    )
+    auto_fix_stale_cellar: bool = Field(
+        default=True,
+        description=(
+            "If True, doctor install offers to rewrite Apple-Silicon Homebrew "
+            "Cellar paths (/opt/homebrew/Cellar/<pkg>/<ver>/bin/X) to the "
+            "stable /opt/homebrew/bin/X symlink that Homebrew maintains."
+        ),
+    )
+
+    @field_validator("identifier")
+    @classmethod
+    def _validate_identifier(cls, v: str) -> str:
+        return _validate_safe_name(v, "StatusLine identifier")
+
+    @field_validator("required_mode")
+    @classmethod
+    def _validate_required_mode(cls, v: str) -> str:
+        if v not in _VALID_STATUS_LINE_REQUIRED_MODES:
+            raise ValueError(f"required_mode must be one of {sorted(_VALID_STATUS_LINE_REQUIRED_MODES)}, got {v!r}")
+        return v
+
+    @field_validator("settings_path")
+    @classmethod
+    def _validate_settings_path(cls, v: str) -> str:
+        if not v or v.isspace():
+            raise ValueError("settings_path must not be empty")
+        if v.startswith("-"):
+            raise ValueError(f"settings_path must not start with '-': {v!r}")
+        body = v[1:] if v.startswith("~") else v
+        if any(ch in body for ch in (";", "|", "&", "$", "`", "\n", "\r")):
+            raise ValueError(f"settings_path contains shell metacharacters: {v!r}")
         return v
 
 
@@ -414,14 +486,19 @@ class DoctorConfig(BaseModel):
     )
     path_prefix_checks: list[PathPrefixCheckSpec] | None = Field(
         default=None,
-        description=(
-            "Override list of $PATH-prefix checks. None (default) keeps "
-            "DEFAULT_PATH_PREFIX_CHECKS."
-        ),
+        description=("Override list of $PATH-prefix checks. None (default) keeps DEFAULT_PATH_PREFIX_CHECKS."),
     )
     extra_path_prefix_checks: list[PathPrefixCheckSpec] = Field(
         default_factory=list,
         description="Additional PATH-prefix checks appended to the default list.",
+    )
+    status_line_checks: list[StatusLineCheckSpec] | None = Field(
+        default=None,
+        description=("Override list of statusline checks. None (default) keeps DEFAULT_STATUS_LINE_CHECKS."),
+    )
+    extra_status_line_checks: list[StatusLineCheckSpec] = Field(
+        default_factory=list,
+        description="Additional statusline checks appended to the default list.",
     )
 
     def effective_plugins(self) -> list[PluginSpec]:
@@ -450,8 +527,15 @@ class DoctorConfig(BaseModel):
         from sccs.doctor.defaults import DEFAULT_PATH_PREFIX_CHECKS
 
         base = (
-            list(self.path_prefix_checks)
-            if self.path_prefix_checks is not None
-            else list(DEFAULT_PATH_PREFIX_CHECKS)
+            list(self.path_prefix_checks) if self.path_prefix_checks is not None else list(DEFAULT_PATH_PREFIX_CHECKS)
         )
         return base + list(self.extra_path_prefix_checks)
+
+    def effective_status_line_checks(self) -> list[StatusLineCheckSpec]:
+        """Return statusline checks to run: override or default, plus extras."""
+        from sccs.doctor.defaults import DEFAULT_STATUS_LINE_CHECKS
+
+        base = (
+            list(self.status_line_checks) if self.status_line_checks is not None else list(DEFAULT_STATUS_LINE_CHECKS)
+        )
+        return base + list(self.extra_status_line_checks)

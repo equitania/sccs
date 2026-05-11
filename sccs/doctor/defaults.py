@@ -12,6 +12,7 @@ from sccs.doctor.schema import (
     PathPrefixCheckSpec,
     PermissionCheckSpec,
     PluginSpec,
+    StatusLineCheckSpec,
 )
 
 MIN_NODE_MAJOR = 20
@@ -148,6 +149,22 @@ DEFAULT_PATH_PREFIX_CHECKS: list[PathPrefixCheckSpec] = [
             "(e.g. `playwright-cli install-browser chromium`) fail with "
             "'Command not found' even though the binary itself is on disk."
         ),
+    ),
+]
+
+# Statusline command-integrity check. Triggered by the 2026-05-11 incident
+# where Homebrew bumped Node 25.x → 26.0.0 and pruned the old Cellar
+# directory, leaving a hardcoded `/opt/homebrew/Cellar/node/25.9.0_3/bin/node`
+# in the user's settings.json. Statusline disappeared silently; doctor was
+# all-green. The check inspects ~/.claude/settings.json's `statusLine.command`
+# and classifies stale Cellar paths, missing binaries, missing scripts, and
+# opaque shell expressions.
+DEFAULT_STATUS_LINE_CHECKS: list[StatusLineCheckSpec] = [
+    StatusLineCheckSpec(
+        identifier="claude-statusline",
+        settings_path="~/.claude/settings.json",
+        required_mode="smart",
+        auto_fix_stale_cellar=True,
     ),
 ]
 

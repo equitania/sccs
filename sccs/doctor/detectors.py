@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +28,7 @@ from sccs.doctor.schema import (
     PathPrefixCheckSpec,
     PermissionCheckSpec,
     PluginSpec,
+    StatusLineCheckSpec,
 )
 from sccs.doctor.state import DoctorStateManager
 from sccs.utils.platform import get_current_platform
@@ -593,6 +596,278 @@ class PathPrefixDetector:
                     )
                 )
         return out
+
+
+_STATUS_LINE_OPAQUE_MARKERS = ("|", "&&", ";", "$(", "`", "||")
+_STATUS_LINE_SCRIPT_CANDIDATES = (
+    "statusline.sh",
+    "statusline.py",
+    "statusline.ps1",
+    "statusline.fish",
+    "hooks/gsd-statusline.js",
+)
+# /opt/homebrew/Cellar/<pkg>/<version>/<rest>. Apple Silicon only — Intel
+# Homebrew (`/usr/local/Cellar/...`) and Linuxbrew are deferred to a future
+# phase per CONTEXT.md D2.
+_STATUS_LINE_CELLAR_RE = re.compile(r"^/opt/homebrew/Cellar/([^/]+)/([^/]+)/(.+)$")
+_STATUS_LINE_SCRIPT_EXTS = (".sh", ".py", ".js", ".mjs", ".ps1", ".fish")
+
+
+@dataclass
+class StatusLineStatus:
+    """Result of inspecting ~/.claude/settings.json `statusLine.command`.
+
+    `state` is one of:
+      - 'ok'              — command parses and binary (+ script if any) exist
+      - 'missing'         — settings.json present but statusLine key absent
+                            *and* `required_mode` resolves to required=True
+      - 'missing_binary'  — first argv token unresolvable
+      - 'missing_script'  — second argv token looks like a script path
+                            but file does not exist
+      - 'stale_cellar'    — first argv token matches the Apple-Silicon
+                            Homebrew Cellar pattern but the version directory
+                            no longer exists (typical Homebrew upgrade
+                            collateral)
+      - 'opaque'          — command shape not parseable (pipes, env prefix,
+                            command substitution, …) — explicitly skipped to
+                            avoid false positives
+      - 'no_settings_file'— settings.json does not exist
+    """
+
+    spec: StatusLineCheckSpec
+    state: str
+    settings_path: str
+    raw_command: str | None
+    binary: str | None
+    script: str | None
+    detail: str
+    cellar_pkg: str | None = None
+    cellar_version: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        # opaque + no_settings_file are not faults: opaque is user-chosen
+        # complexity, no_settings_file is a fresh-install state. Only
+        # missing/missing_binary/missing_script/stale_cellar are problems.
+        return self.state in {"ok", "opaque", "no_settings_file"}
+
+
+class StatusLineDetector:
+    """Parse settings.json `statusLine.command` and classify invokability.
+
+    `smart_required` is the runtime evaluation of D1 from CONTEXT.md: True
+    when the `claude_statusline` sync category is enabled in the user's
+    config. Combined with on-disk script presence at check-time when the
+    spec's `required_mode='smart'`. The CLI layer computes the boolean
+    (it owns config access); the detector consumes it.
+    """
+
+    def __init__(self, smart_required: bool = False) -> None:
+        self._smart_required = smart_required
+
+    def get_statuses(self, specs: list[StatusLineCheckSpec]) -> list[StatusLineStatus]:
+        out: list[StatusLineStatus] = []
+        for spec in specs:
+            out.append(self._evaluate(spec))
+        return out
+
+    def _evaluate(self, spec: StatusLineCheckSpec) -> StatusLineStatus:
+        resolved = Path(os.path.expanduser(spec.settings_path))
+        if not resolved.is_file():
+            return StatusLineStatus(
+                spec=spec,
+                state="no_settings_file",
+                settings_path=str(resolved),
+                raw_command=None,
+                binary=None,
+                script=None,
+                detail="no settings.json",
+            )
+        try:
+            data = json.loads(resolved.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            return StatusLineStatus(
+                spec=spec,
+                state="opaque",
+                settings_path=str(resolved),
+                raw_command=None,
+                binary=None,
+                script=None,
+                detail=f"settings.json unreadable: {exc}",
+            )
+
+        sl = data.get("statusLine") if isinstance(data, dict) else None
+        if not isinstance(sl, dict) or "command" not in sl:
+            if self._is_required(spec, resolved.parent):
+                return StatusLineStatus(
+                    spec=spec,
+                    state="missing",
+                    settings_path=str(resolved),
+                    raw_command=None,
+                    binary=None,
+                    script=None,
+                    detail="statusLine key absent (sync category enabled, script present)",
+                )
+            return StatusLineStatus(
+                spec=spec,
+                state="ok",
+                settings_path=str(resolved),
+                raw_command=None,
+                binary=None,
+                script=None,
+                detail="not configured (opt-in)",
+            )
+
+        cmd = sl.get("command")
+        if not isinstance(cmd, str) or not cmd.strip():
+            return StatusLineStatus(
+                spec=spec,
+                state="opaque",
+                settings_path=str(resolved),
+                raw_command=cmd if isinstance(cmd, str) else None,
+                binary=None,
+                script=None,
+                detail="command is not a non-empty string",
+            )
+
+        if any(marker in cmd for marker in _STATUS_LINE_OPAQUE_MARKERS):
+            return StatusLineStatus(
+                spec=spec,
+                state="opaque",
+                settings_path=str(resolved),
+                raw_command=cmd,
+                binary=None,
+                script=None,
+                detail="custom command shape, not checked",
+            )
+
+        try:
+            tokens = shlex.split(cmd, posix=True)
+        except ValueError as exc:
+            return StatusLineStatus(
+                spec=spec,
+                state="opaque",
+                settings_path=str(resolved),
+                raw_command=cmd,
+                binary=None,
+                script=None,
+                detail=f"unparseable command: {exc}",
+            )
+        if not tokens:
+            return StatusLineStatus(
+                spec=spec,
+                state="opaque",
+                settings_path=str(resolved),
+                raw_command=cmd,
+                binary=None,
+                script=None,
+                detail="empty command after parsing",
+            )
+
+        # env-var prefix (FOO=bar node script.js) — first token has '=' before
+        # any '/', so it's not a path.
+        if "=" in tokens[0] and "/" not in tokens[0].split("=", 1)[0]:
+            return StatusLineStatus(
+                spec=spec,
+                state="opaque",
+                settings_path=str(resolved),
+                raw_command=cmd,
+                binary=None,
+                script=None,
+                detail="env-prefixed command, not checked",
+            )
+
+        binary = tokens[0]
+        script = tokens[1] if len(tokens) > 1 else None
+
+        # Stale-Cellar check first (highest-signal failure mode).
+        cellar = _STATUS_LINE_CELLAR_RE.match(binary)
+        if cellar is not None:
+            pkg, version, _rest = cellar.groups()
+            if not Path(f"/opt/homebrew/Cellar/{pkg}/{version}").is_dir():
+                return StatusLineStatus(
+                    spec=spec,
+                    state="stale_cellar",
+                    settings_path=str(resolved),
+                    raw_command=cmd,
+                    binary=binary,
+                    script=script,
+                    detail=(f"Cellar path stale: {pkg}/{version} no longer exists (Homebrew upgraded?)"),
+                    cellar_pkg=pkg,
+                    cellar_version=version,
+                )
+            # Cellar dir still exists — treat as a literal path below.
+
+        # Binary existence.
+        if "/" in binary:
+            if not Path(binary).is_file():
+                return StatusLineStatus(
+                    spec=spec,
+                    state="missing_binary",
+                    settings_path=str(resolved),
+                    raw_command=cmd,
+                    binary=binary,
+                    script=script,
+                    detail=f"binary not found: {binary}",
+                )
+        else:
+            if which(binary) is None:
+                return StatusLineStatus(
+                    spec=spec,
+                    state="missing_binary",
+                    settings_path=str(resolved),
+                    raw_command=cmd,
+                    binary=binary,
+                    script=script,
+                    detail=f"binary not on PATH: {binary}",
+                )
+
+        # Script existence — only check when second token plausibly *is* a
+        # script (contains '/' or ends with a known script extension). This
+        # avoids false positives for commands like `bash -c '...'` where
+        # the second token is a flag.
+        if script is not None and self._looks_like_script(script):
+            script_path = Path(os.path.expanduser(script))
+            if not script_path.is_file():
+                return StatusLineStatus(
+                    spec=spec,
+                    state="missing_script",
+                    settings_path=str(resolved),
+                    raw_command=cmd,
+                    binary=binary,
+                    script=script,
+                    detail=f"script not found: {script}",
+                )
+
+        return StatusLineStatus(
+            spec=spec,
+            state="ok",
+            settings_path=str(resolved),
+            raw_command=cmd,
+            binary=binary,
+            script=script,
+            detail=binary,
+        )
+
+    def _is_required(self, spec: StatusLineCheckSpec, home_dir: Path) -> bool:
+        mode = spec.required_mode
+        if mode == "always":
+            return True
+        if mode == "never":
+            return False
+        # smart: gated by both config (sync category enabled) and on-disk
+        # script presence. The sync flag is supplied by the CLI; the script
+        # check is done here so the detector remains the single source of
+        # truth for filesystem facts.
+        if not self._smart_required:
+            return False
+        return any((home_dir / candidate).is_file() for candidate in _STATUS_LINE_SCRIPT_CANDIDATES)
+
+    @staticmethod
+    def _looks_like_script(token: str) -> bool:
+        if "/" in token:
+            return True
+        return token.lower().endswith(_STATUS_LINE_SCRIPT_EXTS)
 
 
 def _normalize_path(p: str) -> str:

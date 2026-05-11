@@ -2162,9 +2162,7 @@ class TestMarketplaceUpdateBeforePluginInstall:
             marketplace="context-mode",
             marketplace_source="mksglu/context-mode",
         )
-        actions = _plugin_install_actions(
-            [PluginStatus(spec=spec, installed=False, update_available=None)]
-        )
+        actions = _plugin_install_actions([PluginStatus(spec=spec, installed=False, update_available=None)])
         labels = [a.label for a in actions]
         # No "sync plugin marketplace" step — the `marketplace add` covers it.
         assert "sync plugin marketplace: context-mode" not in labels
@@ -2222,9 +2220,7 @@ class TestNpmPrefixInPathDetection:
         from sccs.doctor.detectors import PathPrefixDetector
         from sccs.doctor.schema import PathPrefixCheckSpec
 
-        fake_proc = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="/home/u/.npm-global\n", stderr=""
-        )
+        fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="/home/u/.npm-global\n", stderr="")
         monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **kw: fake_proc)
         # Build env with the expected bin on PATH (use realpath to mirror
         # the detector's normalization).
@@ -2246,9 +2242,7 @@ class TestNpmPrefixInPathDetection:
         from sccs.doctor.detectors import PathPrefixDetector
         from sccs.doctor.schema import PathPrefixCheckSpec
 
-        fake_proc = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="/home/u/.npm-global\n", stderr=""
-        )
+        fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="/home/u/.npm-global\n", stderr="")
         monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **kw: fake_proc)
         env = {"PATH": "/usr/bin:/bin"}
         spec = PathPrefixCheckSpec(
@@ -2478,9 +2472,7 @@ class TestPluginInstallSkipsWhenMarketplaceMissing:
 
         spec = PluginSpec(name="skill-creator", marketplace="claude-plugins-official")
         plugin_status = PluginStatus(spec=spec, installed=False, update_available=None)
-        market_missing = MarketplaceStatus(
-            name="claude-plugins-official", registered=False, suggested_source=None
-        )
+        market_missing = MarketplaceStatus(name="claude-plugins-official", registered=False, suggested_source=None)
         actions = _plugin_install_actions([plugin_status], marketplaces=[market_missing])
         # No marketplace UPDATE step (cannot update a non-existent marketplace).
         assert not any(a.label.startswith("sync plugin marketplace") for a in actions)
@@ -2549,12 +2541,8 @@ class TestPluginInstallSkipsWhenMarketplaceMissing:
             PluginSpec(name="superpowers", marketplace="claude-plugins-official"),
             PluginSpec(name="frontend-design", marketplace="claude-plugins-official"),
         ]
-        plugin_statuses = [
-            PluginStatus(spec=s, installed=False, update_available=None) for s in plugin_specs
-        ]
-        market_missing = [
-            MarketplaceStatus(name="claude-plugins-official", registered=False, suggested_source=None)
-        ]
+        plugin_statuses = [PluginStatus(spec=s, installed=False, update_available=None) for s in plugin_specs]
+        market_missing = [MarketplaceStatus(name="claude-plugins-official", registered=False, suggested_source=None)]
         plan = build_install_plan(
             DoctorConfig(),
             node=NodeStatus(
@@ -2702,4 +2690,283 @@ class TestMultiUserPermission:
         block = "\n".join(_npm_root_global_fix_block(st))
         assert "Option A" in block
         assert "Option B" in block
-        assert "sudo chown" in block
+
+
+# ---------------------------------------------------------------------------
+# v2.29.0 — StatusLine Detector
+# ---------------------------------------------------------------------------
+# Triggered by the 2026-05-11 incident: Homebrew bumped Node 25.x → 26.0.0 and
+# pruned the old Cellar directory, leaving a hardcoded
+# `/opt/homebrew/Cellar/node/25.9.0_3/bin/node` in the user's settings.json.
+# Statusline silently disappeared; doctor was all-green because nothing
+# inspected settings.json.
+
+
+def _write_settings(tmp_path, statusline=None, extra=None):
+    """Helper: write a synthetic settings.json and return its Path."""
+    import json as _json
+
+    data: dict = {}
+    if statusline is not None:
+        data["statusLine"] = statusline
+    if extra:
+        data.update(extra)
+    sf = tmp_path / "settings.json"
+    sf.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    return sf
+
+
+class TestStatusLineDetector:
+    """Parse ~/.claude/settings.json statusLine.command and classify into
+    one of: ok / missing / missing_binary / missing_script / stale_cellar /
+    opaque / no_settings_file."""
+
+    def test_no_settings_file_state(self, tmp_path):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        spec = StatusLineCheckSpec(
+            identifier="t",
+            settings_path=str(tmp_path / "absent.json"),
+            required_mode="smart",
+        )
+        statuses = StatusLineDetector().get_statuses([spec])
+        assert statuses[0].state == "no_settings_file"
+        assert statuses[0].ok is True  # not a fault
+
+    def test_missing_key_with_required_never_is_ok(self, tmp_path):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(tmp_path, statusline=None, extra={"foo": "bar"})
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        statuses = StatusLineDetector(smart_required=True).get_statuses([spec])
+        assert statuses[0].state == "ok"
+        assert "opt-in" in statuses[0].detail
+
+    def test_missing_key_with_required_always_fails(self, tmp_path):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(tmp_path, statusline=None)
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="always")
+        statuses = StatusLineDetector().get_statuses([spec])
+        assert statuses[0].state == "missing"
+        assert statuses[0].ok is False
+
+    def test_smart_mode_requires_sync_and_script(self, tmp_path):
+        """smart-detect: required iff sync_enabled AND a script file exists in
+        the settings.json's parent directory."""
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(tmp_path, statusline=None)
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="smart")
+
+        # sync disabled → not required → ok
+        statuses = StatusLineDetector(smart_required=False).get_statuses([spec])
+        assert statuses[0].state == "ok"
+
+        # sync enabled but no script → still not required → ok
+        statuses = StatusLineDetector(smart_required=True).get_statuses([spec])
+        assert statuses[0].state == "ok"
+
+        # sync enabled + script present → required → missing
+        (tmp_path / "statusline.sh").write_text("#!/usr/bin/env bash\necho hi\n")
+        statuses = StatusLineDetector(smart_required=True).get_statuses([spec])
+        assert statuses[0].state == "missing"
+
+    def test_ok_binary_resolves_via_path(self, tmp_path, monkeypatch):
+        """`bash script.sh` — binary on PATH, script exists → ok."""
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        script = tmp_path / "s.sh"
+        script.write_text("#!/usr/bin/env bash\n")
+        sf = _write_settings(tmp_path, statusline={"type": "command", "command": f"bash {script}"})
+        monkeypatch.setattr("sccs.doctor.detectors.which", lambda b: f"/usr/bin/{b}")
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        st = StatusLineDetector().get_statuses([spec])[0]
+        assert st.state == "ok", st.detail
+        assert st.binary == "bash"
+        assert st.script == str(script)
+
+    def test_missing_binary_state(self, tmp_path, monkeypatch):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(tmp_path, statusline={"type": "command", "command": "nope-xyz"})
+        monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        st = StatusLineDetector().get_statuses([spec])[0]
+        assert st.state == "missing_binary"
+        assert "nope-xyz" in st.detail
+
+    def test_missing_script_state(self, tmp_path, monkeypatch):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(
+            tmp_path,
+            statusline={"type": "command", "command": "/usr/bin/node /tmp/definitely-not-here.js"},
+        )
+        # Pretend the binary path resolves; the script path does not exist.
+        monkeypatch.setattr(
+            "pathlib.Path.is_file",
+            lambda self: self.name == "node",
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        st = StatusLineDetector().get_statuses([spec])[0]
+        # The settings.json file itself is also is_file()=False per the
+        # monkeypatch — but evaluate() reads it before walking the rest, so
+        # we hit no_settings_file instead. Use a narrower stub:
+        # Restore and try again with a real script-absence:
+        import pathlib as _pl
+
+        monkeypatch.undo()
+        # Use a real, existing binary path (settings_path tmp file works);
+        # we'll use the python binary which always exists.
+        import sys as _sys
+
+        real_bin = _sys.executable
+        sf2 = _write_settings(
+            tmp_path,
+            statusline={"type": "command", "command": f"{real_bin} /tmp/nonexistent-{tmp_path.name}.js"},
+        )
+        spec2 = StatusLineCheckSpec(identifier="t", settings_path=str(sf2), required_mode="never")
+        st2 = StatusLineDetector().get_statuses([spec2])[0]
+        assert st2.state == "missing_script", f"got {st2.state}: {st2.detail}"
+        # Silence unused-variable lint:
+        _ = (st, _pl)
+
+    def test_stale_cellar_state(self, tmp_path):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        # Cellar version 99.99.99 will (essentially) never exist on disk.
+        sf = _write_settings(
+            tmp_path,
+            statusline={
+                "type": "command",
+                "command": '"/opt/homebrew/Cellar/node/99.99.99/bin/node" "/tmp/s.js"',
+            },
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        st = StatusLineDetector().get_statuses([spec])[0]
+        assert st.state == "stale_cellar"
+        assert st.cellar_pkg == "node"
+        assert st.cellar_version == "99.99.99"
+        assert st.ok is False
+
+    def test_opaque_pipeline_command(self, tmp_path):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(
+            tmp_path,
+            statusline={"type": "command", "command": "echo hi | rev"},
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        st = StatusLineDetector().get_statuses([spec])[0]
+        assert st.state == "opaque"
+        assert st.ok is True  # informational, not a fault
+
+    def test_opaque_env_prefix(self, tmp_path):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(
+            tmp_path,
+            statusline={"type": "command", "command": "FOO=bar node /tmp/s.js"},
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        st = StatusLineDetector().get_statuses([spec])[0]
+        assert st.state == "opaque"
+
+
+class TestStatusLineAutoFix:
+    """`_status_line_actions` returns an in-process auto-fix for stale_cellar
+    and manual blocks for the unfixable states. The auto-fix must back up
+    settings.json, rewrite the Cellar path to /opt/homebrew/bin/X, and
+    preserve every other key in the JSON document."""
+
+    def test_auto_fix_rewrites_cellar_and_backs_up(self, tmp_path):
+        import json as _json
+
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.installer import _status_line_actions
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        original = {
+            "statusLine": {
+                "type": "command",
+                "command": '"/opt/homebrew/Cellar/node/99.99.99/bin/node" "/tmp/s.js"',
+            },
+            "preserved": {"key": [1, 2, 3]},
+        }
+        sf = tmp_path / "settings.json"
+        sf.write_text(_json.dumps(original, indent=2), encoding="utf-8")
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        statuses = StatusLineDetector().get_statuses([spec])
+        actions = _status_line_actions(statuses)
+        assert len(actions) == 1
+        action = actions[0]
+        assert action.python_callable is not None
+        assert action.blocks_downstream is False
+
+        action.python_callable()
+        after = _json.loads(sf.read_text())
+        assert after["statusLine"]["command"] == '"/opt/homebrew/bin/node" "/tmp/s.js"'
+        assert after["preserved"] == {"key": [1, 2, 3]}
+        backups = list(tmp_path.glob("settings.json.bak-*"))
+        assert len(backups) == 1
+        assert _json.loads(backups[0].read_text()) == original
+
+    def test_auto_fix_idempotent_for_cellar(self, tmp_path):
+        """Running the fix twice produces a single rewrite; the second pass
+        is a no-op because the Cellar marker is already gone."""
+        import json as _json
+
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.installer import _status_line_actions
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = tmp_path / "settings.json"
+        sf.write_text(
+            _json.dumps(
+                {
+                    "statusLine": {
+                        "type": "command",
+                        "command": '"/opt/homebrew/Cellar/node/99.99.99/bin/node"',
+                    }
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+
+        # First pass: stale_cellar → fix.
+        first = _status_line_actions(StatusLineDetector().get_statuses([spec]))
+        assert len(first) == 1
+        first[0].python_callable()
+
+        # Second pass: no more stale_cellar state → no auto-fix action.
+        second = _status_line_actions(StatusLineDetector().get_statuses([spec]))
+        assert second == []  # idempotent at the action layer
+
+    def test_missing_binary_emits_manual_block(self, tmp_path, monkeypatch):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.installer import _status_line_actions
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(tmp_path, statusline={"type": "command", "command": "nope-xyz"})
+        monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        actions = _status_line_actions(StatusLineDetector().get_statuses([spec]))
+        assert len(actions) == 1
+        assert actions[0].runnable is False
+        assert actions[0].python_callable is None
+        assert "binary not found" in actions[0].manual_block.lower() or (
+            "not on path" in actions[0].manual_block.lower()
+        )

@@ -1,5 +1,19 @@
 # Release Notes
 
+## Version 2.29.0 (11.05.2026)
+
+### Added
+- **Doctor statusline detector** (`StatusLineDetector`, `StatusLineCheckSpec`, `StatusLineStatus`) inspects `~/.claude/settings.json` → `statusLine.command` and classifies it into seven states: `ok`, `missing`, `missing_binary`, `missing_script`, `stale_cellar`, `opaque`, `no_settings_file`. Real-world incident (2026-05-11): the user's settings.json contained a hardcoded `/opt/homebrew/Cellar/node/25.9.0_3/bin/node`; Homebrew bumped Node to 26.0.0 and pruned the old Cellar directory, so the statusline silently disappeared. `sccs doctor check` was all-green because nothing inspected settings.json. The new detector catches the stale Cellar path AND surfaces missing binaries/scripts.
+- **Auto-fix for stale Apple-Silicon Homebrew Cellar paths.** `_status_line_actions` emits a `python_callable` action that, after confirmation, rewrites `/opt/homebrew/Cellar/<pkg>/<version>/bin/<binary>` segments to the stable `/opt/homebrew/bin/<binary>` symlink Homebrew maintains across upgrades. The fix writes a timestamped backup (`settings.json.bak-YYYYMMDD-HHMMSS`) before any mutation; subsequent doctor runs return zero auto-fix actions because the Cellar marker is gone (idempotent at the action layer).
+- **`required_mode` field** on `StatusLineCheckSpec` with values `always`, `never`, and `smart` (default). `smart` mode treats a missing `statusLine` key as a FAIL only when (1) the `claude_statusline` sync category is enabled in `~/.config/sccs/config.yaml` AND (2) at least one statusline script exists in `~/.claude/` (`statusline.sh`/`.py`/`.ps1`/`.fish` or `hooks/gsd-statusline.js`). Users who never asked for a statusline are not nagged; users who clearly configured one but lost the key get a clear FAIL.
+- **`opaque` state** for command shapes the detector cannot safely verify — pipelines (`|`), conditional chains (`&&`/`||`), command substitution (`$(...)`/backticks), or env-var prefixes (`FOO=bar node ...`). Reporter renders these as a blue `INFO` row with detail "custom command shape, not checked"; no false positives for power-users with intentional setups.
+- **Reporter additions:** new `statusline: <identifier>` row in `sccs doctor check`, plus `STALE` (yellow) and `INFO` (blue) status icons. `has_problems()` flips on statusline issues so the doctor exit code is 1 when an actionable issue exists. `render_inline_summary()` (used by `sccs status`) prints `statusline issues: N` when present.
+
+### Tests
+- 13 new tests in `tests/test_doctor.py` across 2 classes:
+  - `TestStatusLineDetector` (10): `no_settings_file`, `missing` key with `required=never|always`, `smart`-mode requires both sync-category enablement AND script presence, `ok` for binary-on-PATH plus existing script, `missing_binary` for unresolvable token, `missing_script` for absent script path, `stale_cellar` for non-existent Cellar version directory, `opaque` for pipelines and env-prefix commands.
+  - `TestStatusLineAutoFix` (3): auto-fix rewrites the Cellar path to `/opt/homebrew/bin/X` and preserves every other settings.json key; auto-fix is idempotent (no second action emitted after the first run); `missing_binary` emits a print-only manual block (no `python_callable`) because the right fix depends on user intent.
+
 ## Version 2.28.1 (06.05.2026)
 
 ### Added

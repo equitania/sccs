@@ -1489,6 +1489,25 @@ def integrations_trust_repo(ctx: click.Context, dry_run: bool) -> None:
 # --- Doctor command group ---
 
 
+def _is_statusline_sync_enabled() -> bool:
+    """Return True iff the `claude_statusline` sync category is enabled in user config.
+
+    Used by `StatusLineDetector` to evaluate the smart-detect required mode
+    (CONTEXT.md D1): the statusline is treated as required only when the
+    user has explicitly enabled the corresponding sync category AND a
+    statusline script exists on disk.
+
+    Returns False on any error (missing config, parse error, missing
+    category) — safe default that never escalates to a FAIL.
+    """
+    try:
+        full_cfg = load_config()
+    except (FileNotFoundError, Exception):  # noqa: BLE001 — defensive fallback
+        return False
+    cat = full_cfg.sync_categories.get("claude_statusline")
+    return bool(cat and cat.enabled)
+
+
 def _collect_doctor_statuses(doctor_cfg, state_manager=None):
     """Build all detector results once. Returns a dict for reuse."""
     from sccs.doctor.detectors import (
@@ -1501,6 +1520,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
         NpxToolDetector,
         PathPrefixDetector,
         PermissionDetector,
+        StatusLineDetector,
     )
     from sccs.doctor.state import DoctorStateManager
 
@@ -1508,6 +1528,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
     npx_specs = doctor_cfg.effective_npx_tools()
     permission_specs = doctor_cfg.effective_permission_checks()
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
+    status_line_specs = doctor_cfg.effective_status_line_checks()
     state = state_manager or DoctorStateManager()
     claude_cli_status = ClaudeCliDetector().get_status()
 
@@ -1523,6 +1544,9 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
         "path_prefixes": PathPrefixDetector().get_statuses(path_prefix_specs),
         "bundled_skills": BundledSkillDetector().get_statuses(npx_specs),
         "browser_bundles": BrowserBundleDetector().get_statuses(npx_specs),
+        "status_lines": StatusLineDetector(smart_required=_is_statusline_sync_enabled()).get_statuses(
+            status_line_specs
+        ),
     }
 
 
@@ -1576,6 +1600,7 @@ def doctor_check(ctx: click.Context) -> None:
         marketplaces=statuses.get("marketplaces"),
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
+        status_lines=statuses.get("status_lines"),
     )
 
     if has_problems(
@@ -1588,6 +1613,7 @@ def doctor_check(ctx: click.Context) -> None:
         marketplaces=statuses.get("marketplaces"),
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
+        status_lines=statuses.get("status_lines"),
     ):
         console.print()
         console.print_warning("Run `sccs doctor install` to fix missing items.")
@@ -1619,6 +1645,7 @@ def doctor_install(ctx: click.Context, yes: bool) -> None:
         marketplaces=statuses.get("marketplaces"),
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
+        status_lines=statuses.get("status_lines"),
     )
 
     if plan.is_empty():
@@ -1660,6 +1687,7 @@ def doctor_update(ctx: click.Context, yes: bool) -> None:
         marketplaces=statuses.get("marketplaces"),
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
+        status_lines=statuses.get("status_lines"),
     )
 
     if plan.is_empty():

@@ -16,6 +16,7 @@ from sccs.doctor.detectors import (
     PathPrefixStatus,
     PermissionStatus,
     PluginStatus,
+    StatusLineStatus,
 )
 from sccs.doctor.installer import ExecuteResult
 from sccs.output.console import Console
@@ -25,6 +26,8 @@ _OK = "[green]OK[/green]"
 _MISSING = "[red]MISSING[/red]"
 _OUTDATED = "[yellow]OUTDATED[/yellow]"
 _MANUAL = "[blue]MANUAL[/blue]"
+_STALE = "[yellow]STALE[/yellow]"
+_INFO = "[blue]INFO[/blue]"
 _UNKNOWN = "[dim]?[/dim]"
 
 
@@ -75,6 +78,26 @@ def _path_prefix_row(status: PathPrefixStatus) -> tuple[str, str, str]:
     if status.in_path:
         return (label, _OK, status.expected_path)
     return (label, _MISSING, f"{status.expected_path} not on $PATH")
+
+
+def _status_line_row(status: StatusLineStatus) -> tuple[str, str, str]:
+    label = f"statusline: {status.spec.identifier}"
+    state = status.state
+    if state == "ok":
+        return (label, _OK, status.detail)
+    if state == "missing":
+        return (label, _MISSING, status.detail)
+    if state == "missing_binary":
+        return (label, _MISSING, status.detail)
+    if state == "missing_script":
+        return (label, _MISSING, status.detail)
+    if state == "stale_cellar":
+        return (label, _STALE, status.detail)
+    if state == "opaque":
+        return (label, _INFO, status.detail)
+    if state == "no_settings_file":
+        return (label, _UNKNOWN, status.detail)
+    return (label, _UNKNOWN, status.detail)  # pragma: no cover
 
 
 def _permission_row(status: PermissionStatus) -> tuple[str, str, str]:
@@ -136,6 +159,7 @@ def render_doctor_report(
     marketplaces: list[MarketplaceStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
+    status_lines: list[StatusLineStatus] | None = None,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -164,6 +188,9 @@ def render_doctor_report(
     if path_prefixes:
         for path_st in path_prefixes:
             table.add_row(*_path_prefix_row(path_st))
+    if status_lines:
+        for sl_st in status_lines:
+            table.add_row(*_status_line_row(sl_st))
 
     console.print(table)
     console.print(f"[dim]Platform: {node.platform}[/dim]")
@@ -196,6 +223,7 @@ def has_problems(
     marketplaces: list[MarketplaceStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
+    status_lines: list[StatusLineStatus] | None = None,
 ) -> bool:
     """Return True if any component is missing/outdated or has a permission issue."""
     if not (node.installed and node.meets_minimum):
@@ -214,6 +242,8 @@ def has_problems(
         return True
     if bundled_skills and any(not s.skill_md_present for s in bundled_skills):
         return True
+    if status_lines and any(not s.ok for s in status_lines):
+        return True
     return bool(browser_bundles and any(not b.all_present for b in browser_bundles))
 
 
@@ -228,6 +258,7 @@ def render_inline_summary(
     path_prefixes: list[PathPrefixStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
+    status_lines: list[StatusLineStatus] | None = None,
 ) -> None:
     """One-line summary used by `sccs status`."""
     parts: list[str] = []
@@ -261,6 +292,11 @@ def render_inline_summary(
         bad_paths = [p for p in path_prefixes if not p.ok]
         if bad_paths:
             parts.append(f"[red]PATH issues: {len(bad_paths)}[/red]")
+
+    if status_lines:
+        bad_status = [s for s in status_lines if not s.ok]
+        if bad_status:
+            parts.append(f"[red]statusline issues: {len(bad_status)}[/red]")
 
     if bundled_skills:
         missing_skills = [s.spec.name for s in bundled_skills if not s.skill_md_present]

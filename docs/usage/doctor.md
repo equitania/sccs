@@ -36,6 +36,7 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 | **Browser-Bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` Verzeichnisse vorhanden | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem-Permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` user-owned + writable | Manual-Block — SCCS ruft niemals `sudo` auf |
 | **PATH-Prefixes** (v2.28.0) | `<npm config get prefix>/bin` ist auf `$PATH` der aktuellen Shell | Manual-Block mit Snippets für bash/zsh/fish — neue Shell starten und `sccs doctor install` erneut ausführen |
+| **Statusline** (v2.29.0) | `~/.claude/settings.json` → `statusLine.command` zeigt auf existierende Binary + Skript; Apple-Silicon-Homebrew-Cellar-Pfade nicht stale | Auto-Fix für `stale_cellar` (rewrite zu `/opt/homebrew/bin/<binary>` mit Backup); Manual-Block für `missing_binary`/`missing_script`/`missing`; `opaque` (Pipes/Env-Prefix) wird informativ angezeigt aber nicht eskaliert |
 
 ### Beispiel-Tabelle (`sccs doctor check`)
 
@@ -55,8 +56,41 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 │ perm: ~/.claude                 │ OK     │ user-owned, writable              │
 │ perm: ~/.config/sccs            │ OK     │ user-owned, writable              │
 │ perm: npm root -g               │ OK     │ user-owned, writable              │
+│ path: npm-prefix-bin            │ OK     │ /opt/homebrew/bin                 │
+│ statusline: claude-statusline   │ OK     │ /opt/homebrew/bin/node            │
 └─────────────────────────────────┴────────┴───────────────────────────────────┘
 ```
+
+### Statusline-Check (ab v2.29.0)
+
+`statusline: claude-statusline` inspiziert `~/.claude/settings.json` →
+`statusLine.command` und meldet einen der folgenden Zustände:
+
+- **`OK`** — Binary auf PATH oder über absoluten Pfad erreichbar, Skript-Datei
+  (falls referenziert) existiert.
+- **`STALE`** — Apple-Silicon-Homebrew-Cellar-Pfad
+  `/opt/homebrew/Cellar/<pkg>/<version>/bin/<binary>` zeigt auf ein Cellar-
+  Verzeichnis das nicht mehr existiert (z.B. nach `brew upgrade node`).
+  `sccs doctor install` bietet einen Auto-Fix an, der den Pfad zum stabilen
+  Symlink `/opt/homebrew/bin/<binary>` umschreibt; ein Backup
+  (`settings.json.bak-YYYYMMDD-HHMMSS`) wird vor der Mutation geschrieben.
+- **`MISSING`** — `statusLine`-Key komplett abwesend, obwohl die
+  `claude_statusline` Sync-Kategorie aktiviert ist und ein Statusline-Skript
+  in `~/.claude/` liegt (Smart-Detect; per Default).
+- **`MISSING`** (`missing_binary` / `missing_script`) — Binary oder Skript
+  aus dem Command nicht auffindbar; Manual-Block zeigt den Pfad, der Fix
+  liegt beim User (Reinstall? Skript-Pfad korrigieren?).
+- **`INFO`** (`opaque`) — Command-Form (Pipes, `&&`, Env-Prefix, Command-
+  Substitution) wird nicht geparst — keine False-Positives für Power-User-
+  Setups.
+
+`required_mode` (Spec-Feld, Default `smart`) steuert, ob ein fehlender
+`statusLine`-Key zum FAIL eskaliert:
+
+- `smart` — FAIL nur wenn Sync-Kategorie `claude_statusline` enabled UND
+  Statusline-Skript existiert. Schützt Nutzer ohne Statusline vor Nags.
+- `always` — fehlender Key → FAIL (für aggressive Default-Setups).
+- `never` — fehlender Key → OK (für Minimal-Setups).
 
 ### Cascade-Resilience (ab v2.28.0)
 
@@ -167,6 +201,7 @@ sccs doctor update               # Update plugins + refresh npx tools
 | **Browser bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` directories present | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` user-owned + writable | manual block — SCCS never invokes `sudo` |
 | **PATH prefixes** (v2.28.0) | `<npm config get prefix>/bin` is on `$PATH` for the current shell | manual block with bash/zsh/fish snippets — start a new shell and re-run `sccs doctor install` |
+| **Statusline** (v2.29.0) | `~/.claude/settings.json` → `statusLine.command` resolves to existing binary + script; Apple-Silicon Homebrew Cellar paths are not stale | auto-fix for `stale_cellar` (rewrite to `/opt/homebrew/bin/<binary>` with backup); manual block for `missing_binary`/`missing_script`/`missing`; `opaque` (pipelines/env-prefix) shown as info but not escalated |
 
 ### Sample `sccs doctor check` table
 
@@ -186,8 +221,42 @@ sccs doctor update               # Update plugins + refresh npx tools
 │ perm: ~/.claude                 │ OK     │ user-owned, writable              │
 │ perm: ~/.config/sccs            │ OK     │ user-owned, writable              │
 │ perm: npm root -g               │ OK     │ user-owned, writable              │
+│ path: npm-prefix-bin            │ OK     │ /opt/homebrew/bin                 │
+│ statusline: claude-statusline   │ OK     │ /opt/homebrew/bin/node            │
 └─────────────────────────────────┴────────┴───────────────────────────────────┘
 ```
+
+### Statusline check (since v2.29.0)
+
+`statusline: claude-statusline` inspects `~/.claude/settings.json` →
+`statusLine.command` and reports one of these states:
+
+- **`OK`** — binary on PATH or reachable via absolute path, script file (if
+  referenced) exists.
+- **`STALE`** — Apple-Silicon Homebrew Cellar path
+  `/opt/homebrew/Cellar/<pkg>/<version>/bin/<binary>` points at a Cellar
+  directory that no longer exists (e.g. after `brew upgrade node`).
+  `sccs doctor install` offers an auto-fix that rewrites the path to the
+  stable `/opt/homebrew/bin/<binary>` symlink; a timestamped backup
+  (`settings.json.bak-YYYYMMDD-HHMMSS`) is written before the mutation.
+- **`MISSING`** — `statusLine` key entirely absent while the
+  `claude_statusline` sync category is enabled AND a statusline script
+  lives under `~/.claude/` (smart-detect, default).
+- **`MISSING`** (`missing_binary` / `missing_script`) — binary or script
+  from the command not found; manual block shows the path, the actual fix
+  is the user's call (reinstall? correct the script path?).
+- **`INFO`** (`opaque`) — command shape (pipelines, `&&`, env-prefix,
+  command substitution) is not parsed — no false positives for power-user
+  setups.
+
+`required_mode` (spec field, default `smart`) controls whether a missing
+`statusLine` key escalates to FAIL:
+
+- `smart` — FAIL only when the `claude_statusline` sync category is enabled
+  AND a statusline script exists. Protects users without a statusline from
+  being nagged.
+- `always` — missing key → FAIL (for aggressive default setups).
+- `never` — missing key → OK (for minimal setups).
 
 ### Cascade resilience (since v2.28.0)
 

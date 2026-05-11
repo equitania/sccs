@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import datetime as _dt
+import json
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -24,6 +27,7 @@ from sccs.doctor.detectors import (
     PathPrefixStatus,
     PermissionStatus,
     PluginStatus,
+    StatusLineStatus,
 )
 from sccs.doctor.runner import DoctorError, _run
 from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec
@@ -280,16 +284,10 @@ def _marketplace_missing_actions(statuses: list[MarketplaceStatus]) -> list[Doct
             block_lines.append("# Run:")
             block_lines.append(f"claude plugin marketplace add {st.suggested_source}")
         else:
-            block_lines.append(
-                "# No `marketplace_source` is configured for this marketplace in your sccs config."
-            )
-            block_lines.append(
-                "# Find the source (e.g. `owner/repo` or full URL) and run:"
-            )
+            block_lines.append("# No `marketplace_source` is configured for this marketplace in your sccs config.")
+            block_lines.append("# Find the source (e.g. `owner/repo` or full URL) and run:")
             block_lines.append(f"claude plugin marketplace add <owner/repo>   # for marketplace '{st.name}'")
-            block_lines.append(
-                "# Then add `marketplace_source: '<owner/repo>'` to the matching plugin entry"
-            )
+            block_lines.append("# Then add `marketplace_source: '<owner/repo>'` to the matching plugin entry")
             block_lines.append("# under `doctor.plugins:` in `~/.config/sccs/config.yaml`.")
         actions.append(
             DoctorAction(
@@ -340,6 +338,110 @@ def _path_prefix_actions(statuses: list[PathPrefixStatus]) -> list[DoctorAction]
                 runnable=False,
                 component=f"path:{st.spec.identifier}",
                 blocks_downstream=True,
+            )
+        )
+    return actions
+
+
+# Apple-Silicon Homebrew Cellar pattern. Same regex as the detector but
+# kept private here so the rewrite logic is self-contained.
+_STATUS_LINE_CELLAR_RE = re.compile(r"/opt/homebrew/Cellar/([^/]+)/([^/]+)/(?:.*/)?bin/([^/\s\"']+)")
+
+
+def _rewrite_stale_cellar_command(cmd: str) -> str | None:
+    """Rewrite `/opt/homebrew/Cellar/<pkg>/<ver>/bin/X` segments to `/opt/homebrew/bin/X`.
+
+    Returns the new command string, or None if no rewrite applied. Idempotent:
+    a string with no Cellar segments returns None and the caller skips the
+    write. Operates on the raw string to preserve user quoting/escaping.
+    """
+    new_cmd, count = _STATUS_LINE_CELLAR_RE.subn(r"/opt/homebrew/bin/\3", cmd)
+    return new_cmd if count > 0 else None
+
+
+def _status_line_actions(statuses: list[StatusLineStatus]) -> list[DoctorAction]:
+    """Surface statusline issues (stale Cellar path, missing binary, etc.).
+
+    Only `stale_cellar` produces an auto-fix action — the rewrite from a
+    Cellar path to the stable Homebrew bin-symlink is mechanical and safe
+    (backed up before write, idempotent). `missing_binary` / `missing_script`
+    / `missing` get manual blocks because the right fix depends on the user's
+    intent (reinstall? change tool? remove statusline entirely?).
+
+    `blocks_downstream=False` for all — statusline failure does not cascade
+    into other doctor components per CONTEXT.md D4.
+    """
+    actions: list[DoctorAction] = []
+    for st in statuses:
+        if st.ok:
+            continue
+        component = f"statusline:{st.spec.identifier}"
+        if st.state == "stale_cellar" and st.spec.auto_fix_stale_cellar and st.raw_command is not None:
+            settings_path = Path(st.settings_path)
+            raw_cmd = st.raw_command
+            new_cmd_opt = _rewrite_stale_cellar_command(raw_cmd)
+            if new_cmd_opt is None:
+                # Defensive: detector said stale_cellar but the rewrite regex
+                # didn't match (e.g. binary not under bin/). Fall through to
+                # the manual-block branch below.
+                pass
+            else:
+                new_cmd: str = new_cmd_opt
+
+                def _fix(p: Path = settings_path, new: str = new_cmd) -> None:
+                    """Mutate settings.json in-place after writing a backup."""
+                    text = p.read_text(encoding="utf-8")
+                    data = json.loads(text)
+                    sl = data.get("statusLine")
+                    if not isinstance(sl, dict):
+                        raise DoctorError("statusLine key missing or non-dict")
+                    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+                    backup = p.with_name(f"{p.name}.bak-{timestamp}")
+                    backup.write_text(text, encoding="utf-8")
+                    sl["command"] = new
+                    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+                actions.append(
+                    DoctorAction(
+                        label=f"fix stale Cellar path in {settings_path.name} ({st.cellar_pkg}/{st.cellar_version})",
+                        cmd=None,
+                        python_callable=_fix,
+                        component=component,
+                        blocks_downstream=False,
+                    )
+                )
+                continue
+        # Manual block for unfixable states (missing / missing_binary / missing_script
+        # / stale_cellar without auto_fix enabled).
+        block_lines: list[str] = [f"# Statusline issue: {st.detail}"]
+        if st.raw_command:
+            block_lines.append(f"# Current command: {st.raw_command}")
+        block_lines.append(f"# Settings file: {st.settings_path}")
+        block_lines.append("")
+        if st.state == "missing":
+            block_lines.append("# Statusline is expected (claude_statusline sync category is enabled")
+            block_lines.append("# and a statusline script exists), but no statusLine key was found.")
+            block_lines.append("# Run `sccs sync --category claude_statusline` to apply the configured")
+            block_lines.append("# settings_ensure block, or edit settings.json manually.")
+        elif st.state == "missing_binary":
+            block_lines.append("# The binary referenced by statusLine.command was not found.")
+            block_lines.append("# Either reinstall it, or edit ~/.claude/settings.json to point at a")
+            block_lines.append("# binary that exists on this system.")
+        elif st.state == "missing_script":
+            block_lines.append("# The script referenced by statusLine.command was not found.")
+            block_lines.append("# Either restore the script (e.g. via the source plugin) or edit")
+            block_lines.append("# ~/.claude/settings.json to remove/update the statusLine.")
+        elif st.state == "stale_cellar":
+            block_lines.append("# Auto-fix is disabled for this check. Manually edit settings.json")
+            block_lines.append("# and replace the Cellar path with the stable /opt/homebrew/bin symlink.")
+        actions.append(
+            DoctorAction(
+                label=f"statusline: {st.spec.identifier} ({st.state})",
+                cmd=None,
+                manual_block="\n".join(block_lines),
+                runnable=False,
+                component=component,
+                blocks_downstream=False,
             )
         )
     return actions
@@ -410,11 +512,7 @@ def _plugin_install_actions(
         # Build per-plugin extra dependencies. Only relevant when the
         # plugin uses a marketplace that doctor knows is missing.
         extra_deps: tuple[str, ...] = ()
-        if (
-            spec.marketplace
-            and spec.marketplace in market_registered
-            and not market_registered[spec.marketplace]
-        ):
+        if spec.marketplace and spec.marketplace in market_registered and not market_registered[spec.marketplace]:
             extra_deps = (f"plugin-marketplace:{spec.marketplace}:exists",)
 
         # Auto-refresh stale marketplace metadata before the install attempt.
@@ -756,6 +854,7 @@ def build_install_plan(
     marketplaces: list[MarketplaceStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
+    status_lines: list[StatusLineStatus] | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -782,6 +881,8 @@ def build_install_plan(
         actions.extend(_bundled_skill_repair_actions(bundled_skills, npx_tools))
     if browser_bundles:
         actions.extend(_browser_bundle_repair_actions(browser_bundles, npx_tools, use_deps=use_deps))
+    if status_lines:
+        actions.extend(_status_line_actions(status_lines))
     return InstallPlan(actions=actions)
 
 
@@ -797,6 +898,7 @@ def build_update_plan(
     marketplaces: list[MarketplaceStatus] | None = None,
     bundled_skills: list[BundledSkillStatus] | None = None,  # noqa: ARG001 — symmetry
     browser_bundles: list[BrowserBundleStatus] | None = None,  # noqa: ARG001 — symmetry
+    status_lines: list[StatusLineStatus] | None = None,
 ) -> InstallPlan:
     """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones.
 
@@ -822,6 +924,8 @@ def build_update_plan(
     actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
     actions.extend(_plugin_update_actions(plugins))
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
+    if status_lines:
+        actions.extend(_status_line_actions(status_lines))
     return InstallPlan(actions=actions)
 
 
@@ -872,11 +976,7 @@ def execute_plan(
         # no-op. Evaluated BEFORE the manual-block / confirm path so a
         # blocked downstream action never even prints a prompt.
         blocking = sorted(
-            {
-                c
-                for c in action.depends_on_components
-                if c in failed_components or c in blocked_components
-            }
+            {c for c in action.depends_on_components if c in failed_components or c in blocked_components}
         )
         if blocking:
             joined = ", ".join(blocking)
@@ -955,9 +1055,7 @@ def execute_plan(
                     detail = f"{detail.strip()}\n  → {hint}"
                 if action.component:
                     failed_components.add(action.component)
-                result.outcomes.append(
-                    ActionOutcome(label=action.label, status="failed", detail=detail)
-                )
+                result.outcomes.append(ActionOutcome(label=action.label, status="failed", detail=detail))
                 logger.warning("doctor action failed: %s — %s", action.label, err)
         except OSError as err:
             # Python-callable filesystem error (copytree etc.)
