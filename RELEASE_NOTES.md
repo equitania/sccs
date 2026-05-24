@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 2.30.0 (24.05.2026)
+
+### Added
+- **`sccs doctor optimize` sub-command** — one-shot optimisation pass that combines `build_install_plan` + `build_update_plan` (install missing, update everything installed) AND surfaces drift between the user's spec and the locally installed reality. Without `--strict`, drift appears as a manual_block warning per category (`foreign-plugins:summary`, `foreign-mcp:summary`) — visible but not removed. With `--strict`, every foreign plugin gets a `claude plugin uninstall <name>@<marketplace> [--scope <scope>]` action and every foreign MCP server gets `claude mcp remove <name> -s user`, each behind its own confirm prompt (default: No). Real driver: a setup audit on macOS removed `claude-mem` from `doctor.plugins:`, but the plugin stayed physically installed on Linux until the user manually ran `claude plugin uninstall`. Without `--strict`, repeated `doctor check`/`update` ignored the entry; the new optimize command makes drift visible in the install/update pipeline and offers explicit removal with `--strict`.
+- **Foreign-plugin detector** (`ClaudePluginDetector.get_foreign_plugins`, `ForeignPluginStatus`). Parses every `❯ <name>@<marketplace>` header in `claude plugin list` and filters against the user's spec. Marketplace-aware: a spec entry for `frontend-design@A` does NOT excuse an installed `frontend-design@B` — the user wanted exactly @A. A bare spec entry (marketplace=None) excuses every installed copy under any source. Scope is extracted from the metadata block so uninstall actions forward the correct `--scope` value (mirrors the v2.21.0 fix for `claude plugin update`).
+- **MCP-server detector + spec** (`MCPServerDetector`, `MCPServerSpec`, `MCPServerStatus`, `ForeignMCPServerStatus`). Parses `claude mcp list` (split on `: ` to preserve server names containing colons, e.g. `plugin:context-mode:context-mode`). Two filter layers: (1) exact name match against `doctor.mcp_servers:`, (2) fnmatch glob against `doctor.ignored_mcp_patterns:`. Default ignored patterns (`DEFAULT_IGNORED_MCP_PATTERNS`) skip `claude.ai *` OAuth services (Gmail/Calendar/Drive) and `plugin:*` plugin-internal MCPs out of the box so first-run doctor optimize on a fresh install does not flag system-supplied entries as foreign.
+- **`doctor.mcp_servers` / `extra_mcp_servers` / `ignored_mcp_patterns`** fields on `DoctorConfig`, each with its own `effective_*()` resolver — same override/extras pattern as `doctor.plugins`. `DEFAULT_MCP_SERVERS` is intentionally empty: users with custom MCP integrations they want to own add them here.
+- **`sccs_config` sync category** in `DEFAULT_CONFIG` (well, the user's own config — bundled defaults remain unchanged). Bidirectional sync of `~/.config/sccs/config.yaml` itself across hosts, with `conflict_resolution: local` so the most recently edited host wins. Cross-platform: `repository.path` is `~`-relative, resolved by `Path.home()` via `expand_path`, identical on macOS/Linux/Windows when the repo lives under `~/gitbase/sccs-sync` on each box. Closes the gap where doctor overrides made on one machine did not propagate.
+
+### Tests
+- 18 new tests across 5 classes in `tests/test_doctor.py`:
+  - `TestForeignPluginDetection` (6): empty-spec-is-all-foreign, exact-match excludes, marketplace mismatch still counts, bare-spec covers all marketplaces, scope extraction, empty output → no foreign.
+  - `TestMCPServerDetector` (8): colons in names survive (regression for the `plugin:context-mode:context-mode` parser), spaces in names survive (regression for `claude.ai Gmail`), banner skipping, default-ignored-patterns work, spec-match excludes, empty-ignored-patterns flags everything, spec status marks missing, empty output.
+  - `TestMCPServerSpecValidation` (3): unsafe characters rejected, colons + dots + spaces accepted, scope validation.
+  - `TestBuildOptimizePlan` (5): non-strict emits warning-block for foreign plugins, strict queues uninstall with `--scope`, strict queues `claude mcp remove`, non-strict emits warning-block for foreign MCP servers, empty state → empty plan.
+  - `TestDoctorConfigLoaderPreservesMCPOverride` (1): regression cover for `doctor.mcp_servers` and `doctor.ignored_mcp_patterns` surviving `_merge_with_defaults` — same bug class as v2.29.1's `doctor.plugins`.
+
 ## Version 2.29.1 (24.05.2026)
 
 ### Fixed

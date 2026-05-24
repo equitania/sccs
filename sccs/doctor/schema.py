@@ -396,6 +396,45 @@ class StatusLineCheckSpec(BaseModel):
         return v
 
 
+class MCPServerSpec(BaseModel):
+    """An explicitly-managed Claude MCP server.
+
+    Used by `sccs doctor optimize` to decide which MCP servers (as
+    reported by `claude mcp list`) are "in spec" and which are
+    foreign. Built-in `claude.ai *` OAuth servers and plugin-internal
+    `plugin:* *` MCPs are auto-ignored via `ignored_mcp_patterns`
+    (DEFAULT_IGNORED_MCP_PATTERNS) so the spec only needs to enumerate
+    custom MCP integrations.
+    """
+
+    name: str = Field(description="MCP server name as it appears in `claude mcp list` (left of ':').")
+    scope: str = Field(
+        default="user",
+        description="Installation scope: user | project | local.",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("MCP server name cannot be empty")
+        # MCP server names in `claude mcp` are user-chosen labels — we allow
+        # the same charset as plugin names plus ':' for the plugin:* prefix
+        # and ' ' for built-in claude.ai labels like "claude.ai Gmail".
+        if not re.match(r"^[A-Za-z0-9_:\-./ ]+$", v):
+            raise ValueError(f"MCP server name contains unsafe characters: {v!r}")
+        return v
+
+    @field_validator("scope")
+    @classmethod
+    def _validate_scope(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in {"user", "project", "local"}:
+            raise ValueError(f"MCP scope must be user/project/local, got: {v!r}")
+        return v
+
+
 class NodeInstallSpec(BaseModel):
     """How to install Node.js on a given platform."""
 
@@ -500,6 +539,28 @@ class DoctorConfig(BaseModel):
         default_factory=list,
         description="Additional statusline checks appended to the default list.",
     )
+    mcp_servers: list[MCPServerSpec] | None = Field(
+        default=None,
+        description=(
+            "Override list of explicitly-managed MCP servers (matched against "
+            "`claude mcp list` output). None keeps DEFAULT_MCP_SERVERS (empty). "
+            "`sccs doctor optimize` removes installed servers not on this list "
+            "unless they match an `ignored_mcp_patterns` entry."
+        ),
+    )
+    extra_mcp_servers: list[MCPServerSpec] = Field(
+        default_factory=list,
+        description="Additional MCP servers appended to the default list.",
+    )
+    ignored_mcp_patterns: list[str] | None = Field(
+        default=None,
+        description=(
+            "fnmatch-style globs against MCP server names that should be treated "
+            "as system-supplied and never flagged foreign. None keeps "
+            "DEFAULT_IGNORED_MCP_PATTERNS (claude.ai OAuth services, plugin:* "
+            "internal MCPs). Set to [] to flag every non-spec entry as foreign."
+        ),
+    )
 
     def effective_plugins(self) -> list[PluginSpec]:
         """Return plugins to check: override or default, plus extras."""
@@ -521,6 +582,23 @@ class DoctorConfig(BaseModel):
 
         base = list(self.permission_checks) if self.permission_checks is not None else list(DEFAULT_PERMISSION_CHECKS)
         return base + list(self.extra_permission_checks)
+
+    def effective_mcp_servers(self) -> list[MCPServerSpec]:
+        """Return MCP servers to manage: override or default, plus extras."""
+        from sccs.doctor.defaults import DEFAULT_MCP_SERVERS
+
+        base = list(self.mcp_servers) if self.mcp_servers is not None else list(DEFAULT_MCP_SERVERS)
+        return base + list(self.extra_mcp_servers)
+
+    def effective_ignored_mcp_patterns(self) -> list[str]:
+        """Return fnmatch globs whose match excludes an MCP from foreign-flagging."""
+        from sccs.doctor.defaults import DEFAULT_IGNORED_MCP_PATTERNS
+
+        return (
+            list(self.ignored_mcp_patterns)
+            if self.ignored_mcp_patterns is not None
+            else list(DEFAULT_IGNORED_MCP_PATTERNS)
+        )
 
     def effective_path_prefix_checks(self) -> list[PathPrefixCheckSpec]:
         """Return PATH-prefix checks to run: override or default, plus extras."""

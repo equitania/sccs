@@ -1508,14 +1508,21 @@ def _is_statusline_sync_enabled() -> bool:
     return bool(cat and cat.enabled)
 
 
-def _collect_doctor_statuses(doctor_cfg, state_manager=None):
-    """Build all detector results once. Returns a dict for reuse."""
+def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign: bool = False):
+    """Build all detector results once. Returns a dict for reuse.
+
+    `include_foreign=True` additionally runs the foreign-plugin and
+    foreign-MCP-server detectors needed by `sccs doctor optimize`. Kept
+    off by default so `doctor check` / `install` / `update` don't pay
+    the cost of an extra `claude mcp list` subprocess.
+    """
     from sccs.doctor.detectors import (
         BrowserBundleDetector,
         BundledSkillDetector,
         ClaudeCliDetector,
         ClaudeMarketplaceDetector,
         ClaudePluginDetector,
+        MCPServerDetector,
         NodeDetector,
         NpxToolDetector,
         PathPrefixDetector,
@@ -1531,11 +1538,12 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
     status_line_specs = doctor_cfg.effective_status_line_checks()
     state = state_manager or DoctorStateManager()
     claude_cli_status = ClaudeCliDetector().get_status()
+    plugin_detector = ClaudePluginDetector()
 
-    return {
+    result = {
         "node": NodeDetector().get_status(doctor_cfg.min_node_major),
         "claude_cli": claude_cli_status,
-        "plugins": ClaudePluginDetector().get_statuses(plugin_specs),
+        "plugins": plugin_detector.get_statuses(plugin_specs),
         "marketplaces": ClaudeMarketplaceDetector().get_statuses(
             plugin_specs, claude_cli_installed=claude_cli_status.installed
         ),
@@ -1548,6 +1556,16 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None):
             status_line_specs
         ),
     }
+
+    if include_foreign:
+        mcp_specs = doctor_cfg.effective_mcp_servers()
+        ignored_patterns = doctor_cfg.effective_ignored_mcp_patterns()
+        mcp_detector = MCPServerDetector()
+        result["foreign_plugins"] = plugin_detector.get_foreign_plugins(plugin_specs)
+        result["mcp_servers"] = mcp_detector.get_statuses(mcp_specs)
+        result["foreign_mcp_servers"] = mcp_detector.get_foreign_servers(mcp_specs, ignored_patterns)
+
+    return result
 
 
 def _load_doctor_config():
@@ -1695,6 +1713,76 @@ def doctor_update(ctx: click.Context, yes: bool) -> None:
         return
 
     console.print_info(f"Planned actions: {len(plan.actions)}")
+    if yes:
+        console.print_warning("--yes given: confirm prompts will be SKIPPED.")
+
+    result = execute_plan(plan, assume_yes=yes, print_fn=console.print, state_manager=state)
+    render_execute_result(console, result)
+    if result.failed:
+        sys.exit(1)
+
+
+@doctor_group.command("optimize")
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Queue uninstall actions for foreign plugins/MCP servers (not in spec). "
+        "Without --strict, drift is surfaced as a warning block but nothing is removed."
+    ),
+)
+@click.option("--yes", is_flag=True, default=False, help="Skip confirm prompts (CI use only).")
+@click.pass_context
+def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
+    """Bring the local Claude environment in line with the spec.
+
+    Runs build_install_plan + build_update_plan in one pass AND surfaces
+    drift between `doctor.plugins`/`doctor.mcp_servers` and the locally
+    installed state. Without --strict, foreign entries appear as a
+    warning block only. With --strict, they get queued for removal —
+    `claude plugin uninstall` for foreign plugins, `claude mcp remove`
+    for foreign MCP servers — each behind its own confirm prompt
+    (default: No).
+    """
+    from sccs.doctor.installer import build_optimize_plan, execute_plan
+    from sccs.doctor.reporter import render_execute_result
+    from sccs.doctor.state import DoctorStateManager
+
+    console = ctx.obj["console"]
+    doctor_cfg = _load_doctor_config()
+    state = DoctorStateManager()
+    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state, include_foreign=True)
+
+    plan = build_optimize_plan(
+        doctor_cfg,
+        node=statuses["node"],
+        claude_cli=statuses["claude_cli"],
+        plugins=statuses["plugins"],
+        foreign_plugins=statuses["foreign_plugins"],
+        mcp_servers=statuses["mcp_servers"],
+        foreign_mcp_servers=statuses["foreign_mcp_servers"],
+        npx_tools=statuses["npx_tools"],
+        permissions=statuses.get("permissions"),
+        path_prefixes=statuses.get("path_prefixes"),
+        marketplaces=statuses.get("marketplaces"),
+        status_lines=statuses.get("status_lines"),
+        strict=strict,
+    )
+
+    if plan.is_empty():
+        console.print_success("Already optimal — no actions queued.")
+        return
+
+    console.print_info(f"Planned actions: {len(plan.actions)}")
+    if strict:
+        console.print_warning("--strict: foreign plugins/MCP servers will be queued for removal.")
+    else:
+        foreign_count = len(statuses["foreign_plugins"]) + len(statuses["foreign_mcp_servers"])
+        if foreign_count:
+            console.print_info(
+                f"Detected {foreign_count} foreign item(s) — re-run with --strict to remove them."
+            )
     if yes:
         console.print_warning("--yes given: confirm prompts will be SKIPPED.")
 

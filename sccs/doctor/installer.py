@@ -21,7 +21,10 @@ from sccs.doctor.detectors import (
     BrowserBundleStatus,
     BundledSkillStatus,
     ClaudeCliStatus,
+    ForeignMCPServerStatus,
+    ForeignPluginStatus,
     MarketplaceStatus,
+    MCPServerStatus,
     NodeStatus,
     NpxToolStatus,
     PathPrefixStatus,
@@ -813,6 +816,101 @@ def _browser_bundle_repair_actions(
     return actions
 
 
+def _foreign_plugin_remove_actions(
+    statuses: list[ForeignPluginStatus],
+) -> list[DoctorAction]:
+    """Plan `claude plugin uninstall` steps for plugins outside the spec.
+
+    Only emitted by `build_optimize_plan` when `--strict` is set. Without
+    strict mode, foreign plugins are surfaced as a warning block in the
+    reporter — keeping the default behaviour conservative so a single user
+    declaring `doctor.plugins:` does not nuke peer-installed tooling.
+
+    Scope is forwarded as `--scope <value>` when the detector parsed it
+    out of `claude plugin list`; otherwise `claude plugin uninstall`
+    defaults to scope=user. This mirrors `_plugin_update_actions` so
+    project/local/managed installs are uninstalled cleanly.
+    """
+    actions: list[DoctorAction] = []
+    for st in statuses:
+        target = f"{st.name}@{st.marketplace}" if st.marketplace else st.name
+        cmd = ["claude", "plugin", "uninstall", target]
+        scope_label = ""
+        if st.scope and st.scope.lower() in _VALID_PLUGIN_SCOPES:
+            cmd.extend(["--scope", st.scope.lower()])
+            scope_label = f" (scope: {st.scope.lower()})"
+        actions.append(
+            DoctorAction(
+                label=f"REMOVE foreign plugin {target}{scope_label}",
+                cmd=cmd,
+                runnable=True,
+                # foreign:<name> component so a future plugin-install action
+                # for the same name can depend on it if needed.
+                component=f"foreign-plugin:{st.name}",
+            )
+        )
+    return actions
+
+
+def _foreign_mcp_remove_actions(
+    statuses: list[ForeignMCPServerStatus],
+) -> list[DoctorAction]:
+    """Plan `claude mcp remove` steps for MCP servers outside the spec.
+
+    Only emitted by `build_optimize_plan` when `--strict` is set. Default
+    scope is `user` — matches `claude mcp remove`'s own default, and we
+    don't have a reliable per-server scope from `claude mcp list` output.
+
+    Server names with embedded spaces or colons (e.g. `claude.ai Gmail`,
+    `plugin:context-mode:context-mode`) are quoted by the runner's argv
+    handling — no shell expansion happens because `_run(shell=False)`.
+    """
+    actions: list[DoctorAction] = []
+    for st in statuses:
+        cmd = ["claude", "mcp", "remove", st.name, "-s", "user"]
+        actions.append(
+            DoctorAction(
+                label=f"REMOVE foreign MCP server {st.name}",
+                cmd=cmd,
+                runnable=True,
+                component=f"foreign-mcp:{st.name}",
+            )
+        )
+    return actions
+
+
+def _mcp_server_install_warnings(
+    statuses: list[MCPServerStatus],
+) -> list[DoctorAction]:
+    """Warn (no runnable action) when a spec'd MCP server is missing.
+
+    `claude mcp add` needs the server's command/URL — information we
+    don't carry in `MCPServerSpec` (only name + scope). Surfacing this
+    as a manual_block tells the user what to do without inventing
+    fragile auto-install logic.
+    """
+    actions: list[DoctorAction] = []
+    for st in statuses:
+        if st.installed:
+            continue
+        block = (
+            f"# MCP server '{st.spec.name}' is declared in doctor.mcp_servers "
+            f"but not registered locally.\n"
+            f"# Add it manually with the correct command/URL, e.g.:\n"
+            f"#   claude mcp add {st.spec.name} <command-or-url> -s {st.spec.scope}"
+        )
+        actions.append(
+            DoctorAction(
+                label=f"missing MCP server {st.spec.name} — manual setup required",
+                cmd=[],
+                runnable=False,
+                manual_block=block,
+                component=f"mcp:{st.spec.name}",
+            )
+        )
+    return actions
+
+
 def _blocking_components(
     permissions: list[PermissionStatus] | None,
     path_prefixes: list[PathPrefixStatus] | None,
@@ -924,6 +1022,111 @@ def build_update_plan(
     actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
     actions.extend(_plugin_update_actions(plugins))
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
+    if status_lines:
+        actions.extend(_status_line_actions(status_lines))
+    return InstallPlan(actions=actions)
+
+
+def build_optimize_plan(
+    config: DoctorConfig,  # noqa: ARG001 — symmetry with build_install_plan / build_update_plan
+    *,
+    node: NodeStatus,
+    claude_cli: ClaudeCliStatus,
+    plugins: list[PluginStatus],
+    foreign_plugins: list[ForeignPluginStatus],
+    mcp_servers: list[MCPServerStatus],
+    foreign_mcp_servers: list[ForeignMCPServerStatus],
+    npx_tools: list[NpxToolStatus],
+    permissions: list[PermissionStatus] | None = None,
+    path_prefixes: list[PathPrefixStatus] | None = None,
+    marketplaces: list[MarketplaceStatus] | None = None,
+    status_lines: list[StatusLineStatus] | None = None,
+    strict: bool = False,
+) -> InstallPlan:
+    """Plan a one-shot optimize pass.
+
+    Combines `build_update_plan`'s install+update behaviour with two new
+    concerns:
+
+      * `foreign_plugins` — installed but not in the spec. With
+        `strict=True`, queue `claude plugin uninstall` actions; without
+        strict, surface them as a manual_block warning so the user can
+        review before the next strict run.
+      * `foreign_mcp_servers` — registered with Claude but not in
+        `doctor.mcp_servers` and not matching `ignored_mcp_patterns`.
+        Same strict/non-strict split as foreign plugins.
+      * `mcp_servers` — spec'd servers that are missing get a manual_block
+        only (since `claude mcp add` needs command/URL info we don't
+        carry in the spec).
+
+    Strict-mode uninstall actions run BEFORE plugin install/update so a
+    foreign claude-mem cannot get refreshed in the same pass that's
+    removing it.
+    """
+    actions: list[DoctorAction] = []
+    if permissions:
+        actions.extend(_permission_actions(permissions))
+    if path_prefixes:
+        actions.extend(_path_prefix_actions(path_prefixes))
+    if marketplaces:
+        actions.extend(_marketplace_missing_actions(marketplaces))
+    install_deps, use_deps = _blocking_components(permissions, path_prefixes)
+    node_action = _node_action(node)
+    if node_action:
+        actions.append(node_action)
+    cli_action = _claude_cli_action(claude_cli)
+    if cli_action:
+        actions.append(cli_action)
+
+    # Strict cleanup happens first so subsequent install/update steps don't
+    # race against foreign entries we're about to remove.
+    if strict:
+        actions.extend(_foreign_plugin_remove_actions(foreign_plugins))
+        actions.extend(_foreign_mcp_remove_actions(foreign_mcp_servers))
+    else:
+        # Non-strict: surface the foreign set as a single warning block per
+        # category. This avoids spamming the action list with manual_blocks
+        # that the user has to scroll past on every `optimize` run, while
+        # still making the drift visible.
+        if foreign_plugins:
+            lines = ["# Foreign Claude plugins (not in doctor.plugins):"]
+            for fp in foreign_plugins:
+                target = f"{fp.name}@{fp.marketplace}" if fp.marketplace else fp.name
+                lines.append(f"#   - {target}" + (f"  [scope: {fp.scope}]" if fp.scope else ""))
+            lines.append("# Re-run with `--strict` to queue uninstall actions.")
+            actions.append(
+                DoctorAction(
+                    label=f"{len(foreign_plugins)} foreign plugin(s) detected — review needed",
+                    cmd=[],
+                    runnable=False,
+                    manual_block="\n".join(lines),
+                    component="foreign-plugins:summary",
+                )
+            )
+        if foreign_mcp_servers:
+            lines = ["# Foreign MCP servers (not in doctor.mcp_servers, not ignored):"]
+            for fm in foreign_mcp_servers:
+                lines.append(f"#   - {fm.name}")
+            lines.append("# Re-run with `--strict` to queue `claude mcp remove` actions.")
+            actions.append(
+                DoctorAction(
+                    label=f"{len(foreign_mcp_servers)} foreign MCP server(s) detected — review needed",
+                    cmd=[],
+                    runnable=False,
+                    manual_block="\n".join(lines),
+                    component="foreign-mcp:summary",
+                )
+            )
+
+    # Same install+update sequence as build_update_plan so optimize is a
+    # superset of update: anything update would do, optimize also does.
+    actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
+    actions.extend(_plugin_update_actions(plugins))
+    actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
+
+    # Spec'd-but-missing MCP servers get a manual_block (no auto-add).
+    actions.extend(_mcp_server_install_warnings(mcp_servers))
+
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     return InstallPlan(actions=actions)

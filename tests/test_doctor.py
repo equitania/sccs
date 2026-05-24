@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from sccs.doctor.defaults import (
     DEFAULT_CLAUDE_PLUGINS,
+    DEFAULT_IGNORED_MCP_PATTERNS,
     DEFAULT_NPX_TOOLS,
     NODE_INSTALL,
     get_node_install_spec,
@@ -19,16 +20,20 @@ from sccs.doctor.defaults import (
 from sccs.doctor.detectors import (
     ClaudeCliDetector,
     ClaudePluginDetector,
+    ForeignMCPServerStatus,
+    ForeignPluginStatus,
+    MCPServerDetector,
     NodeDetector,
     NpxToolDetector,
 )
 from sccs.doctor.installer import (
     build_install_plan,
+    build_optimize_plan,
     build_update_plan,
     execute_plan,
 )
 from sccs.doctor.runner import DoctorError, _run, _validate_head, parse_node_major
-from sccs.doctor.schema import DoctorConfig, NodeInstallSpec, NpxToolSpec, PluginSpec
+from sccs.doctor.schema import DoctorConfig, MCPServerSpec, NodeInstallSpec, NpxToolSpec, PluginSpec
 from sccs.doctor.state import DoctorStateManager, _hash_invocation
 
 # --------------------------------------------------------------------------- #
@@ -2970,3 +2975,280 @@ class TestStatusLineAutoFix:
         assert "binary not found" in actions[0].manual_block.lower() or (
             "not on path" in actions[0].manual_block.lower()
         )
+
+
+# v2.30.0: foreign-plugin detection + doctor optimize sub-command.
+
+
+class TestForeignPluginDetection:
+    """ClaudePluginDetector.get_foreign_plugins() — plugins installed locally
+    but NOT in the user's spec.
+    """
+
+    SAMPLE = """Installed plugins:
+
+  ❯ claude-mem@thedotmack
+    Version: 13.3.0
+    Scope: user
+
+  ❯ context-mode@context-mode
+    Version: 1.0.131
+    Scope: user
+
+  ❯ frontend-design@claude-code-plugins
+    Version: 1.0.0
+    Scope: user
+
+  ❯ frontend-design@claude-plugins-official
+    Version: unknown
+    Scope: user
+
+  ❯ gopls-lsp@claude-plugins-official
+    Version: 1.0.0
+    Scope: user
+"""
+
+    def test_empty_spec_means_everything_is_foreign(self):
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE)
+        foreign = detector.get_foreign_plugins([])
+        names = {(f.name, f.marketplace) for f in foreign}
+        assert names == {
+            ("claude-mem", "thedotmack"),
+            ("context-mode", "context-mode"),
+            ("frontend-design", "claude-code-plugins"),
+            ("frontend-design", "claude-plugins-official"),
+            ("gopls-lsp", "claude-plugins-official"),
+        }
+
+    def test_exact_match_excludes_from_foreign(self):
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE)
+        foreign = detector.get_foreign_plugins(
+            [PluginSpec(name="context-mode", marketplace="context-mode")]
+        )
+        assert ("context-mode", "context-mode") not in {(f.name, f.marketplace) for f in foreign}
+
+    def test_marketplace_mismatch_still_counts_as_foreign(self):
+        """frontend-design@A in spec must NOT excuse frontend-design@B."""
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE)
+        foreign = detector.get_foreign_plugins(
+            [PluginSpec(name="frontend-design", marketplace="claude-plugins-official")]
+        )
+        names = {(f.name, f.marketplace) for f in foreign}
+        assert ("frontend-design", "claude-code-plugins") in names
+        assert ("frontend-design", "claude-plugins-official") not in names
+
+    def test_bare_spec_marketplace_none_covers_all_marketplaces(self):
+        """A spec without marketplace excuses every installed copy under any source."""
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE)
+        foreign = detector.get_foreign_plugins([PluginSpec(name="frontend-design")])
+        names = {(f.name, f.marketplace) for f in foreign}
+        assert ("frontend-design", "claude-code-plugins") not in names
+        assert ("frontend-design", "claude-plugins-official") not in names
+
+    def test_scope_is_extracted(self):
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE)
+        foreign = detector.get_foreign_plugins([])
+        scopes = {f.name: f.scope for f in foreign}
+        assert scopes["claude-mem"] == "user"
+        assert scopes["gopls-lsp"] == "user"
+
+    def test_empty_output_means_no_foreign(self):
+        detector = ClaudePluginDetector(raw_output="")
+        assert detector.get_foreign_plugins([]) == []
+
+
+class TestMCPServerDetector:
+    """MCPServerDetector — parses `claude mcp list` and classifies servers."""
+
+    SAMPLE = """Checking MCP server health…
+
+claude.ai Gmail: https://gmailmcp.googleapis.com/mcp/v1 - ! Needs authentication
+claude.ai Google Calendar: https://calendarmcp.googleapis.com/mcp/v1 - ! Needs authentication
+plugin:context-mode:context-mode: node /tmp/start.mjs - ✓ Connected
+my-custom-server: docker mcp gateway run - ✓ Connected
+MCP_DOCKER: docker mcp gateway run - ✓ Connected
+"""
+
+    def test_parser_handles_colons_in_names(self):
+        """Names like `plugin:context-mode:context-mode` must survive intact."""
+        names = MCPServerDetector._parse_server_names(self.SAMPLE)
+        assert "plugin:context-mode:context-mode" in names
+
+    def test_parser_handles_spaces_in_names(self):
+        """`claude.ai Gmail` has a space — must split on `: ` not first `:`."""
+        names = MCPServerDetector._parse_server_names(self.SAMPLE)
+        assert "claude.ai Gmail" in names
+        assert "claude.ai Google Calendar" in names
+
+    def test_parser_skips_banner(self):
+        """The `Checking MCP server health…` banner must not leak in."""
+        names = MCPServerDetector._parse_server_names(self.SAMPLE)
+        assert all(not n.startswith("Checking") for n in names)
+
+    def test_default_ignored_patterns_skip_oauth_and_plugin(self):
+        detector = MCPServerDetector(raw_output=self.SAMPLE)
+        foreign = detector.get_foreign_servers([], DEFAULT_IGNORED_MCP_PATTERNS)
+        names = {f.name for f in foreign}
+        assert names == {"my-custom-server", "MCP_DOCKER"}
+
+    def test_spec_match_excludes_from_foreign(self):
+        detector = MCPServerDetector(raw_output=self.SAMPLE)
+        foreign = detector.get_foreign_servers(
+            [MCPServerSpec(name="my-custom-server")],
+            DEFAULT_IGNORED_MCP_PATTERNS,
+        )
+        assert {f.name for f in foreign} == {"MCP_DOCKER"}
+
+    def test_empty_ignored_patterns_flags_everything(self):
+        """Setting ignored_mcp_patterns: [] lets the user audit ALL drift."""
+        detector = MCPServerDetector(raw_output=self.SAMPLE)
+        foreign = detector.get_foreign_servers([], [])
+        assert "claude.ai Gmail" in {f.name for f in foreign}
+        assert "plugin:context-mode:context-mode" in {f.name for f in foreign}
+
+    def test_spec_status_marks_missing(self):
+        detector = MCPServerDetector(raw_output=self.SAMPLE)
+        statuses = detector.get_statuses(
+            [MCPServerSpec(name="my-custom-server"), MCPServerSpec(name="not-installed")]
+        )
+        installed = {s.spec.name: s.installed for s in statuses}
+        assert installed == {"my-custom-server": True, "not-installed": False}
+
+    def test_empty_output(self):
+        assert MCPServerDetector(raw_output="").get_foreign_servers([], []) == []
+
+
+class TestMCPServerSpecValidation:
+    def test_name_rejects_unsafe_chars(self):
+        with pytest.raises(ValueError, match="unsafe characters"):
+            MCPServerSpec(name="bad; rm -rf /")
+
+    def test_name_accepts_colons_and_dots(self):
+        # Real `claude mcp list` names use both.
+        MCPServerSpec(name="plugin:context-mode:context-mode")
+        MCPServerSpec(name="claude.ai Gmail")
+
+    def test_scope_rejects_unknown_value(self):
+        with pytest.raises(ValueError, match="user/project/local"):
+            MCPServerSpec(name="x", scope="managed")
+
+
+class TestBuildOptimizePlan:
+    """Smoke-tests for build_optimize_plan — does it queue what we expect?"""
+
+    @staticmethod
+    def _minimal_kwargs(**overrides):
+        """Build a complete kwarg set so plan-builders don't crash."""
+        from sccs.doctor.detectors import ClaudeCliStatus, NodeStatus
+
+        defaults = {
+            "node": NodeStatus(
+                installed=True,
+                version="20.0.0",
+                major=20,
+                meets_minimum=True,
+                install_hint=get_node_install_spec("macos"),
+                platform="macos",
+            ),
+            "claude_cli": ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            "plugins": [],
+            "foreign_plugins": [],
+            "mcp_servers": [],
+            "foreign_mcp_servers": [],
+            "npx_tools": [],
+            "permissions": [],
+            "path_prefixes": [],
+            "marketplaces": [],
+            "status_lines": [],
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_non_strict_emits_warning_block_for_foreign_plugins(self):
+        plan = build_optimize_plan(
+            DoctorConfig(),
+            **self._minimal_kwargs(
+                foreign_plugins=[ForeignPluginStatus(name="claude-mem", marketplace="thedotmack", scope="user")],
+            ),
+            strict=False,
+        )
+        # Should be a manual_block, NOT a runnable uninstall.
+        warning_actions = [a for a in plan.actions if a.component == "foreign-plugins:summary"]
+        assert len(warning_actions) == 1
+        assert warning_actions[0].runnable is False
+        assert "claude-mem@thedotmack" in warning_actions[0].manual_block
+
+    def test_strict_queues_uninstall_action(self):
+        plan = build_optimize_plan(
+            DoctorConfig(),
+            **self._minimal_kwargs(
+                foreign_plugins=[ForeignPluginStatus(name="claude-mem", marketplace="thedotmack", scope="user")],
+            ),
+            strict=True,
+        )
+        uninstall = [a for a in plan.actions if a.component == "foreign-plugin:claude-mem"]
+        assert len(uninstall) == 1
+        assert uninstall[0].runnable is True
+        assert uninstall[0].cmd[:3] == ["claude", "plugin", "uninstall"]
+        assert "claude-mem@thedotmack" in uninstall[0].cmd
+        assert "--scope" in uninstall[0].cmd
+
+    def test_strict_queues_mcp_remove_action(self):
+        plan = build_optimize_plan(
+            DoctorConfig(),
+            **self._minimal_kwargs(
+                foreign_mcp_servers=[ForeignMCPServerStatus(name="MCP_DOCKER")],
+            ),
+            strict=True,
+        )
+        remove = [a for a in plan.actions if a.component == "foreign-mcp:MCP_DOCKER"]
+        assert len(remove) == 1
+        assert remove[0].runnable is True
+        assert remove[0].cmd == ["claude", "mcp", "remove", "MCP_DOCKER", "-s", "user"]
+
+    def test_non_strict_emits_warning_block_for_foreign_mcp(self):
+        plan = build_optimize_plan(
+            DoctorConfig(),
+            **self._minimal_kwargs(
+                foreign_mcp_servers=[ForeignMCPServerStatus(name="MCP_DOCKER")],
+            ),
+            strict=False,
+        )
+        summary = [a for a in plan.actions if a.component == "foreign-mcp:summary"]
+        assert len(summary) == 1
+        assert summary[0].runnable is False
+
+    def test_empty_state_produces_empty_plan(self):
+        plan = build_optimize_plan(DoctorConfig(), **self._minimal_kwargs(), strict=False)
+        assert plan.is_empty() or all(not a.runnable for a in plan.actions)
+
+
+class TestDoctorConfigLoaderPreservesMCPOverride:
+    """Loader regression: doctor.mcp_servers and ignored_mcp_patterns must
+    survive _merge_with_defaults — same bug class as v2.29.1's doctor.plugins.
+    """
+
+    def test_mcp_servers_override_loads(self, tmp_path):
+        import yaml
+
+        from sccs.config.loader import load_config
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "repository": {"path": str(tmp_path)},
+                    "sync_categories": {},
+                    "doctor": {
+                        "mcp_servers": [{"name": "my-server", "scope": "user"}],
+                        "ignored_mcp_patterns": ["custom:*"],
+                    },
+                }
+            )
+        )
+
+        cfg = load_config(config_path)
+        assert cfg.doctor.mcp_servers is not None
+        assert len(cfg.doctor.mcp_servers) == 1
+        assert cfg.doctor.mcp_servers[0].name == "my-server"
+        assert cfg.doctor.ignored_mcp_patterns == ["custom:*"]

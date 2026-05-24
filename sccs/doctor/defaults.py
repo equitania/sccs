@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from sccs.doctor.schema import (
     BundledSkillSpec,
+    MCPServerSpec,
     NodeInstallSpec,
     NpxToolSpec,
     PathPrefixCheckSpec,
@@ -195,3 +196,24 @@ NODE_INSTALL: dict[str, NodeInstallSpec] = {
 def get_node_install_spec(platform_name: str) -> NodeInstallSpec:
     """Return the install spec for a platform, falling back to the linux block."""
     return NODE_INSTALL.get(platform_name, NODE_INSTALL["linux"])
+
+
+# Explicitly-managed MCP servers. Empty by default — `sccs doctor optimize`
+# will warn about every installed MCP server outside this list unless the
+# server name matches `DEFAULT_IGNORED_MCP_PATTERNS`. Users with custom MCP
+# integrations they want to "own" should add entries here.
+DEFAULT_MCP_SERVERS: list[MCPServerSpec] = []
+
+# fnmatch-style globs against MCP server names that doctor optimize should
+# treat as system-supplied and NEVER flag as foreign. Default skips:
+#   * `claude.ai *`           → Claude Code's built-in OAuth services
+#                                 (Gmail, Google Calendar, Google Drive)
+#   * `plugin:* *`            → MCPs registered automatically by Claude
+#                                 plugins (e.g. plugin:context-mode:context-mode);
+#                                 their lifecycle is owned by the plugin itself,
+#                                 not by the user, so removing them would just
+#                                 re-create them on the next session start.
+DEFAULT_IGNORED_MCP_PATTERNS: list[str] = [
+    "claude.ai *",
+    "plugin:*",
+]

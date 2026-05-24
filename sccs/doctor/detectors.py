@@ -18,11 +18,13 @@ from sccs.doctor.runner import (
     _run,
     parse_node_major,
     run_claude_marketplace_list,
+    run_claude_mcp_list,
     run_claude_plugin_list,
     run_node_version,
     which,
 )
 from sccs.doctor.schema import (
+    MCPServerSpec,
     NodeInstallSpec,
     NpxToolSpec,
     PathPrefixCheckSpec,
@@ -82,6 +84,22 @@ class PluginStatus:
     # otherwise default to `user` and fail with "Plugin … is not installed
     # at scope user" for plugins installed under a different scope.
     scope: str | None = None
+
+
+@dataclass
+class ForeignPluginStatus:
+    """A Claude plugin that is installed but NOT in the user's doctor.plugins
+    spec.
+
+    Surfaced by ClaudePluginDetector.get_foreign_plugins() so `sccs doctor
+    optimize` can warn about drift between what the user declares and what
+    the local Claude install actually has. With `--strict`, doctor optimize
+    queues an uninstall action against each entry.
+    """
+
+    name: str
+    marketplace: str | None
+    scope: str | None
 
 
 @dataclass
@@ -382,6 +400,63 @@ class ClaudePluginDetector:
                 )
             )
         return statuses
+
+    def get_foreign_plugins(self, specs: list[PluginSpec]) -> list[ForeignPluginStatus]:
+        """Return plugins that are installed locally but NOT in `specs`.
+
+        Used by `sccs doctor optimize` to surface drift: a plugin the user
+        removed from `doctor.plugins:` is no longer managed, but stays
+        physically installed until either the user runs
+        `claude plugin uninstall …` manually OR `doctor optimize --strict`
+        queues the removal. Matching is name-based, marketplace-aware: a
+        plugin counts as "in spec" if (a) its name matches a spec entry
+        AND (b) the spec either omits the marketplace or matches the
+        installed one. The latter clause means `frontend-design@A` in spec
+        does NOT excuse `frontend-design@B` from being marked foreign —
+        the user wanted exactly @A.
+        """
+        output = self._output()
+        if not output:
+            return []
+
+        # Parse every `❯ <name>@<marketplace>` (or bare `❯ <name>`) header
+        # from the plugin-list output. The same marketplace-token charset
+        # as _detect_plugin keeps these two helpers in sync.
+        header_re = re.compile(
+            r"❯\s+([A-Za-z0-9_\-][A-Za-z0-9_.\-]*)(?:@([A-Za-z0-9_.\-]+))?",
+        )
+
+        # Index the spec for O(1) lookups. Marketplace=None means "any source
+        # of this plugin is fine" — matches the semantics of _detect_plugin's
+        # `bare` branch.
+        spec_index: dict[str, set[str | None]] = {}
+        for spec in specs:
+            spec_index.setdefault(spec.name.lower(), set()).add(
+                spec.marketplace.lower() if spec.marketplace else None
+            )
+
+        foreign: list[ForeignPluginStatus] = []
+        seen: set[tuple[str, str | None]] = set()
+        for m in header_re.finditer(output):
+            name = m.group(1)
+            marketplace = m.group(2)
+            key = (name.lower(), marketplace.lower() if marketplace else None)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            spec_marketplaces = spec_index.get(name.lower())
+            if spec_marketplaces is not None:
+                # In spec under any marketplace (None) → covered.
+                # In spec under the installed marketplace → covered.
+                installed_mp = marketplace.lower() if marketplace else None
+                if None in spec_marketplaces or installed_mp in spec_marketplaces:
+                    continue
+
+            scope = ClaudePluginDetector._extract_scope_from_block(output, m.end())
+            foreign.append(ForeignPluginStatus(name=name, marketplace=marketplace, scope=scope))
+
+        return foreign
 
 
 class ClaudeMarketplaceDetector:
@@ -1164,3 +1239,118 @@ class NpxToolDetector:
                 )
             )
         return out
+
+
+@dataclass
+class MCPServerStatus:
+    """Result of inspecting a single spec'd MCP server."""
+
+    spec: MCPServerSpec
+    installed: bool
+
+
+@dataclass
+class ForeignMCPServerStatus:
+    """An MCP server registered locally but NOT in the spec and not ignored.
+
+    Surfaced by MCPServerDetector.get_foreign_servers() so `sccs doctor
+    optimize` can flag drift between `doctor.mcp_servers` and what the
+    local `claude mcp list` actually contains. With `--strict`, doctor
+    optimize queues a `claude mcp remove <name> -s user` action per entry.
+    """
+
+    name: str
+
+
+class MCPServerDetector:
+    """Detect MCP servers registered with the local Claude install.
+
+    Parses the line-based output of `claude mcp list`:
+
+        <name>: <command-or-url> - <status>
+
+    The `<name>:` token (left of the first colon) is the only field we
+    care about — the rest is opaque to the detector. Status text is not
+    inspected (a foreign server is foreign whether it's connected or not).
+    """
+
+    def __init__(self, raw_output: str | None = None) -> None:
+        # Allow injection for testing; otherwise lazy-load via runner.
+        self._raw_output = raw_output
+
+    def _output(self) -> str:
+        if self._raw_output is None:
+            self._raw_output = run_claude_mcp_list()
+        return self._raw_output
+
+    # Regex used to split `<name>: <command-or-url> - <status>` lines.
+    # We split on `: ` (colon + space) rather than the first bare `:` so
+    # server names containing colons survive — concretely `claude mcp list`
+    # emits plugin-internal MCPs as `plugin:context-mode:context-mode: node
+    # …`, where the name itself has two colons. The space requirement
+    # disambiguates: the body always starts with whitespace after the
+    # delimiter colon.
+    _NAME_SPLIT_RE = re.compile(r":\s")
+
+    @staticmethod
+    def _parse_server_names(output: str) -> list[str]:
+        """Extract the `<name>` tokens from `claude mcp list` stdout.
+
+        Skips the leading "Checking MCP server health…" banner and any
+        empty lines. A server line is recognised by the `<name>: <rest>`
+        shape — lines without a colon-space delimiter are noise. Names may
+        themselves contain colons (see `plugin:<plugin-name>:<server-name>`),
+        which is why we split on the first `: ` rather than the first `:`.
+        """
+        names: list[str] = []
+        for line in output.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("Checking "):
+                continue
+            split = MCPServerDetector._NAME_SPLIT_RE.split(stripped, maxsplit=1)
+            if len(split) != 2:
+                continue
+            name = split[0].strip()
+            # Defensive: reject empty or obviously broken names so a
+            # mangled line in the CLI output cannot leak into the
+            # `claude mcp remove` action queue.
+            if name and re.match(r"^[A-Za-z0-9_:\-./ ]+$", name):
+                names.append(name)
+        return names
+
+    def get_statuses(self, specs: list[MCPServerSpec]) -> list[MCPServerStatus]:
+        """Classify each spec'd server as installed or missing."""
+        installed = set(self._parse_server_names(self._output()))
+        return [
+            MCPServerStatus(spec=spec, installed=spec.name in installed)
+            for spec in specs
+        ]
+
+    def get_foreign_servers(
+        self,
+        specs: list[MCPServerSpec],
+        ignored_patterns: list[str],
+    ) -> list[ForeignMCPServerStatus]:
+        """Return MCP servers installed locally but NOT in specs/ignored.
+
+        Filtering order:
+          1. Drop any server whose name matches a `spec.name`.
+          2. Drop any server whose name matches an fnmatch glob in
+             `ignored_patterns` (DEFAULT_IGNORED_MCP_PATTERNS covers
+             `claude.ai *` OAuth services and `plugin:*` plugin-internal
+             MCPs out of the box).
+          3. Whatever's left is foreign.
+        """
+        import fnmatch as _fnmatch
+
+        spec_names = {s.name for s in specs}
+        foreign: list[ForeignMCPServerStatus] = []
+        seen: set[str] = set()
+        for name in self._parse_server_names(self._output()):
+            if name in spec_names or name in seen:
+                continue
+            if any(_fnmatch.fnmatchcase(name, pat) for pat in ignored_patterns):
+                continue
+            seen.add(name)
+            foreign.append(ForeignMCPServerStatus(name=name))
+        return foreign

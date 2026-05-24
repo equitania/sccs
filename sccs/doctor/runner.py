@@ -102,6 +102,26 @@ def run_claude_plugin_list() -> str:
     return proc.stdout or ""
 
 
+def run_claude_mcp_list() -> str:
+    """Return raw stdout of `claude mcp list`. Empty on failure.
+
+    Used by MCPServerDetector / `sccs doctor optimize` to enumerate every
+    MCP server currently registered with the local Claude install. Format
+    is one server per line:
+
+        <name>: <command-or-url> - <status>
+
+    where status is `✓ Connected`, `! Needs authentication`, etc. The
+    detector parses only the leading `<name>:` token; the rest is treated
+    as opaque.
+    """
+    try:
+        proc = _run(["claude", "mcp", "list"], timeout=20, check=False)
+    except DoctorError:
+        return ""
+    return proc.stdout or ""
+
+
 def run_claude_marketplace_list() -> str:
     """Return raw stdout of `claude plugin marketplace list`. Empty on failure.
 
