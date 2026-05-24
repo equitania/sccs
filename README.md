@@ -4,7 +4,7 @@
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
-**Version:** 2.27.1 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
+**Version:** 2.31.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
 
 ---
 
@@ -18,6 +18,8 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 
 - 🔄 **Bidirektionale Synchronisierung** zwischen `~/.claude/` und Git-Repository, mit interaktiver Konfliktauflösung und automatischen Backups → [docs/usage/sync.md](docs/usage/sync.md)
 - 🩺 **System & Plugin Health-Check** (`sccs doctor`) für Node.js, `claude` CLI, Claude-Plugins, npm-Helper-Tools, Browser-Bundles und Filesystem-Permissions — mit gezielten Reparatur-Plänen → [docs/usage/doctor.md](docs/usage/doctor.md)
+- 🧹 **`sccs doctor optimize`** *(v2.30.0)* — Ein-Schuss-Optimierungslauf: install + update + Drift-Warnung für Plugins/MCP-Server außerhalb der Spec. Mit `--strict` werden Uninstall-Actions per Confirm gequeut.
+- 🔧 **`doctor.disallowed_hooks`** *(v2.31.0)* — Substring-Patterns entfernen unerwünschte Hooks aus `~/.claude/settings.json` nach jedem doctor-Pass (z.B. Hooks die von npx-Tools re-injiziert werden). Mit Backup, idempotent.
 - 📦 **Selektiver Export/Import** als ZIP-Archiv (Checkbox-Auswahl) für Kundendeployments → [docs/usage/transfer.md](docs/usage/transfer.md)
 - 🧠 **Memory Bridge** — file-basierter persistenter Kontext zwischen Claude Code (Terminal) und Claude.ai (Web), inklusive `sccs memory` CRUD-CLI → [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md)
 - 🪟 **Plattformübergreifend** macOS, Linux, Windows mit nativer PowerShell-7-Unterstützung und Fish→PowerShell-Konvertierung → [docs/usage/platforms.md](docs/usage/platforms.md)
@@ -93,6 +95,8 @@ SCCS is a YAML-configured, bidirectional synchronization tool for Claude Code fi
 
 - 🔄 **Bidirectional sync** between `~/.claude/` and a Git repository, with interactive conflict resolution and automatic backups → [docs/usage/sync.md](docs/usage/sync.md)
 - 🩺 **System & plugin health check** (`sccs doctor`) for Node.js, the `claude` CLI, Claude plugins, npm helper tools, browser bundles and filesystem permissions — with surgical repair plans → [docs/usage/doctor.md](docs/usage/doctor.md)
+- 🧹 **`sccs doctor optimize`** *(v2.30.0)* — one-shot optimisation pass: install + update + drift warning for plugins/MCP servers outside the spec. With `--strict`, uninstall actions are queued per confirm.
+- 🔧 **`doctor.disallowed_hooks`** *(v2.31.0)* — substring patterns strip unwanted hooks from `~/.claude/settings.json` after every doctor pass (e.g. hooks re-injected by npx tools). Backup-aware, idempotent.
 - 📦 **Selective export/import** as ZIP archives (checkbox selection) for customer deployments → [docs/usage/transfer.md](docs/usage/transfer.md)
 - 🧠 **Memory Bridge** — file-based persistent context between Claude Code (terminal) and Claude.ai (web), including a full `sccs memory` CRUD CLI → [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md)
 - 🪟 **Cross-platform** macOS, Linux, Windows with native PowerShell 7 support and Fish→PowerShell conversion → [docs/usage/platforms.md](docs/usage/platforms.md)

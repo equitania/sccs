@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -3026,9 +3027,7 @@ class TestForeignPluginDetection:
 
     def test_exact_match_excludes_from_foreign(self):
         detector = ClaudePluginDetector(raw_output=self.SAMPLE)
-        foreign = detector.get_foreign_plugins(
-            [PluginSpec(name="context-mode", marketplace="context-mode")]
-        )
+        foreign = detector.get_foreign_plugins([PluginSpec(name="context-mode", marketplace="context-mode")])
         assert ("context-mode", "context-mode") not in {(f.name, f.marketplace) for f in foreign}
 
     def test_marketplace_mismatch_still_counts_as_foreign(self):
@@ -3112,9 +3111,7 @@ MCP_DOCKER: docker mcp gateway run - ✓ Connected
 
     def test_spec_status_marks_missing(self):
         detector = MCPServerDetector(raw_output=self.SAMPLE)
-        statuses = detector.get_statuses(
-            [MCPServerSpec(name="my-custom-server"), MCPServerSpec(name="not-installed")]
-        )
+        statuses = detector.get_statuses([MCPServerSpec(name="my-custom-server"), MCPServerSpec(name="not-installed")])
         installed = {s.spec.name: s.installed for s in statuses}
         assert installed == {"my-custom-server": True, "not-installed": False}
 
@@ -3403,9 +3400,7 @@ class TestSettingsHookCleanupAction:
                 }
             )
         )
-        v = SettingsHookViolation(
-            event="PreToolUse", matcher="X", command="node /a/bad.js", matched_pattern="bad.js"
-        )
+        v = SettingsHookViolation(event="PreToolUse", matcher="X", command="node /a/bad.js", matched_pattern="bad.js")
         actions = _settings_hook_cleanup_actions([v], settings_path=sp)
         actions[0].python_callable()
         result = json.loads(sp.read_text())
@@ -3430,9 +3425,7 @@ class TestSettingsHookCleanupAction:
                 }
             )
         )
-        v = SettingsHookViolation(
-            event="PreToolUse", matcher="X", command="node /a/bad.js", matched_pattern="bad.js"
-        )
+        v = SettingsHookViolation(event="PreToolUse", matcher="X", command="node /a/bad.js", matched_pattern="bad.js")
         actions = _settings_hook_cleanup_actions([v], settings_path=sp)
         actions[0].python_callable()
         result = json.loads(sp.read_text())
@@ -3455,9 +3448,7 @@ class TestSettingsHookCleanupAction:
         """Running the python_callable twice yields the same end state."""
         sp = tmp_path / "settings.json"
         sp.write_text(
-            json.dumps(
-                {"hooks": {"PreToolUse": [{"hooks": [{"command": "/a/bad"}, {"command": "/a/keep"}]}]}}
-            )
+            json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": "/a/bad"}, {"command": "/a/keep"}]}]}})
         )
         v = SettingsHookViolation(event="PreToolUse", matcher=None, command="/a/bad", matched_pattern="bad")
         actions = _settings_hook_cleanup_actions([v], settings_path=sp)

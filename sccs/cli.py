@@ -1791,9 +1791,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
     else:
         foreign_count = len(statuses["foreign_plugins"]) + len(statuses["foreign_mcp_servers"])
         if foreign_count:
-            console.print_info(
-                f"Detected {foreign_count} foreign item(s) — re-run with --strict to remove them."
-            )
+            console.print_info(f"Detected {foreign_count} foreign item(s) — re-run with --strict to remove them.")
     if yes:
         console.print_warning("--yes given: confirm prompts will be SKIPPED.")
 

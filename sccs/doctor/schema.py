@@ -619,11 +619,7 @@ class DoctorConfig(BaseModel):
         """Return substring patterns identifying hooks to strip from settings.json."""
         from sccs.doctor.defaults import DEFAULT_DISALLOWED_HOOKS
 
-        return (
-            list(self.disallowed_hooks)
-            if self.disallowed_hooks is not None
-            else list(DEFAULT_DISALLOWED_HOOKS)
-        )
+        return list(self.disallowed_hooks) if self.disallowed_hooks is not None else list(DEFAULT_DISALLOWED_HOOKS)
 
     def effective_path_prefix_checks(self) -> list[PathPrefixCheckSpec]:
         """Return PATH-prefix checks to run: override or default, plus extras."""

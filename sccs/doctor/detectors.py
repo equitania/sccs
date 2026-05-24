@@ -431,9 +431,7 @@ class ClaudePluginDetector:
         # `bare` branch.
         spec_index: dict[str, set[str | None]] = {}
         for spec in specs:
-            spec_index.setdefault(spec.name.lower(), set()).add(
-                spec.marketplace.lower() if spec.marketplace else None
-            )
+            spec_index.setdefault(spec.name.lower(), set()).add(spec.marketplace.lower() if spec.marketplace else None)
 
         foreign: list[ForeignPluginStatus] = []
         seen: set[tuple[str, str | None]] = set()
@@ -1413,10 +1411,7 @@ class MCPServerDetector:
     def get_statuses(self, specs: list[MCPServerSpec]) -> list[MCPServerStatus]:
         """Classify each spec'd server as installed or missing."""
         installed = set(self._parse_server_names(self._output()))
-        return [
-            MCPServerStatus(spec=spec, installed=spec.name in installed)
-            for spec in specs
-        ]
+        return [MCPServerStatus(spec=spec, installed=spec.name in installed) for spec in specs]
 
     def get_foreign_servers(
         self,

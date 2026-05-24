@@ -1097,9 +1097,7 @@ def build_install_plan(
     # (get-shit-done-cc, etc.) which overwrite settings.json during their
     # install step are followed by our cleanup pass.
     if settings_hook_violations and settings_path is not None:
-        actions.extend(
-            _settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path)
-        )
+        actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
     return InstallPlan(actions=actions)
 
 
@@ -1146,9 +1144,7 @@ def build_update_plan(
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     if settings_hook_violations and settings_path is not None:
-        actions.extend(
-            _settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path)
-        )
+        actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
     return InstallPlan(actions=actions)
 
 
@@ -1260,9 +1256,7 @@ def build_optimize_plan(
     # rewrites performed by upstream actions (npx tools, plugin installs,
     # statusline auto-fix) happen before our cleanup pass.
     if settings_hook_violations and settings_path is not None:
-        actions.extend(
-            _settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path)
-        )
+        actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
     return InstallPlan(actions=actions)
 
 
