@@ -1,5 +1,24 @@
 # Release Notes
 
+## Version 2.31.0 (24.05.2026)
+
+### Added
+- **Settings.json hook sanitisation after every doctor pass.** Real driver: `npx get-shit-done-cc --claude --global --force-statusline` (one of doctor's bundled npx tools) overwrites `~/.claude/settings.json` on every run, re-injecting hooks the user had explicitly removed in a setup audit — concretely `gsd-read-guard.js`, which a v2.30.0 audit had stripped from the PreToolUse stack. Each `sccs doctor optimize` then silently put it back. The new `doctor.disallowed_hooks:` list takes substring patterns matched against every `hooks[event][i].hooks[j].command` entry; `build_install_plan`, `build_update_plan`, and `build_optimize_plan` queue a final sanitiser action that rewrites settings.json without the offending entries (with timestamped `.bak-YYYYMMDD-HHMMSS` backup). Sanitiser runs LAST so it picks up violations re-injected by upstream actions. Idempotent: a second pass over a clean file emits no action.
+- **`SettingsHookDetector`** parses `~/.claude/settings.json` and returns a `SettingsHookViolation` per matching hook entry, carrying the event name (`PreToolUse`/`PostToolUse`/…), matcher string, full command, and which pattern matched. Defensive: missing file, malformed JSON, or absent `hooks` block all return `[]` without raising.
+- **`_settings_hook_cleanup_actions`** builds a single `DoctorAction` with a `python_callable` closure (same pattern as v2.29.0's statusline auto-fix). Removal rules: (1) hooks matching any disallowed pattern are deleted, (2) outer entries whose inner `hooks:` list ends up empty are dropped, (3) event keys with no remaining entries are dropped. Eliminates the dead `{matcher: …, hooks: []}` accumulation that would otherwise grow on every run.
+- **`DoctorConfig.disallowed_hooks` field** + `effective_disallowed_hooks()` resolver. `DEFAULT_DISALLOWED_HOOKS` is intentionally empty: the bundled distribution makes no judgements about user hook setups. Opt in via `~/.config/sccs/config.yaml`:
+  ```yaml
+  doctor:
+    disallowed_hooks:
+      - gsd-read-guard.js
+  ```
+
+### Tests
+- 15 new tests across 3 classes in `tests/test_doctor.py`:
+  - `TestSettingsHookDetector` (7): finds match in nested hook, finds match in multi-hook entry, empty disallowed → no violations, missing settings file → no violations, malformed JSON → no violations, no `hooks` block → no violations, multiple patterns matching same command report only once.
+  - `TestSettingsHookCleanupAction` (6): no violations → no action, action removes matching hook entry and keeps siblings, action drops empty outer entry, action drops empty event key, action writes timestamped backup, action is idempotent.
+  - `TestDoctorConfigDisallowedHooks` (2): override survives `_merge_with_defaults`, default is empty.
+
 ## Version 2.30.0 (24.05.2026)
 
 ### Added

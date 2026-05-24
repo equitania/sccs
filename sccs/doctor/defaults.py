@@ -217,3 +217,12 @@ DEFAULT_IGNORED_MCP_PATTERNS: list[str] = [
     "claude.ai *",
     "plugin:*",
 ]
+
+# Substring patterns matched against `hooks[*].hooks[*].command` entries
+# in ~/.claude/settings.json. Doctor install/update/optimize sanitises
+# settings.json by removing every hook entry whose command contains one
+# of these substrings. Default is empty: the bundled SCCS distribution
+# makes no judgements about which hooks a user should or should not
+# have. Users opt in by populating `doctor.disallowed_hooks:` in their
+# own `~/.config/sccs/config.yaml`.
+DEFAULT_DISALLOWED_HOOKS: list[str] = []

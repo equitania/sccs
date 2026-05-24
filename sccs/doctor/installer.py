@@ -30,6 +30,7 @@ from sccs.doctor.detectors import (
     PathPrefixStatus,
     PermissionStatus,
     PluginStatus,
+    SettingsHookViolation,
     StatusLineStatus,
 )
 from sccs.doctor.runner import DoctorError, _run
@@ -879,6 +880,115 @@ def _foreign_mcp_remove_actions(
     return actions
 
 
+def _settings_hook_cleanup_actions(
+    violations: list[SettingsHookViolation],
+    *,
+    settings_path: Path,
+) -> list[DoctorAction]:
+    """Queue a single sanitiser action that removes disallowed hooks from
+    settings.json (after writing a timestamped backup).
+
+    Strategy: collect ALL violations into one action rather than emitting
+    one action per violation. Reason: the python_callable rewrites the
+    whole file atomically, and per-violation confirms would force the
+    user to say yes N times to a single semantic operation. The single
+    action's manual_block lists every violation it intends to remove so
+    the confirm prompt is still informed.
+
+    Removal rules:
+      * `hooks[event][i].hooks[j]` entries whose `command` substring-matches
+        any disallowed pattern are deleted.
+      * If an event's outer entry (`hooks[event][i]`) ends up with an
+        empty inner `hooks` list after removal, the outer entry is
+        dropped too — otherwise settings.json accumulates dead `{matcher:
+        …, hooks: []}` blocks across runs.
+      * If an event itself ends up empty, the event key is removed.
+
+    Idempotent: a second run after sanitisation finds no violations and
+    returns []. No action queued.
+    """
+    if not violations:
+        return []
+
+    # Group violations by command for the manual_block so the user sees
+    # "PreToolUse: Write|Edit → gsd-read-guard.js" rather than a wall of
+    # paths. Pattern-list per command gives stable output across runs.
+    block_lines = ["# Will sanitise settings.json — remove these hook entries:"]
+    for v in violations:
+        matcher_label = f" [{v.matcher}]" if v.matcher else ""
+        block_lines.append(f"#   - {v.event}{matcher_label} → matched {v.matched_pattern!r}")
+    block_lines.append(f"# Backup will be written next to {settings_path.name}.")
+
+    # Snapshot the violation set into the closure so the action remains
+    # valid if settings.json is mutated between plan-build and execute
+    # (worst case: we re-read fresh and find the same violations again).
+    patterns_to_remove = sorted({v.matched_pattern for v in violations})
+
+    def _sanitise(p: Path = settings_path, pats: list[str] = patterns_to_remove) -> None:
+        """Rewrite settings.json without entries matching disallowed patterns."""
+        if not p.is_file():
+            return  # nothing to do — settings.json vanished between detect and run
+        text = p.read_text(encoding="utf-8")
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise DoctorError(f"settings.json is not valid JSON: {exc}") from exc
+
+        hooks_root = data.get("hooks")
+        if not isinstance(hooks_root, dict):
+            return  # no hooks block — nothing to sanitise
+
+        timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = p.with_name(f"{p.name}.bak-{timestamp}")
+        backup.write_text(text, encoding="utf-8")
+
+        new_hooks: dict[str, list[dict]] = {}
+        for event, entries in hooks_root.items():
+            if not isinstance(entries, list):
+                new_hooks[event] = entries
+                continue
+            kept_entries: list[dict] = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    kept_entries.append(entry)
+                    continue
+                inner = entry.get("hooks")
+                if not isinstance(inner, list):
+                    kept_entries.append(entry)
+                    continue
+                kept_inner = [
+                    ih
+                    for ih in inner
+                    if not (
+                        isinstance(ih, dict)
+                        and isinstance(ih.get("command"), str)
+                        and any(pat in ih["command"] for pat in pats)
+                    )
+                ]
+                if kept_inner:
+                    new_entry = dict(entry)
+                    new_entry["hooks"] = kept_inner
+                    kept_entries.append(new_entry)
+                # else: drop the outer entry — its hooks list is empty.
+            if kept_entries:
+                new_hooks[event] = kept_entries
+            # else: drop the event key — no entries left.
+
+        data["hooks"] = new_hooks
+        p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    return [
+        DoctorAction(
+            label=f"sanitise settings.json: remove {len(violations)} disallowed hook(s)",
+            cmd=[],
+            runnable=True,
+            python_callable=_sanitise,
+            manual_block="\n".join(block_lines),
+            component="settings-hooks:sanitise",
+        )
+    ]
+
+
 def _mcp_server_install_warnings(
     statuses: list[MCPServerStatus],
 ) -> list[DoctorAction]:
@@ -953,6 +1063,8 @@ def build_install_plan(
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
     status_lines: list[StatusLineStatus] | None = None,
+    settings_hook_violations: list[SettingsHookViolation] | None = None,
+    settings_path: Path | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -981,6 +1093,13 @@ def build_install_plan(
         actions.extend(_browser_bundle_repair_actions(browser_bundles, npx_tools, use_deps=use_deps))
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
+    # Settings.json sanitisation runs LAST so that third-party tools
+    # (get-shit-done-cc, etc.) which overwrite settings.json during their
+    # install step are followed by our cleanup pass.
+    if settings_hook_violations and settings_path is not None:
+        actions.extend(
+            _settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path)
+        )
     return InstallPlan(actions=actions)
 
 
@@ -997,6 +1116,8 @@ def build_update_plan(
     bundled_skills: list[BundledSkillStatus] | None = None,  # noqa: ARG001 — symmetry
     browser_bundles: list[BrowserBundleStatus] | None = None,  # noqa: ARG001 — symmetry
     status_lines: list[StatusLineStatus] | None = None,
+    settings_hook_violations: list[SettingsHookViolation] | None = None,
+    settings_path: Path | None = None,
 ) -> InstallPlan:
     """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones.
 
@@ -1024,6 +1145,10 @@ def build_update_plan(
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
+    if settings_hook_violations and settings_path is not None:
+        actions.extend(
+            _settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path)
+        )
     return InstallPlan(actions=actions)
 
 
@@ -1041,6 +1166,8 @@ def build_optimize_plan(
     path_prefixes: list[PathPrefixStatus] | None = None,
     marketplaces: list[MarketplaceStatus] | None = None,
     status_lines: list[StatusLineStatus] | None = None,
+    settings_hook_violations: list[SettingsHookViolation] | None = None,
+    settings_path: Path | None = None,
     strict: bool = False,
 ) -> InstallPlan:
     """Plan a one-shot optimize pass.
@@ -1129,6 +1256,13 @@ def build_optimize_plan(
 
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
+    # Settings.json sanitisation always runs LAST so any settings.json
+    # rewrites performed by upstream actions (npx tools, plugin installs,
+    # statusline auto-fix) happen before our cleanup pass.
+    if settings_hook_violations and settings_path is not None:
+        actions.extend(
+            _settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path)
+        )
     return InstallPlan(actions=actions)
 
 

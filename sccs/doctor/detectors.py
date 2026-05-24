@@ -1250,6 +1250,98 @@ class MCPServerStatus:
 
 
 @dataclass
+class SettingsHookViolation:
+    """A hook entry in settings.json that matches a `disallowed_hooks` pattern.
+
+    Carries enough information for the reporter to print "PreToolUse:
+    Write|Edit → gsd-read-guard.js" without re-parsing settings.json,
+    and for the action builder to construct an idempotent removal closure.
+    """
+
+    event: str  # PreToolUse | PostToolUse | SessionStart | Stop | ...
+    matcher: str | None  # the matcher string, or None when omitted
+    command: str  # the full command string from the hook entry
+    matched_pattern: str  # which `disallowed_hooks` substring matched
+
+
+class SettingsHookDetector:
+    """Find hook entries in settings.json whose command matches a disallowed
+    pattern.
+
+    Real driver: third-party doctor tools (npx get-shit-done-cc
+    --force-statusline, …) overwrite settings.json on every run, re-
+    injecting hooks the user explicitly removed in a setup audit. The
+    detector surfaces those violations so `_settings_hook_cleanup_actions`
+    can queue a sanitiser that re-removes them after every doctor pass.
+
+    Pattern matching is plain substring (case-sensitive) against the
+    `command` field of each hook entry — same shape as glob-free
+    filtering elsewhere in doctor. Globs would be overkill: hook commands
+    are file paths the user themselves chose, so substring matching on
+    the script basename (e.g. "gsd-read-guard.js") is precise enough.
+    """
+
+    def __init__(self, settings_path: Path | str = "~/.claude/settings.json") -> None:
+        self._settings_path = Path(os.path.expanduser(str(settings_path)))
+
+    @property
+    def settings_path(self) -> Path:
+        return self._settings_path
+
+    def get_violations(self, disallowed: list[str]) -> list[SettingsHookViolation]:
+        """Return one violation per hook entry that matches any disallowed pattern.
+
+        Empty `disallowed` list short-circuits to []. Missing or malformed
+        settings.json also returns [] — the detector is read-only and the
+        cleanup-action layer makes the same safety call when it runs.
+        """
+        if not disallowed:
+            return []
+        if not self._settings_path.is_file():
+            return []
+        try:
+            data = json.loads(self._settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+
+        hooks_root = data.get("hooks")
+        if not isinstance(hooks_root, dict):
+            return []
+
+        violations: list[SettingsHookViolation] = []
+        for event, entries in hooks_root.items():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                inner_hooks = entry.get("hooks")
+                if not isinstance(inner_hooks, list):
+                    continue
+                matcher = entry.get("matcher") if entry.get("matcher") != "" else ""
+                # matcher may be None / "" / "Bash|Edit" — kept verbatim for
+                # display, no normalisation here.
+                for inner in inner_hooks:
+                    if not isinstance(inner, dict):
+                        continue
+                    cmd = inner.get("command")
+                    if not isinstance(cmd, str):
+                        continue
+                    for pattern in disallowed:
+                        if pattern and pattern in cmd:
+                            violations.append(
+                                SettingsHookViolation(
+                                    event=str(event),
+                                    matcher=matcher if matcher is not None else None,
+                                    command=cmd,
+                                    matched_pattern=pattern,
+                                )
+                            )
+                            break  # one pattern is enough — don't double-report
+        return violations
+
+
+@dataclass
 class ForeignMCPServerStatus:
     """An MCP server registered locally but NOT in the spec and not ignored.
 

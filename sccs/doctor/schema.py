@@ -561,6 +561,21 @@ class DoctorConfig(BaseModel):
             "internal MCPs). Set to [] to flag every non-spec entry as foreign."
         ),
     )
+    disallowed_hooks: list[str] | None = Field(
+        default=None,
+        description=(
+            "Substring patterns matched against `hooks[*].hooks[*].command` "
+            "entries in ~/.claude/settings.json. After every doctor install/"
+            "update/optimize pass, SCCS sanitises settings.json by removing "
+            "hook entries whose command contains any of these substrings. "
+            "Real driver: third-party doctor tools (npx get-shit-done-cc "
+            "--force-statusline, …) overwrite settings.json on every run, "
+            "re-injecting hooks the user had explicitly removed in a setup "
+            "audit. This list re-applies the removal after each tool run. "
+            "None keeps DEFAULT_DISALLOWED_HOOKS (empty); pass [] explicitly "
+            "to make that intent visible in the config."
+        ),
+    )
 
     def effective_plugins(self) -> list[PluginSpec]:
         """Return plugins to check: override or default, plus extras."""
@@ -598,6 +613,16 @@ class DoctorConfig(BaseModel):
             list(self.ignored_mcp_patterns)
             if self.ignored_mcp_patterns is not None
             else list(DEFAULT_IGNORED_MCP_PATTERNS)
+        )
+
+    def effective_disallowed_hooks(self) -> list[str]:
+        """Return substring patterns identifying hooks to strip from settings.json."""
+        from sccs.doctor.defaults import DEFAULT_DISALLOWED_HOOKS
+
+        return (
+            list(self.disallowed_hooks)
+            if self.disallowed_hooks is not None
+            else list(DEFAULT_DISALLOWED_HOOKS)
         )
 
     def effective_path_prefix_checks(self) -> list[PathPrefixCheckSpec]:

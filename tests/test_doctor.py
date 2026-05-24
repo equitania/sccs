@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from unittest.mock import patch
 
@@ -25,8 +26,11 @@ from sccs.doctor.detectors import (
     MCPServerDetector,
     NodeDetector,
     NpxToolDetector,
+    SettingsHookDetector,
+    SettingsHookViolation,
 )
 from sccs.doctor.installer import (
+    _settings_hook_cleanup_actions,
     build_install_plan,
     build_optimize_plan,
     build_update_plan,
@@ -3252,3 +3256,240 @@ class TestDoctorConfigLoaderPreservesMCPOverride:
         assert len(cfg.doctor.mcp_servers) == 1
         assert cfg.doctor.mcp_servers[0].name == "my-server"
         assert cfg.doctor.ignored_mcp_patterns == ["custom:*"]
+
+
+# v2.31.0: settings.json hook sanitisation after doctor runs.
+
+
+class TestSettingsHookDetector:
+    """SettingsHookDetector — parse settings.json + flag disallowed hooks."""
+
+    SAMPLE_SETTINGS = {
+        "permissions": {"allow": []},
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [
+                        {"type": "command", "command": "node /home/u/.claude/hooks/gsd-read-guard.js"},
+                    ],
+                },
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {"type": "command", "command": "bash /home/u/.claude/hooks/lint.sh"},
+                    ],
+                },
+            ],
+            "PostToolUse": [
+                {
+                    "matcher": "Edit|Write",
+                    "hooks": [
+                        {"type": "command", "command": "python3 /home/u/.claude/hooks/quality-gate.py"},
+                        {"type": "command", "command": "node /home/u/.claude/hooks/gsd-context-monitor.js"},
+                    ],
+                },
+            ],
+        },
+    }
+
+    def test_finds_match_in_nested_hook(self, tmp_path: Path):
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps(self.SAMPLE_SETTINGS))
+        det = SettingsHookDetector(sp)
+        violations = det.get_violations(["gsd-read-guard.js"])
+        assert len(violations) == 1
+        v = violations[0]
+        assert v.event == "PreToolUse"
+        assert v.matcher == "Write|Edit"
+        assert "gsd-read-guard.js" in v.command
+        assert v.matched_pattern == "gsd-read-guard.js"
+
+    def test_finds_match_in_multi_hook_entry(self, tmp_path: Path):
+        """Two hooks in the same `hooks:` array — the matching one must surface."""
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps(self.SAMPLE_SETTINGS))
+        det = SettingsHookDetector(sp)
+        violations = det.get_violations(["gsd-context-monitor.js"])
+        assert len(violations) == 1
+        assert violations[0].event == "PostToolUse"
+
+    def test_empty_disallowed_returns_empty(self, tmp_path: Path):
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps(self.SAMPLE_SETTINGS))
+        det = SettingsHookDetector(sp)
+        assert det.get_violations([]) == []
+
+    def test_no_settings_file_returns_empty(self, tmp_path: Path):
+        det = SettingsHookDetector(tmp_path / "missing.json")
+        assert det.get_violations(["foo"]) == []
+
+    def test_malformed_json_returns_empty(self, tmp_path: Path):
+        sp = tmp_path / "settings.json"
+        sp.write_text("{ not json")
+        det = SettingsHookDetector(sp)
+        assert det.get_violations(["foo"]) == []
+
+    def test_no_hooks_block_returns_empty(self, tmp_path: Path):
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps({"permissions": {"allow": []}}))
+        det = SettingsHookDetector(sp)
+        assert det.get_violations(["anything"]) == []
+
+    def test_multiple_patterns_only_first_match_reported(self, tmp_path: Path):
+        """If two patterns match the same command, only the first is reported."""
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps(self.SAMPLE_SETTINGS))
+        det = SettingsHookDetector(sp)
+        violations = det.get_violations(["gsd-read-guard.js", "read-guard"])
+        # Both patterns match the SAME command — break-after-first means 1.
+        assert len(violations) == 1
+
+
+class TestSettingsHookCleanupAction:
+    """_settings_hook_cleanup_actions — build action; run python_callable."""
+
+    def test_no_violations_means_no_action(self, tmp_path: Path):
+        actions = _settings_hook_cleanup_actions([], settings_path=tmp_path / "settings.json")
+        assert actions == []
+
+    def test_action_removes_matching_hook_entry(self, tmp_path: Path):
+        sp = tmp_path / "settings.json"
+        sp.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Write|Edit",
+                                "hooks": [
+                                    {"command": "node /a/gsd-read-guard.js"},
+                                    {"command": "node /a/keep-me.js"},
+                                ],
+                            }
+                        ],
+                    }
+                }
+            )
+        )
+        violation = SettingsHookViolation(
+            event="PreToolUse",
+            matcher="Write|Edit",
+            command="node /a/gsd-read-guard.js",
+            matched_pattern="gsd-read-guard.js",
+        )
+        actions = _settings_hook_cleanup_actions([violation], settings_path=sp)
+        assert len(actions) == 1
+        assert actions[0].runnable is True
+        assert actions[0].python_callable is not None
+
+        actions[0].python_callable()
+        result = json.loads(sp.read_text())
+        commands = [h["command"] for h in result["hooks"]["PreToolUse"][0]["hooks"]]
+        assert commands == ["node /a/keep-me.js"]  # other hook survives
+
+    def test_action_drops_empty_outer_entry(self, tmp_path: Path):
+        """If removal empties the inner `hooks:` list, the outer entry goes too."""
+        sp = tmp_path / "settings.json"
+        sp.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"matcher": "X", "hooks": [{"command": "node /a/bad.js"}]},
+                            {"matcher": "Y", "hooks": [{"command": "node /a/good.js"}]},
+                        ]
+                    }
+                }
+            )
+        )
+        v = SettingsHookViolation(
+            event="PreToolUse", matcher="X", command="node /a/bad.js", matched_pattern="bad.js"
+        )
+        actions = _settings_hook_cleanup_actions([v], settings_path=sp)
+        actions[0].python_callable()
+        result = json.loads(sp.read_text())
+        entries = result["hooks"]["PreToolUse"]
+        assert len(entries) == 1
+        assert entries[0]["matcher"] == "Y"
+
+    def test_action_drops_empty_event_key(self, tmp_path: Path):
+        """If removal empties the event entirely, the event key is dropped."""
+        sp = tmp_path / "settings.json"
+        sp.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"matcher": "X", "hooks": [{"command": "node /a/bad.js"}]},
+                        ],
+                        "PostToolUse": [
+                            {"matcher": "Z", "hooks": [{"command": "node /a/keep.js"}]},
+                        ],
+                    }
+                }
+            )
+        )
+        v = SettingsHookViolation(
+            event="PreToolUse", matcher="X", command="node /a/bad.js", matched_pattern="bad.js"
+        )
+        actions = _settings_hook_cleanup_actions([v], settings_path=sp)
+        actions[0].python_callable()
+        result = json.loads(sp.read_text())
+        assert "PreToolUse" not in result["hooks"]
+        assert "PostToolUse" in result["hooks"]
+
+    def test_action_writes_backup(self, tmp_path: Path):
+        sp = tmp_path / "settings.json"
+        original = json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": "/a/bad"}]}]}})
+        sp.write_text(original)
+        v = SettingsHookViolation(event="PreToolUse", matcher=None, command="/a/bad", matched_pattern="bad")
+        actions = _settings_hook_cleanup_actions([v], settings_path=sp)
+        actions[0].python_callable()
+        # Find the bak-* sibling.
+        backups = list(tmp_path.glob("settings.json.bak-*"))
+        assert len(backups) == 1
+        assert backups[0].read_text() == original
+
+    def test_action_is_idempotent(self, tmp_path: Path):
+        """Running the python_callable twice yields the same end state."""
+        sp = tmp_path / "settings.json"
+        sp.write_text(
+            json.dumps(
+                {"hooks": {"PreToolUse": [{"hooks": [{"command": "/a/bad"}, {"command": "/a/keep"}]}]}}
+            )
+        )
+        v = SettingsHookViolation(event="PreToolUse", matcher=None, command="/a/bad", matched_pattern="bad")
+        actions = _settings_hook_cleanup_actions([v], settings_path=sp)
+        actions[0].python_callable()
+        first_state = sp.read_text()
+        actions[0].python_callable()
+        second_state = sp.read_text()
+        assert first_state == second_state
+
+
+class TestDoctorConfigDisallowedHooks:
+    """Loader regression: doctor.disallowed_hooks must survive merge."""
+
+    def test_override_loads(self, tmp_path: Path):
+        import yaml as _yaml
+
+        from sccs.config.loader import load_config
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            _yaml.dump(
+                {
+                    "repository": {"path": str(tmp_path)},
+                    "sync_categories": {},
+                    "doctor": {"disallowed_hooks": ["gsd-read-guard.js"]},
+                }
+            )
+        )
+        cfg = load_config(config_path)
+        assert cfg.doctor.effective_disallowed_hooks() == ["gsd-read-guard.js"]
+
+    def test_default_is_empty(self):
+        from sccs.doctor.schema import DoctorConfig
+
+        assert DoctorConfig().effective_disallowed_hooks() == []

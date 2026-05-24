@@ -1527,6 +1527,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign:
         NpxToolDetector,
         PathPrefixDetector,
         PermissionDetector,
+        SettingsHookDetector,
         StatusLineDetector,
     )
     from sccs.doctor.state import DoctorStateManager
@@ -1536,9 +1537,11 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign:
     permission_specs = doctor_cfg.effective_permission_checks()
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
     status_line_specs = doctor_cfg.effective_status_line_checks()
+    disallowed_hooks = doctor_cfg.effective_disallowed_hooks()
     state = state_manager or DoctorStateManager()
     claude_cli_status = ClaudeCliDetector().get_status()
     plugin_detector = ClaudePluginDetector()
+    settings_hook_detector = SettingsHookDetector()
 
     result = {
         "node": NodeDetector().get_status(doctor_cfg.min_node_major),
@@ -1555,6 +1558,8 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign:
         "status_lines": StatusLineDetector(smart_required=_is_statusline_sync_enabled()).get_statuses(
             status_line_specs
         ),
+        "settings_hook_violations": settings_hook_detector.get_violations(disallowed_hooks),
+        "settings_path": settings_hook_detector.settings_path,
     }
 
     if include_foreign:
@@ -1664,6 +1669,8 @@ def doctor_install(ctx: click.Context, yes: bool) -> None:
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
         status_lines=statuses.get("status_lines"),
+        settings_hook_violations=statuses.get("settings_hook_violations"),
+        settings_path=statuses.get("settings_path"),
     )
 
     if plan.is_empty():
@@ -1706,6 +1713,8 @@ def doctor_update(ctx: click.Context, yes: bool) -> None:
         bundled_skills=statuses.get("bundled_skills"),
         browser_bundles=statuses.get("browser_bundles"),
         status_lines=statuses.get("status_lines"),
+        settings_hook_violations=statuses.get("settings_hook_violations"),
+        settings_path=statuses.get("settings_path"),
     )
 
     if plan.is_empty():
@@ -1767,6 +1776,8 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
         path_prefixes=statuses.get("path_prefixes"),
         marketplaces=statuses.get("marketplaces"),
         status_lines=statuses.get("status_lines"),
+        settings_hook_violations=statuses.get("settings_hook_violations"),
+        settings_path=statuses.get("settings_path"),
         strict=strict,
     )
 
