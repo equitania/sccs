@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.29.1 (24.05.2026)
+
+### Fixed
+- **Config loader silently dropped user-supplied `doctor:` overrides.** `_merge_with_defaults()` in `sccs/config/loader.py` had merge branches for every top-level `SccsConfig` field except `doctor`. A user that added a `doctor:` block to `~/.config/sccs/config.yaml` (e.g. to remove a plugin from `DEFAULT_CLAUDE_PLUGINS` by setting `doctor.plugins:` to a smaller list) saw the entire block disappear before Pydantic validation, so every DoctorConfig field fell back to its bundled default. Real-world impact: after a setup audit removed `claude-mem` from a user's Claude Code install, the user's `doctor.plugins:` override could not actually prevent `sccs doctor install/update` from reinstalling it. The loader now passes the user's `doctor:` block through verbatim — `DoctorConfig` already handles partial overrides via its own field defaults, so no merge gymnastics are needed at the loader layer.
+
+### Tests
+- `test_load_config_preserves_doctor_override` in `tests/test_config.py::TestConfigLoader` writes a sample config with `doctor.min_node_major` and `doctor.plugins` set, reloads it, and asserts both values survive the loader pipeline.
+
 ## Version 2.29.0 (11.05.2026)
 
 ### Added

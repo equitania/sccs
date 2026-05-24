@@ -102,6 +102,29 @@ class TestConfigLoader:
         with pytest.raises(FileNotFoundError):
             load_config(temp_dir / "nonexistent.yaml")
 
+    def test_load_config_preserves_doctor_override(self, temp_dir: Path, sample_config: dict):
+        """User-supplied `doctor:` blocks must survive _merge_with_defaults.
+
+        Regression for a bug where _merge_with_defaults silently dropped the
+        entire `doctor` key because it had no merge branch — the resulting
+        DoctorConfig fell back to its bundled defaults and every user
+        override (plugins, npx_tools, permission_checks, …) was ignored.
+        """
+        sample_config["doctor"] = {
+            "min_node_major": 22,
+            "plugins": [
+                {"name": "skill-creator", "marketplace": "claude-plugins-official"},
+            ],
+        }
+        config_path = temp_dir / "doctor-override.yaml"
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(sample_config, f, default_flow_style=False)
+
+        config = load_config(config_path)
+        assert config.doctor.min_node_major == 22
+        assert config.doctor.plugins is not None
+        assert [p.name for p in config.doctor.plugins] == ["skill-creator"]
+
     def test_save_config(self, temp_dir: Path, sample_config: dict):
         """Test saving configuration."""
         config = SccsConfig.model_validate(sample_config)

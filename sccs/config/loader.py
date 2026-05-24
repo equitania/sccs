@@ -280,6 +280,15 @@ def _merge_with_defaults(data: dict) -> dict:
     if "output" in data:
         result["output"] = {**result["output"], **data["output"]}
 
+    # `doctor` is fully optional in DEFAULT_CONFIG (DoctorConfig has its own
+    # default_factory), so we pass the user's block through verbatim. Without
+    # this branch, user-supplied `doctor:` overrides were silently dropped —
+    # all DoctorConfig fields fell back to their bundled defaults and a user
+    # that set `doctor.plugins:` to replace the plugin list would see no
+    # effect at all (the override never reached the Pydantic model).
+    if "doctor" in data:
+        result["doctor"] = data["doctor"]
+
     return result
 
 
