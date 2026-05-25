@@ -1,5 +1,15 @@
 # Release Notes
 
+## Version 2.32.1 (25.05.2026)
+
+### Fixed
+- **Linux system-npm permission gap (`npm-bin-global` check).** On a system-wide npm install, `npm root -g` is `/usr/lib/node_modules` (lib) but `npm install -g` ALSO symlinks the CLI binary into `<prefix>/bin` (e.g. `/usr/bin`). The doctor only gated installs on the lib dir, so after `sudo chown -R <uid> /usr/lib/node_modules` the permission check passed but `npm install -g @playwright/cli@latest` still died with `EACCES` on the `/usr/bin/playwright-cli` symlink. A new `npm-bin-global` permission check (resolved via `<npm config get prefix>/bin`, simple writability — never recursively scanned or chowned) now gates the npx install on the bin dir too, so the failure is surfaced as a manual block before the install runs instead of as a raw npm crash.
+- **Misleading chown advice for system npm prefixes.** The npm-permission manual block offered Option B (`sudo chown` of the global root) even when the prefix was a system directory (`/usr`). Chowning `/usr/lib/node_modules` alone is the trap that caused the incident — it leaves `/usr/bin` root-owned — and chowning `/usr/bin` is dangerous. Option B is now suppressed for any npm dir outside `$HOME` (joining the existing multi-user suppression); only the user-local prefix (`~/.npm-global`, which relocates BOTH lib and bin under home) is recommended, with an explicit system-dir warning. `_npm_root_global_fix_block` → `_npm_global_fix_block` (now also handles the bin dir).
+- **CI red on Linux since v2.29.0.** `TestStatusLineAutoFix::test_auto_fix_idempotent_for_cellar` asserted the second detector pass produced zero actions, but the stale-Cellar auto-fix rewrites the command to `/opt/homebrew/bin/node` — which only exists on macOS Homebrew hosts. On Linux CI that path is missing, so the second pass correctly emitted a `missing_binary` manual block, failing the assertion. The test now asserts the idempotency invariant precisely: no auto-fix (in-process `python_callable` action) is re-triggered, tolerating a platform-dependent `missing_binary` block.
+
+### Tests
+- 8 new tests in `tests/test_doctor.py` (`TestNpmBinGlobalPermission`): default check present, skipped when npm missing, unwritable → not ok, writable/nonexistent → ok, system-path block recommends user prefix only, failing bin check gates the npx install. Plus `TestNpmRootGlobalPermission::test_system_npm_root_suppresses_chown_option` and a renamed home-relative two-option test. The multi-user tests adopt the `_npm_global_fix_block` name.
+
 ## Version 2.32.0 (25.05.2026)
 
 ### Added

@@ -139,6 +139,26 @@ DEFAULT_PERMISSION_CHECKS: list[PermissionCheckSpec] = [
             "prefix or `sudo chown` so doctor can manage tools without sudo."
         ),
     ),
+    # Resolved at check-time via `<npm config get prefix>/bin`. Closes the gap
+    # behind the Linux system-npm incident: `npm install -g` ALSO symlinks the
+    # CLI binary into `<prefix>/bin` (e.g. /usr/bin). Chowning only the global
+    # root (/usr/lib/node_modules) passes the npm-root-global check but the
+    # install still dies with EACCES on the /usr/bin symlink. This separate
+    # writability check gates the install on the bin dir too — and its manual
+    # block steers system prefixes to a user-local prefix (chowning /usr/bin is
+    # unsafe). Simple writability only: never recursively scanned or chowned.
+    PermissionCheckSpec(
+        path="npm bin -g",
+        path_kind="npm-bin-global",
+        label="npm global bin dir",
+        purpose=(
+            "`npm install -g` symlinks CLI binaries here (e.g. playwright-cli). "
+            "System-wide npm puts this at /usr/bin (root-owned) — the binary "
+            "symlink then fails with EACCES even after the global root is "
+            "chowned. Fix with a user-local prefix (~/.npm-global) which "
+            "relocates BOTH the lib and bin dirs under your home."
+        ),
+    ),
 ]
 
 # PATH-prefix checks: directories that must be on $PATH for downstream

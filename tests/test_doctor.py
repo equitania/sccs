@@ -1888,10 +1888,51 @@ class TestNpmRootGlobalPermission:
         assert statuses[0].ok is True
         assert statuses[0].resolved_path == str(tmp_path)
 
-    def test_root_owned_npm_root_triggers_manual_block_with_two_options(self, monkeypatch, tmp_path):
-        # Simulate root ownership by stubbing PermissionStatus to look bad.
-        # The manual block must contain BOTH fix options (npm prefix +
-        # sudo chown) so the user can pick whichever fits their setup.
+    def test_home_owned_npm_root_triggers_manual_block_with_two_options(self, monkeypatch, tmp_path):
+        # Root-owned npm root UNDER the user's home (e.g. ~/.npm-global chowned
+        # to root by a stray `sudo npm`). Here `sudo chown` IS safe and complete
+        # (the sibling bin dir is also under home), so BOTH options must show.
+        import sccs.doctor.installer as installer_mod
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        home_root = str(Path.home() / ".npm-global" / "lib" / "node_modules")
+        spec = PermissionCheckSpec(
+            path="npm root -g",
+            path_kind="npm-root-global",
+            label="npm global install dir",
+            purpose="`npm install -g` writes here",
+        )
+        bad_status = PermissionStatus(
+            spec=spec,
+            exists=True,
+            is_user_owned=False,
+            is_writable=False,
+            expected_uid=1000,
+            expected_gid=1000,
+            resolved_path=home_root,
+            offending_paths=[home_root + "/some-pkg"],
+        )
+        actions = installer_mod._permission_actions([bad_status])
+        assert len(actions) == 1
+        block = actions[0].manual_block or ""
+        # Both fix options must be present for a home-relative path
+        assert "npm config set prefix ~/.npm-global" in block
+        assert f"sudo chown -R 1000:1000 {home_root}" in block
+        # PATH advice for both bash/zsh and fish must be present
+        assert 'export PATH="$HOME/.npm-global/bin:$PATH"' in block
+        assert "set -gx PATH $HOME/.npm-global/bin $PATH" in block
+        # mkdir for lib/ + bin/ — guards against the ENOENT-on-first-npx
+        # quirk we hit on Debian 13 right after `npm config set prefix`.
+        assert "mkdir -p ~/.npm-global/lib ~/.npm-global/bin" in block
+        assert actions[0].runnable is False  # manual only — never run by SCCS
+
+    def test_system_npm_root_suppresses_chown_option(self):
+        # System path (/usr/lib/node_modules, NOT under $HOME): `sudo chown` of
+        # the lib dir alone is the TRAP — it leaves the sibling bin dir
+        # (/usr/bin) root-owned and `npm install -g` still fails on the binary
+        # symlink. Option B must be suppressed; only the user-local prefix
+        # (Option A) is offered, with an explicit system-dir warning.
         import sccs.doctor.installer as installer_mod
         from sccs.doctor.detectors import PermissionStatus
         from sccs.doctor.schema import PermissionCheckSpec
@@ -1913,18 +1954,12 @@ class TestNpmRootGlobalPermission:
             offending_paths=["/usr/lib/node_modules/some-pkg"],
         )
         actions = installer_mod._permission_actions([bad_status])
-        assert len(actions) == 1
         block = actions[0].manual_block or ""
-        # Both fix options must be present
-        assert "npm config set prefix ~/.npm-global" in block
-        assert "sudo chown -R 1000:1000 /usr/lib/node_modules" in block
-        # PATH advice for both bash/zsh and fish must be present
-        assert 'export PATH="$HOME/.npm-global/bin:$PATH"' in block
-        assert "set -gx PATH $HOME/.npm-global/bin $PATH" in block
-        # mkdir for lib/ + bin/ — guards against the ENOENT-on-first-npx
-        # quirk we hit on Debian 13 right after `npm config set prefix`.
-        assert "mkdir -p ~/.npm-global/lib ~/.npm-global/bin" in block
-        assert actions[0].runnable is False  # manual only — never run by SCCS
+        assert "npm config set prefix ~/.npm-global" in block  # Option A present
+        # The actual chown COMMAND must be gone (the prose may mention sudo chown
+        # to explain *why* it's unsafe).
+        assert "sudo chown -R" not in block
+        assert "system director" in block.lower()  # explanatory warning
 
     def test_literal_path_keeps_simple_chown_block(self, tmp_path):
         # Regression: literal paths (e.g. ~/.npm) must keep their old single-
@@ -1985,6 +2020,123 @@ class TestResolveNpmRootGlobal:
         fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="\n", stderr="")
         monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **kw: fake_proc)
         assert _resolve_npm_root_global() is None
+
+
+# --------------------------------------------------------------------------- #
+# v2.32.1 — npm global BIN dir writability (Linux system-npm symlink EACCES)  #
+# --------------------------------------------------------------------------- #
+
+
+class TestNpmBinGlobalPermission:
+    """Catches the gap behind the Linux system-npm incident: `npm install -g`
+    also symlinks the CLI binary into `<prefix>/bin` (e.g. /usr/bin). Chowning
+    only `npm root -g` (/usr/lib/node_modules) passes the old check but the
+    install still dies with EACCES on the /usr/bin symlink. A dedicated
+    `npm-bin-global` permission check closes that gap.
+    """
+
+    def test_default_includes_npm_bin_global_check(self):
+        from sccs.doctor.defaults import DEFAULT_PERMISSION_CHECKS
+
+        bin_specs = [c for c in DEFAULT_PERMISSION_CHECKS if c.path_kind == "npm-bin-global"]
+        assert len(bin_specs) == 1
+        assert bin_specs[0].path == "npm bin -g"
+
+    def test_skipped_when_npm_missing(self, monkeypatch):
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        monkeypatch.setattr("sccs.doctor.detectors._resolve_npm_prefix_bin", lambda: None)
+        spec = PermissionCheckSpec(path="npm bin -g", path_kind="npm-bin-global", label="npm bin", purpose="...")
+        statuses = PermissionDetector().get_statuses([spec])
+        assert statuses[0].ok is True
+        assert statuses[0].skipped_reason is not None
+        assert "npm not on PATH" in statuses[0].skipped_reason
+
+    def test_unwritable_npm_bin_is_not_ok(self, monkeypatch, tmp_path):
+        # Simulate /usr/bin: exists but not writable by current uid.
+        import sccs.doctor.detectors as det_mod
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        bin_dir = tmp_path / "usr-bin"
+        bin_dir.mkdir()
+        monkeypatch.setattr(det_mod, "_resolve_npm_prefix_bin", lambda: str(bin_dir))
+        monkeypatch.setattr(det_mod.os, "access", lambda p, mode: False)
+        spec = PermissionCheckSpec(path="npm bin -g", path_kind="npm-bin-global", label="npm bin", purpose="...")
+        statuses = PermissionDetector().get_statuses([spec])
+        assert statuses[0].ok is False
+        assert statuses[0].resolved_path == str(bin_dir)
+
+    def test_writable_npm_bin_is_ok(self, monkeypatch, tmp_path):
+        import sccs.doctor.detectors as det_mod
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        bin_dir = tmp_path / "home-bin"
+        bin_dir.mkdir()
+        monkeypatch.setattr(det_mod, "_resolve_npm_prefix_bin", lambda: str(bin_dir))
+        spec = PermissionCheckSpec(path="npm bin -g", path_kind="npm-bin-global", label="npm bin", purpose="...")
+        statuses = PermissionDetector().get_statuses([spec])
+        assert statuses[0].ok is True
+
+    def test_nonexistent_npm_bin_is_ok(self, monkeypatch, tmp_path):
+        # User-local prefix not created yet — npm creates the bin dir on first
+        # install, so a missing dir must NOT be flagged.
+        import sccs.doctor.detectors as det_mod
+        from sccs.doctor.detectors import PermissionDetector
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        missing = tmp_path / "not-yet" / "bin"
+        monkeypatch.setattr(det_mod, "_resolve_npm_prefix_bin", lambda: str(missing))
+        spec = PermissionCheckSpec(path="npm bin -g", path_kind="npm-bin-global", label="npm bin", purpose="...")
+        statuses = PermissionDetector().get_statuses([spec])
+        assert statuses[0].ok is True
+
+    def test_bin_global_block_recommends_user_prefix_only_for_system_path(self):
+        # /usr/bin is a system path → user-local prefix advice, no chown.
+        import sccs.doctor.installer as installer_mod
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        spec = PermissionCheckSpec(
+            path="npm bin -g", path_kind="npm-bin-global", label="npm global bin dir", purpose="..."
+        )
+        bad = PermissionStatus(
+            spec=spec,
+            exists=True,
+            is_user_owned=True,
+            is_writable=False,
+            expected_uid=1000,
+            expected_gid=1000,
+            resolved_path="/usr/bin",
+        )
+        actions = installer_mod._permission_actions([bad])
+        assert len(actions) == 1
+        block = actions[0].manual_block or ""
+        assert "npm config set prefix ~/.npm-global" in block
+        assert "sudo chown -R" not in block
+
+    def test_failing_npm_bin_gates_npx_install(self):
+        # The bin-writability failure must gate the npx install (install_deps),
+        # not just post_install — otherwise `npm install -g` runs and dies.
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.installer import _blocking_components
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        spec = PermissionCheckSpec(path="npm bin -g", path_kind="npm-bin-global", label="npm bin", purpose="...")
+        bad = PermissionStatus(
+            spec=spec,
+            exists=True,
+            is_user_owned=True,
+            is_writable=False,
+            expected_uid=1000,
+            expected_gid=1000,
+            resolved_path="/usr/bin",
+        )
+        install_deps, use_deps = _blocking_components([bad], None)
+        assert "perm:npm bin -g" in install_deps
+        assert "perm:npm bin -g" in use_deps
 
 
 # --------------------------------------------------------------------------- #
@@ -2722,7 +2874,7 @@ class TestMultiUserPermission:
 
     def test_multi_user_block_suppresses_option_b(self):
         from sccs.doctor.detectors import PermissionStatus
-        from sccs.doctor.installer import _npm_root_global_fix_block
+        from sccs.doctor.installer import _npm_global_fix_block
         from sccs.doctor.schema import PermissionCheckSpec
 
         st = PermissionStatus(
@@ -2741,7 +2893,7 @@ class TestMultiUserPermission:
             offending_paths=["/usr/local/lib/node_modules/bun"],
             foreign_uids={1001, 1002},
         )
-        block = "\n".join(_npm_root_global_fix_block(st))
+        block = "\n".join(_npm_global_fix_block(st))
         # Option B suppressed; warning + uid list visible; Option A still there.
         assert "DO NOT" in block.upper() or "do not" in block.lower()
         assert "1001" in block and "1002" in block
@@ -2756,10 +2908,15 @@ class TestMultiUserPermission:
             assert not line.startswith("sudo chown -R"), f"runnable chown leaked: {line}"
 
     def test_single_admin_block_keeps_both_options(self):
+        # Single-admin AND home-relative npm root: chown is safe + complete here
+        # (the sibling bin dir is also under home), so both options stay.
+        # NOTE: for a SYSTEM root (/usr/...) Option B is now suppressed even for
+        # a single admin — see test_system_npm_root_suppresses_chown_option.
         from sccs.doctor.detectors import PermissionStatus
-        from sccs.doctor.installer import _npm_root_global_fix_block
+        from sccs.doctor.installer import _npm_global_fix_block
         from sccs.doctor.schema import PermissionCheckSpec
 
+        home_root = str(Path.home() / ".npm-global" / "lib" / "node_modules")
         st = PermissionStatus(
             spec=PermissionCheckSpec(
                 path="npm root -g",
@@ -2772,11 +2929,11 @@ class TestMultiUserPermission:
             is_writable=False,
             expected_uid=1009,
             expected_gid=1011,
-            resolved_path="/usr/lib/node_modules",
-            offending_paths=["/usr/lib/node_modules/foo"],
+            resolved_path=home_root,
+            offending_paths=[home_root + "/foo"],
             foreign_uids={0},  # root only — single admin host
         )
-        block = "\n".join(_npm_root_global_fix_block(st))
+        block = "\n".join(_npm_global_fix_block(st))
         assert "Option A" in block
         assert "Option B" in block
 
@@ -3040,9 +3197,14 @@ class TestStatusLineAutoFix:
         assert len(first) == 1
         first[0].python_callable()
 
-        # Second pass: no more stale_cellar state → no auto-fix action.
+        # Second pass: the stale_cellar auto-fix (an in-process python_callable
+        # action) must NOT be re-triggered — that is the idempotency guarantee.
+        # We assert on the absence of an auto-fix rather than `== []` because
+        # the rewrite target (/opt/homebrew/bin/node) only exists on macOS
+        # Homebrew hosts; on Linux CI it surfaces as a `missing_binary` manual
+        # block, which is a correct, different finding — not a re-applied fix.
         second = _status_line_actions(StatusLineDetector().get_statuses([spec]))
-        assert second == []  # idempotent at the action layer
+        assert all(a.python_callable is None for a in second)  # no auto-fix re-triggered
 
     def test_missing_binary_emits_manual_block(self, tmp_path, monkeypatch):
         from sccs.doctor.detectors import StatusLineDetector

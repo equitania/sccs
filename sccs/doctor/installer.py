@@ -175,57 +175,97 @@ def _diagnose_hint(text: str) -> str | None:
     return None
 
 
-def _npm_root_global_fix_block(st: PermissionStatus) -> list[str]:
-    """Two-option remediation for an unwritable `npm root -g` directory.
+def _is_home_path(resolved: str) -> bool:
+    """True when `resolved` lives under the current user's home directory.
+
+    Distinguishes a user-local npm prefix (`~/.npm-global` — `sudo chown` is
+    safe AND complete because the sibling bin dir is also under home) from a
+    system prefix (`/usr` — chowning the lib dir alone leaves `/usr/bin`
+    root-owned, and chowning `/usr/bin` is dangerous). On systems without a
+    resolvable home (unlikely) we conservatively treat the path as a system
+    path so we never recommend chowning it.
+    """
+    try:
+        return Path(resolved).expanduser().resolve().is_relative_to(Path.home().resolve())
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def _user_local_prefix_lines(header: str) -> list[str]:
+    """Option-A remediation snippet: relocate npm's global prefix under $HOME.
+
+    A single user-local prefix fixes BOTH the global root (lib/node_modules)
+    AND the bin dir in one move — which is exactly why it's the only correct
+    fix for a system prefix. Pre-creates lib/ and bin/ to dodge the
+    ENOENT-on-first-npx quirk (npx lstat's `<prefix>/lib` before the first
+    `npm install -g` would have created it — real Debian incident).
+    """
+    return [
+        header,
+        "mkdir -p ~/.npm-global/lib ~/.npm-global/bin",
+        "npm config set prefix ~/.npm-global",
+        "# Add to your shell rc (bash/zsh):",
+        'export PATH="$HOME/.npm-global/bin:$PATH"',
+        "# Or fish:",
+        "set -gx PATH $HOME/.npm-global/bin $PATH",
+    ]
+
+
+def _npm_global_fix_block(st: PermissionStatus) -> list[str]:
+    """Remediation for an unwritable npm global dir (root `lib` OR `bin`).
 
     Real Debian incident: system npm installs land in /usr/lib/node_modules/
     (root-owned), so `npm install -g @playwright/cli@latest` dies with EACCES.
-    Doctor surfaces this *before* the npm action runs and offers both:
+    Doctor surfaces this *before* the npm action runs.
 
-      * Preferred: user-local npm prefix (`~/.npm-global`) — no sudo required,
-        survives `apt install nodejs` cleanly.
-      * Alternative: `sudo chown -R` of the existing global root — quicker
-        but reverts on every system-wide nodejs upgrade.
+    Option B (`sudo chown`) is offered ONLY when it is both safe and complete,
+    i.e. when the directory lives under the user's home (a user-controlled
+    `~/.npm-global` chowned to root by a stray `sudo npm`). It is suppressed:
 
-    Multi-user-aware (v2.28.1): when the offending paths are owned by ≥2
-    distinct non-root users (terminal-server case), Option B would silently
-    destroy the other users' installs. The block then suppresses Option B
-    in favor of a strong Option-A-only recommendation with an explicit
-    "do NOT chown" warning.
+      * on multi-user systems (v2.28.1): ≥2 distinct non-root owners → chown
+        would destroy the other users' installs.
+      * on system prefixes (v2.32.1): `/usr/lib/node_modules` and `/usr/bin`
+        have different parents. Chowning only the lib dir is the trap that
+        bit the original report — the bin-dir symlink still fails with EACCES;
+        and chowning `/usr/bin` is dangerous. The user-local prefix (Option A)
+        relocates BOTH dirs under home in one step.
     """
     lines: list[str] = []
     lines.append(f"# Detected: {st.resolved_path} is not writable by uid {st.expected_uid}.")
+
     if st.is_multi_user:
         # Foreign uids → list them so the user can verify the heuristic.
         foreign = sorted(uid for uid in st.foreign_uids if uid not in (0, st.expected_uid))
         uid_list = ", ".join(str(u) for u in foreign)
         lines.append(f"# WARNING: directory owned by multiple non-root users (uids: {uid_list}).")
         lines.append("# This is a multi-user / terminal-server setup. `sudo chown -R` would")
-        lines.append("# DESTROY the other users' installs — DO NOT use Option B here.")
+        lines.append("# DESTROY the other users' installs — DO NOT chown here.")
         lines.append("# Use Option A (user-local prefix) only.")
         lines.append("")
-        lines.append("# Option A (REQUIRED on multi-user systems): user-local npm prefix, no sudo")
-        lines.append("mkdir -p ~/.npm-global/lib ~/.npm-global/bin")
-        lines.append("npm config set prefix ~/.npm-global")
-        lines.append("# Add to your shell rc (bash/zsh):")
-        lines.append('export PATH="$HOME/.npm-global/bin:$PATH"')
-        lines.append("# Or fish:")
-        lines.append("set -gx PATH $HOME/.npm-global/bin $PATH")
+        lines.extend(
+            _user_local_prefix_lines("# Option A (REQUIRED on multi-user systems): user-local npm prefix, no sudo")
+        )
         return lines
+
+    if not _is_home_path(st.resolved_path):
+        # System prefix (e.g. /usr): chowning the lib dir alone is incomplete
+        # (the bin dir stays root-owned) and chowning /usr/bin is unsafe.
+        lines.append(f"# WARNING: {st.resolved_path} is a system directory (npm prefix outside your home).")
+        lines.append("# `sudo chown` here is unsafe AND incomplete: npm uses BOTH")
+        lines.append("# <prefix>/lib/node_modules AND <prefix>/bin (e.g. /usr/bin). Chowning one")
+        lines.append("# is not enough, and chowning /usr/bin breaks your system.")
+        lines.append("# Use Option A (user-local prefix) only — it relocates BOTH dirs under $HOME.")
+        lines.append("")
+        lines.extend(
+            _user_local_prefix_lines("# Option A (REQUIRED for system npm prefixes): user-local npm prefix, no sudo")
+        )
+        return lines
+
     lines.append("# Two fixes — pick ONE:")
     lines.append("")
-    lines.append("# Option A (recommended): user-local npm prefix, no sudo")
-    # Pre-create lib/ and bin/ — without them, the next `npx -y <tool>` will
-    # die with ENOENT on `<prefix>/lib` because npx lstat's the dir before the
-    # first npm install -g would have created it. Real Debian incident.
-    lines.append("mkdir -p ~/.npm-global/lib ~/.npm-global/bin")
-    lines.append("npm config set prefix ~/.npm-global")
-    lines.append("# Add to your shell rc (bash/zsh):")
-    lines.append('export PATH="$HOME/.npm-global/bin:$PATH"')
-    lines.append("# Or fish:")
-    lines.append("set -gx PATH $HOME/.npm-global/bin $PATH")
+    lines.extend(_user_local_prefix_lines("# Option A (recommended): user-local npm prefix, no sudo"))
     lines.append("")
-    lines.append("# Option B: take ownership of the system npm root")
+    lines.append("# Option B: take ownership of the npm dir (safe here — it's under your home)")
     lines.append(st.fix_command or f"sudo chown -R {st.expected_uid}:{st.expected_gid} {st.resolved_path}")
     return lines
 
@@ -248,8 +288,8 @@ def _permission_actions(statuses: list[PermissionStatus]) -> list[DoctorAction]:
             block_lines.append(f"# Examples of foreign-owned entries under {st.resolved_path}:")
             for p in st.offending_paths[:3]:
                 block_lines.append(f"#   {p}")
-        if st.spec.path_kind == "npm-root-global":
-            block_lines.extend(_npm_root_global_fix_block(st))
+        if st.spec.path_kind in ("npm-root-global", "npm-bin-global"):
+            block_lines.extend(_npm_global_fix_block(st))
         else:
             if not st.is_writable:
                 block_lines.append(f"# Path is not writable by uid {st.expected_uid}.")
@@ -1056,7 +1096,12 @@ def _blocking_components(
     use: list[str] = []
     if permissions:
         for perm_st in permissions:
-            if not perm_st.ok and perm_st.spec.path_kind == "npm-root-global":
+            # Both the global root (lib/node_modules) and the global bin dir
+            # must be writable for `npm install -g` to succeed: it writes the
+            # package under root and symlinks the binary under bin. Gating on
+            # both closes the Linux system-npm gap where chowning only the root
+            # passed the check but the bin-dir symlink still failed with EACCES.
+            if not perm_st.ok and perm_st.spec.path_kind in ("npm-root-global", "npm-bin-global"):
                 comp = f"perm:{perm_st.spec.path}"
                 install.append(comp)
                 use.append(comp)

@@ -991,6 +991,20 @@ class PermissionDetector:
                     skipped_reason="npm not on PATH — cannot resolve global root",
                 )
             resolved = npm_root
+        elif spec.path_kind == "npm-bin-global":
+            npm_bin = _resolve_npm_prefix_bin()
+            if npm_bin is None:
+                return PermissionStatus(
+                    spec=spec,
+                    exists=False,
+                    is_user_owned=True,
+                    is_writable=True,
+                    expected_uid=-1,
+                    expected_gid=-1,
+                    resolved_path=spec.path,
+                    skipped_reason="npm not on PATH — cannot resolve global bin",
+                )
+            resolved = npm_bin
         else:
             resolved = os.path.expanduser(spec.path)
 
@@ -1018,6 +1032,23 @@ class PermissionDetector:
                 exists=False,
                 is_user_owned=True,
                 is_writable=True,
+                expected_uid=current_uid,
+                expected_gid=current_gid,
+                resolved_path=resolved,
+            )
+
+        if spec.path_kind == "npm-bin-global":
+            # Simple writability check only. We never recursively scan or chown
+            # a global bin dir (e.g. /usr/bin): the only safe fix for a
+            # non-writable system bin dir is a user-local npm prefix, surfaced
+            # by the manual block. A recursive scan here would also be wasteful
+            # (hundreds of unrelated /usr/bin entries) and misleadingly suggest
+            # chowning system binaries.
+            return PermissionStatus(
+                spec=spec,
+                exists=True,
+                is_user_owned=True,
+                is_writable=os.access(path, os.W_OK),
                 expected_uid=current_uid,
                 expected_gid=current_gid,
                 resolved_path=resolved,

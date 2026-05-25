@@ -206,7 +206,7 @@ class NpxToolSpec(BaseModel):
         return v
 
 
-_VALID_PATH_KINDS = {"literal", "npm-root-global"}
+_VALID_PATH_KINDS = {"literal", "npm-root-global", "npm-bin-global"}
 _VALID_PATH_PREFIX_KINDS = {"npm-prefix-bin"}
 _VALID_STATUS_LINE_REQUIRED_MODES = {"always", "never", "smart"}
 
@@ -233,9 +233,12 @@ class PermissionCheckSpec(BaseModel):
     path_kind: str = Field(
         default="literal",
         description=(
-            "How `path` is interpreted: 'literal' (filesystem path, default) "
-            "or 'npm-root-global' (resolved at check-time via `npm root -g`). "
-            "For non-literal kinds the `path` field is a display label only."
+            "How `path` is interpreted: 'literal' (filesystem path, default), "
+            "'npm-root-global' (resolved at check-time via `npm root -g`), or "
+            "'npm-bin-global' (resolved via `<npm config get prefix>/bin` — the "
+            "dir `npm install -g` symlinks CLI binaries into; simple writability "
+            "check, never recursively scanned or chowned). For non-literal kinds "
+            "the `path` field is a display label only."
         ),
     )
     label: str = Field(
