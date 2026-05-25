@@ -22,15 +22,26 @@ DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
     PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
     PluginSpec(name="superpowers", marketplace="claude-plugins-official"),
     PluginSpec(name="frontend-design", marketplace="claude-plugins-official"),
+    # frontend-design also ships from the anthropics/claude-code marketplace.
+    # Listing both marketplaces keeps a locally-disabled `@claude-code-plugins`
+    # copy from being flagged foreign by `optimize --strict`.
+    PluginSpec(name="frontend-design", marketplace="claude-code-plugins"),
+    # Official language-server plugins. Common in real setups — managed so the
+    # foreign-drift detector treats them as legitimate, not removal candidates.
+    PluginSpec(name="gopls-lsp", marketplace="claude-plugins-official"),
+    PluginSpec(name="pyright-lsp", marketplace="claude-plugins-official"),
+    PluginSpec(name="rust-analyzer-lsp", marketplace="claude-plugins-official"),
+    PluginSpec(name="swift-lsp", marketplace="claude-plugins-official"),
+    PluginSpec(name="typescript-lsp", marketplace="claude-plugins-official"),
+    PluginSpec(
+        name="superpowers-developing-for-claude-code",
+        marketplace="superpowers-marketplace",
+        marketplace_source="obra/superpowers-marketplace",
+    ),
     PluginSpec(
         name="context-mode",
         marketplace="context-mode",
         marketplace_source="mksglu/context-mode",
-    ),
-    PluginSpec(
-        name="claude-mem",
-        marketplace=None,
-        marketplace_source="thedotmack/claude-mem",
     ),
 ]
 
@@ -226,3 +237,13 @@ DEFAULT_IGNORED_MCP_PATTERNS: list[str] = [
 # have. Users opt in by populating `doctor.disallowed_hooks:` in their
 # own `~/.config/sccs/config.yaml`.
 DEFAULT_DISALLOWED_HOOKS: list[str] = []
+
+# Substring patterns identifying hook commands the sanitiser must NEVER
+# strip, even when a `disallowed_hooks` pattern would otherwise match them.
+# Protection wins over removal. Real driver: GSD (get-shit-done-cc) re-injects
+# its hooks (gsd-read-guard.js, …) into settings.json on every run; removing
+# them breaks the plugin. Matching is plain substring, symmetric with
+# `disallowed_hooks`, and `gsd-` mirrors the `managed.py` convention
+# (`get-shit-done-cc: ["gsd-*"]`). Users may override via
+# `doctor.protected_hooks:` in `~/.config/sccs/config.yaml`.
+DEFAULT_PROTECTED_HOOKS: list[str] = ["gsd-"]

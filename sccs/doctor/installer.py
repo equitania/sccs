@@ -81,6 +81,14 @@ class DoctorAction:
     # refresh — if it fails, the install still has a chance and we don't
     # want a red FAILED row for an opportunistic step.
     soft_fail: bool = False
+    # Safe, idempotent maintenance (plugin install/update, npx refresh,
+    # marketplace add/update, post-install + bundled-skill follow-ups) runs
+    # without a confirm prompt so `sccs doctor update` / `optimize` keep the
+    # host current unattended. Destructive actions (foreign plugin/MCP
+    # uninstall, settings.json hook removal, settings.json statusline rewrite)
+    # keep auto_confirm=False — the global delete-safety rule still applies and
+    # the user is asked every time. `--yes` remains the blanket override.
+    auto_confirm: bool = False
 
     def is_print_only(self) -> bool:
         return not self.runnable or (self.cmd is None and self.python_callable is None)
@@ -537,6 +545,7 @@ def _plugin_install_actions(
                     runnable=True,
                     component=f"plugin-marketplace:{spec.marketplace}:update",
                     soft_fail=True,
+                    auto_confirm=True,  # prerequisite for unattended install
                 )
             )
         if spec.marketplace_source:
@@ -546,6 +555,7 @@ def _plugin_install_actions(
                     cmd=["claude", "plugin", "marketplace", "add", spec.marketplace_source],
                     runnable=True,
                     component=f"plugin:{spec.name}",
+                    auto_confirm=True,  # prerequisite for unattended install
                 )
             )
         actions.append(
@@ -555,6 +565,7 @@ def _plugin_install_actions(
                 runnable=True,
                 component=f"plugin:{spec.name}",
                 depends_on_components=extra_deps,
+                auto_confirm=True,  # safe maintenance — runs unattended
             )
         )
     return actions
@@ -604,6 +615,7 @@ def _plugin_update_actions(statuses: list[PluginStatus]) -> list[DoctorAction]:
                 cmd=cmd,
                 runnable=True,
                 component=f"plugin:{st.spec.name}",
+                auto_confirm=True,  # safe maintenance — runs unattended
             )
         )
     return actions
@@ -632,6 +644,7 @@ def _post_install_actions(
             runnable=True,
             component=f"npx:{spec.name}:post:{i}",
             depends_on_components=extra_deps,
+            auto_confirm=True,  # follow-up of an auto-confirmed npx maintenance step
         )
         for i, cmd in enumerate(spec.post_install)
     ]
@@ -656,6 +669,7 @@ def _bundled_skill_action(
         component=f"npx:{spec.name}:skill",
         depends_on_components=extra_deps,
         python_callable=_run_skill_sync,
+        auto_confirm=True,  # follow-up of an auto-confirmed npx maintenance step
     )
 
 
@@ -714,6 +728,7 @@ def _npx_install_actions(
                 depends_on_components=install_deps,
                 npx_tool_name=spec.name if spec.detect_via_state else None,
                 npx_invocation=list(spec.invocation) if spec.detect_via_state else None,
+                auto_confirm=True,  # safe maintenance — runs unattended
             )
         )
         post_deps = (install_component, *use_deps)
@@ -749,6 +764,7 @@ def _npx_update_actions(
                 depends_on_components=install_deps,
                 npx_tool_name=spec.name if spec.detect_via_state else None,
                 npx_invocation=list(spec.invocation) if spec.detect_via_state else None,
+                auto_confirm=True,  # safe maintenance — runs unattended (GSD refresh)
             )
         )
         post_deps = (install_component, *use_deps)
@@ -812,6 +828,7 @@ def _browser_bundle_repair_actions(
                     runnable=True,
                     component=f"npx:{st.spec.name}:browser:{bundle}",
                     depends_on_components=use_deps,
+                    auto_confirm=True,  # follow-up of an auto-confirmed npx maintenance step
                 )
             )
     return actions
@@ -1329,7 +1346,7 @@ def execute_plan(
                 blocked_components.add(action.component)
             continue
 
-        if not _confirm(action.label, assume_yes=assume_yes):
+        if not _confirm(action.label, assume_yes=assume_yes or action.auto_confirm):
             result.outcomes.append(ActionOutcome(label=action.label, status="skipped", detail="user declined"))
             continue
 

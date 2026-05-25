@@ -1538,6 +1538,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign:
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
     status_line_specs = doctor_cfg.effective_status_line_checks()
     disallowed_hooks = doctor_cfg.effective_disallowed_hooks()
+    protected_hooks = doctor_cfg.effective_protected_hooks()
     state = state_manager or DoctorStateManager()
     claude_cli_status = ClaudeCliDetector().get_status()
     plugin_detector = ClaudePluginDetector()
@@ -1558,7 +1559,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign:
         "status_lines": StatusLineDetector(smart_required=_is_statusline_sync_enabled()).get_statuses(
             status_line_specs
         ),
-        "settings_hook_violations": settings_hook_detector.get_violations(disallowed_hooks),
+        "settings_hook_violations": settings_hook_detector.get_violations(disallowed_hooks, protected=protected_hooks),
         "settings_path": settings_hook_detector.settings_path,
     }
 

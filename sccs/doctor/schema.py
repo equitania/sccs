@@ -576,6 +576,18 @@ class DoctorConfig(BaseModel):
             "to make that intent visible in the config."
         ),
     )
+    protected_hooks: list[str] | None = Field(
+        default=None,
+        description=(
+            "Substring patterns identifying hook commands the sanitiser must "
+            "NEVER strip, even when a `disallowed_hooks` pattern would match. "
+            "Protection wins over removal. Real driver: GSD (get-shit-done-cc) "
+            "re-injects its hooks (gsd-read-guard.js, …) into settings.json on "
+            "every run and they must be preserved — removing them breaks the "
+            "plugin. None keeps DEFAULT_PROTECTED_HOOKS (['gsd-']); pass [] "
+            "explicitly to disable protection entirely."
+        ),
+    )
 
     def effective_plugins(self) -> list[PluginSpec]:
         """Return plugins to check: override or default, plus extras."""
@@ -620,6 +632,12 @@ class DoctorConfig(BaseModel):
         from sccs.doctor.defaults import DEFAULT_DISALLOWED_HOOKS
 
         return list(self.disallowed_hooks) if self.disallowed_hooks is not None else list(DEFAULT_DISALLOWED_HOOKS)
+
+    def effective_protected_hooks(self) -> list[str]:
+        """Return substring patterns identifying hooks the sanitiser must never strip."""
+        from sccs.doctor.defaults import DEFAULT_PROTECTED_HOOKS
+
+        return list(self.protected_hooks) if self.protected_hooks is not None else list(DEFAULT_PROTECTED_HOOKS)
 
     def effective_path_prefix_checks(self) -> list[PathPrefixCheckSpec]:
         """Return PATH-prefix checks to run: override or default, plus extras."""

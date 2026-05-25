@@ -1286,15 +1286,27 @@ class SettingsHookDetector:
     def settings_path(self) -> Path:
         return self._settings_path
 
-    def get_violations(self, disallowed: list[str]) -> list[SettingsHookViolation]:
+    def get_violations(
+        self,
+        disallowed: list[str],
+        *,
+        protected: list[str] | None = None,
+    ) -> list[SettingsHookViolation]:
         """Return one violation per hook entry that matches any disallowed pattern.
 
         Empty `disallowed` list short-circuits to []. Missing or malformed
         settings.json also returns [] — the detector is read-only and the
         cleanup-action layer makes the same safety call when it runs.
+
+        `protected` wins over `disallowed`: a command whose string contains any
+        protected substring is never reported, even if a disallowed pattern
+        also matches. This is the hard guard that keeps GSD hooks
+        (DEFAULT_PROTECTED_HOOKS = ['gsd-']) from ever being stripped, even if a
+        user accidentally re-adds them to `disallowed_hooks`.
         """
         if not disallowed:
             return []
+        protected = protected or []
         if not self._settings_path.is_file():
             return []
         try:
@@ -1324,6 +1336,10 @@ class SettingsHookDetector:
                         continue
                     cmd = inner.get("command")
                     if not isinstance(cmd, str):
+                        continue
+                    # Protected hooks (e.g. GSD) are never reported — protection
+                    # wins over removal regardless of disallowed matches.
+                    if any(p and p in cmd for p in protected):
                         continue
                     for pattern in disallowed:
                         if pattern and pattern in cmd:

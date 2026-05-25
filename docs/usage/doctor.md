@@ -165,7 +165,20 @@ doctor:
     - path: ~/my-fragile-cache
       label: my cache
       purpose: my tool writes here
+  # v2.31.0 — Hooks aus settings.json nach jedem Pass entfernen (Default: leer)
+  disallowed_hooks:
+    - some-unwanted-hook.js
+  # v2.32.0 — geschützte Hooks NIE entfernen, auch wenn disallowed matcht
+  # (protection wins). Default ['gsd-'] bewahrt GSD-Hooks. [] deaktiviert Schutz.
+  protected_hooks:
+    - "gsd-"
 ```
+
+**Auto-Update (v2.32.0):** `sccs doctor update` und `optimize` führen sichere
+Wartung (Plugin-Install/Update, npx-Refresh inkl. GSD, Marketplace-,
+Bundled-Skill- und Browser-Schritte) **ohne Nachfrage** aus. Destruktive Actions
+(Foreign-Plugin/MCP-`uninstall`, Hook-Entfernung, Statusline-Rewrite) bleiben
+confirm-pflichtig; `--yes` überspringt auch diese.
 
 Querverweise: [cli-reference.md](cli-reference.md), [sync.md](sync.md), [categories.md](categories.md), [../architecture.md](../architecture.md)
 
@@ -332,6 +345,19 @@ doctor:
     - path: ~/my-fragile-cache
       label: my cache
       purpose: my tool writes here
+  # v2.31.0 — strip hooks from settings.json after every pass (default: empty)
+  disallowed_hooks:
+    - some-unwanted-hook.js
+  # v2.32.0 — protected hooks are NEVER stripped, even if disallowed matches
+  # (protection wins). Default ['gsd-'] preserves GSD hooks. [] disables it.
+  protected_hooks:
+    - "gsd-"
 ```
+
+**Auto-update (v2.32.0):** `sccs doctor update` and `optimize` run safe
+maintenance (plugin install/update, npx refresh incl. GSD, marketplace,
+bundled-skill and browser steps) **without prompting**. Destructive actions
+(foreign plugin/MCP `uninstall`, hook removal, statusline rewrite) keep their
+confirm gate; `--yes` skips those too.
 
 See also: [cli-reference.md](cli-reference.md), [sync.md](sync.md), [categories.md](categories.md), [../architecture.md](../architecture.md)

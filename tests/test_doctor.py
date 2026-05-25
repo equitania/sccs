@@ -372,12 +372,18 @@ def _make_status_set(
     tools_present=None,
     plugin_found_marketplace=None,
     plugin_detection_source=None,
+    specs=None,
 ):
     """Build the four detector results for plan tests.
 
     ``plugin_found_marketplace`` and ``plugin_detection_source`` accept
     ``{plugin_name: value}`` dicts so individual tests can simulate the
     alternative-marketplace and missing-marketplace cases.
+
+    ``specs`` overrides the plugin specs the status set is built from
+    (defaults to DEFAULT_CLAUDE_PLUGINS). Tests needing a plugin shape no
+    longer present in the defaults (e.g. a bare marketplace=None plugin)
+    pass their own list.
     """
     from sccs.doctor.detectors import (
         ClaudeCliStatus,
@@ -390,6 +396,7 @@ def _make_status_set(
     tools_present = tools_present if tools_present is not None else {}
     plugin_found_marketplace = plugin_found_marketplace or {}
     plugin_detection_source = plugin_detection_source or {}
+    specs = specs if specs is not None else DEFAULT_CLAUDE_PLUGINS
 
     plugin_statuses = [
         PluginStatus(
@@ -401,7 +408,7 @@ def _make_status_set(
             ),
             found_marketplace=plugin_found_marketplace.get(spec.name),
         )
-        for spec in DEFAULT_CLAUDE_PLUGINS
+        for spec in specs
     ]
     tool_statuses = [
         NpxToolStatus(
@@ -461,7 +468,11 @@ class TestBuildInstallPlan:
 
     def test_install_plan_registers_marketplace_then_plugin(self):
         cfg = DoctorConfig()
-        s = _make_status_set()  # everything missing by default
+        # claude-mem shape (marketplace=None + marketplace_source) is no longer
+        # a default; inject it so this test still exercises the register-then-
+        # install ordering for source-based plugins.
+        claude_mem = PluginSpec(name="claude-mem", marketplace=None, marketplace_source="thedotmack/claude-mem")
+        s = _make_status_set(specs=[claude_mem])  # everything missing by default
         plan = build_install_plan(cfg, **s)
         # Find claude-mem related actions (it has marketplace_source)
         claude_mem_actions = [a for a in plan.actions if "claude-mem" in a.label]
@@ -475,7 +486,9 @@ class TestBuildInstallPlan:
 class TestBuildUpdatePlan:
     def test_update_plan_includes_installed_plugins(self):
         cfg = DoctorConfig()
+        claude_mem = PluginSpec(name="claude-mem", marketplace=None, marketplace_source="thedotmack/claude-mem")
         s = _make_status_set(
+            specs=[claude_mem],
             plugins_present={"claude-mem": True},
             plugin_found_marketplace={"claude-mem": "thedotmack"},
         )
@@ -488,7 +501,9 @@ class TestBuildUpdatePlan:
         marketplace `claude plugin list` actually reports — `claude plugin
         update claude-mem` (bare) returns 'Plugin not found'."""
         cfg = DoctorConfig()
+        claude_mem = PluginSpec(name="claude-mem", marketplace=None, marketplace_source="thedotmack/claude-mem")
         s = _make_status_set(
+            specs=[claude_mem],
             plugins_present={"claude-mem": True},
             plugin_found_marketplace={"claude-mem": "thedotmack"},
         )
@@ -527,9 +542,11 @@ class TestBuildUpdatePlan:
         is available, surface the bare name and let `claude plugin update`
         produce its own error message rather than silently dropping the action."""
         cfg = DoctorConfig()
-        # claude-mem default has marketplace=None; simulate `claude plugin list`
-        # output that contained no @marketplace token at all (bare-name match).
+        # A marketplace=None plugin; simulate `claude plugin list` output that
+        # contained no @marketplace token at all (bare-name match).
+        claude_mem = PluginSpec(name="claude-mem", marketplace=None, marketplace_source="thedotmack/claude-mem")
         s = _make_status_set(
+            specs=[claude_mem],
             plugins_present={"claude-mem": True},
             plugin_found_marketplace={},
             plugin_detection_source={"claude-mem": "bare"},
@@ -605,6 +622,68 @@ class TestExecutePlan:
             result = execute_plan(plan, assume_yes=True, print_fn=lambda _: None)
         assert len(result.failed) == 1
         assert result.failed[0].detail == "upstream error"
+
+    def test_auto_confirm_runs_without_prompt(self):
+        """auto_confirm=True bypasses questionary even when assume_yes=False."""
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="update plugin foo",
+                    cmd=["claude", "plugin", "update", "foo"],
+                    runnable=True,
+                    component="plugin:foo",
+                    auto_confirm=True,
+                )
+            ]
+        )
+        fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok\n", stderr="")
+        with (
+            patch("sccs.doctor.installer._run", return_value=fake_proc) as run_mock,
+            patch("sccs.doctor.installer.questionary") as q_mock,
+        ):
+            result = execute_plan(plan, assume_yes=False, print_fn=lambda _: None)
+        run_mock.assert_called_once()
+        q_mock.confirm.assert_not_called()  # never prompted
+        assert len(result.executed) == 1
+
+    def test_destructive_action_still_prompts_when_not_auto(self):
+        """auto_confirm=False (e.g. uninstall) keeps the confirm gate; declining skips it."""
+        from sccs.doctor.installer import DoctorAction, InstallPlan
+
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(
+                    label="update plugin foo",
+                    cmd=["claude", "plugin", "update", "foo"],
+                    runnable=True,
+                    component="plugin:foo",
+                    auto_confirm=True,
+                ),
+                DoctorAction(
+                    label="REMOVE foreign plugin bar@baz",
+                    cmd=["claude", "plugin", "uninstall", "bar@baz"],
+                    runnable=True,
+                    component="plugin:bar",
+                    auto_confirm=False,
+                ),
+            ]
+        )
+        fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok\n", stderr="")
+        # questionary.confirm(...).ask() → False: the user declines the uninstall.
+        with (
+            patch("sccs.doctor.installer._run", return_value=fake_proc) as run_mock,
+            patch("sccs.doctor.installer.questionary") as q_mock,
+        ):
+            q_mock.confirm.return_value.ask.return_value = False
+            result = execute_plan(plan, assume_yes=False, print_fn=lambda _: None)
+        # Only the auto_confirm update ran; the uninstall was prompted and declined.
+        run_mock.assert_called_once()
+        q_mock.confirm.assert_called_once()
+        assert len(result.executed) == 1
+        assert len(result.skipped) == 1
+        assert result.skipped[0].detail == "user declined"
 
 
 # --------------------------------------------------------------------------- #
@@ -3048,6 +3127,35 @@ class TestForeignPluginDetection:
         assert ("frontend-design", "claude-code-plugins") not in names
         assert ("frontend-design", "claude-plugins-official") not in names
 
+    # Real host snapshot (2026-05-25): all 11 managed plugins, claude-mem gone.
+    HOST_SAMPLE = """Installed plugins:
+
+  ❯ context-mode@context-mode
+  ❯ frontend-design@claude-code-plugins
+  ❯ frontend-design@claude-plugins-official
+  ❯ gopls-lsp@claude-plugins-official
+  ❯ pyright-lsp@claude-plugins-official
+  ❯ rust-analyzer-lsp@claude-plugins-official
+  ❯ skill-creator@claude-plugins-official
+  ❯ superpowers-developing-for-claude-code@superpowers-marketplace
+  ❯ superpowers@claude-plugins-official
+  ❯ swift-lsp@claude-plugins-official
+  ❯ typescript-lsp@claude-plugins-official
+"""
+
+    def test_default_plugins_flag_nothing_foreign_on_real_host(self):
+        """The canonical DEFAULT_CLAUDE_PLUGINS allowlist must cover this host."""
+        detector = ClaudePluginDetector(raw_output=self.HOST_SAMPLE)
+        foreign = detector.get_foreign_plugins(list(DEFAULT_CLAUDE_PLUGINS))
+        assert foreign == []
+
+    def test_claude_mem_is_foreign_against_defaults(self):
+        """claude-mem was dropped from defaults — a stray install must be flagged."""
+        sample = self.HOST_SAMPLE + "  ❯ claude-mem@thedotmack\n"
+        detector = ClaudePluginDetector(raw_output=sample)
+        foreign = detector.get_foreign_plugins(list(DEFAULT_CLAUDE_PLUGINS))
+        assert {(f.name, f.marketplace) for f in foreign} == {("claude-mem", "thedotmack")}
+
     def test_scope_is_extracted(self):
         detector = ClaudePluginDetector(raw_output=self.SAMPLE)
         foreign = detector.get_foreign_plugins([])
@@ -3342,6 +3450,31 @@ class TestSettingsHookDetector:
         # Both patterns match the SAME command — break-after-first means 1.
         assert len(violations) == 1
 
+    def test_protected_hook_is_never_reported(self, tmp_path: Path):
+        """A GSD hook matched by disallowed must be skipped when protected matches."""
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps(self.SAMPLE_SETTINGS))
+        det = SettingsHookDetector(sp)
+        violations = det.get_violations(["gsd-read-guard.js"], protected=["gsd-"])
+        assert violations == []
+
+    def test_protection_is_selective(self, tmp_path: Path):
+        """Protection skips only protected commands; others still surface."""
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps(self.SAMPLE_SETTINGS))
+        det = SettingsHookDetector(sp)
+        # gsd-read-guard.js is protected; lint.sh is not.
+        violations = det.get_violations(["gsd-read-guard.js", "lint.sh"], protected=["gsd-"])
+        assert len(violations) == 1
+        assert "lint.sh" in violations[0].command
+
+    def test_without_protection_gsd_hook_is_reported(self, tmp_path: Path):
+        """Counter-check: no protection list → GSD hook is a violation."""
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps(self.SAMPLE_SETTINGS))
+        det = SettingsHookDetector(sp)
+        assert len(det.get_violations(["gsd-read-guard.js"])) == 1
+
 
 class TestSettingsHookCleanupAction:
     """_settings_hook_cleanup_actions — build action; run python_callable."""
@@ -3484,3 +3617,35 @@ class TestDoctorConfigDisallowedHooks:
         from sccs.doctor.schema import DoctorConfig
 
         assert DoctorConfig().effective_disallowed_hooks() == []
+
+
+class TestDoctorConfigProtectedHooks:
+    """protected_hooks default + override — GSD hooks must be guarded."""
+
+    def test_default_protects_gsd(self):
+        from sccs.doctor.schema import DoctorConfig
+
+        assert DoctorConfig().effective_protected_hooks() == ["gsd-"]
+
+    def test_explicit_empty_disables_protection(self):
+        from sccs.doctor.schema import DoctorConfig
+
+        assert DoctorConfig(protected_hooks=[]).effective_protected_hooks() == []
+
+    def test_override_loads(self, tmp_path: Path):
+        import yaml as _yaml
+
+        from sccs.config.loader import load_config
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            _yaml.dump(
+                {
+                    "repository": {"path": str(tmp_path)},
+                    "sync_categories": {},
+                    "doctor": {"protected_hooks": ["gsd-", "my-hook.js"]},
+                }
+            )
+        )
+        cfg = load_config(config_path)
+        assert cfg.doctor.effective_protected_hooks() == ["gsd-", "my-hook.js"]

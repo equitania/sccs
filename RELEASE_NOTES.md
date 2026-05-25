@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 2.32.0 (25.05.2026)
+
+### Added
+- **GSD-hook protection (`doctor.protected_hooks`).** Hard guard that the settings.json sanitiser must never strip a protected hook, even when a `disallowed_hooks` pattern would match it — protection wins over removal. Real driver: the v2.31.0 sanitiser was built to fight GSD's settings.json re-injection, but GSD (`get-shit-done-cc`) hooks must be **preserved** — removing them breaks the plugin. `DEFAULT_PROTECTED_HOOKS = ["gsd-"]` (mirrors the `managed.py` `gsd-*` convention) so GSD hooks survive every doctor pass out of the box. `SettingsHookDetector.get_violations(disallowed, *, protected=...)` skips any command containing a protected substring. Override via `doctor.protected_hooks:`; pass `[]` to disable protection entirely.
+- **`auto_confirm` on safe maintenance actions.** `sccs doctor update` / `optimize` now run plugin install/update, npx-tool refresh (incl. GSD), marketplace add/update, and bundled-skill / browser post-install steps **without per-action confirm prompts** — installed plugins stay current unattended, replacing GSD's sluggish built-in update. Destructive actions (foreign plugin/MCP `uninstall`, settings.json hook removal, statusline rewrite) keep `auto_confirm=False` and still prompt every time; `--yes` remains the blanket override. New `DoctorAction.auto_confirm` field; `execute_plan` honours `assume_yes or action.auto_confirm`.
+
+### Changed
+- **`DEFAULT_CLAUDE_PLUGINS` rewritten to the canonical official-ecosystem allowlist.** Dropped `claude-mem` (superseded by Claude Code's native auto-memory). Added the official language-server plugins (`gopls-lsp`, `pyright-lsp`, `rust-analyzer-lsp`, `swift-lsp`, `typescript-lsp` @claude-plugins-official), `superpowers-developing-for-claude-code@superpowers-marketplace` (source `obra/superpowers-marketplace`), and a second `frontend-design@claude-code-plugins` entry so a locally-disabled copy is not flagged foreign. `optimize --strict` no longer queues these legitimate plugins for removal; `claude-mem` is now correctly flagged as foreign if still installed.
+
+### Tests
+- 9 new tests in `tests/test_doctor.py`:
+  - `TestSettingsHookDetector` (3): protected hook never reported, protection is selective (non-protected siblings still surface), counter-check without protection.
+  - `TestForeignPluginDetection` (2): real-host snapshot flags nothing foreign against defaults; stray `claude-mem` flagged foreign.
+  - `TestExecutePlan` (2): `auto_confirm=True` runs without prompting questionary; `auto_confirm=False` still prompts and a declined uninstall is skipped while the auto update runs.
+  - `TestDoctorConfigProtectedHooks` (3): default protects `gsd-`, explicit `[]` disables protection, override survives loader merge.
+- `_make_status_set` gained an optional `specs=` parameter so plugin-plan tests decouple from the defaults (4 `claude-mem` fixtures migrated to injected synthetic specs).
+
 ## Version 2.31.0 (24.05.2026)
 
 ### Added

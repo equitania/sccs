@@ -4,7 +4,7 @@
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
-**Version:** 2.31.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
+**Version:** 2.32.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
 
 ---
 
@@ -20,6 +20,8 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 - 🩺 **System & Plugin Health-Check** (`sccs doctor`) für Node.js, `claude` CLI, Claude-Plugins, npm-Helper-Tools, Browser-Bundles und Filesystem-Permissions — mit gezielten Reparatur-Plänen → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🧹 **`sccs doctor optimize`** *(v2.30.0)* — Ein-Schuss-Optimierungslauf: install + update + Drift-Warnung für Plugins/MCP-Server außerhalb der Spec. Mit `--strict` werden Uninstall-Actions per Confirm gequeut.
 - 🔧 **`doctor.disallowed_hooks`** *(v2.31.0)* — Substring-Patterns entfernen unerwünschte Hooks aus `~/.claude/settings.json` nach jedem doctor-Pass (z.B. Hooks die von npx-Tools re-injiziert werden). Mit Backup, idempotent.
+- 🛡️ **`doctor.protected_hooks`** *(v2.32.0)* — harter Schutzwall (Default `gsd-`): geschützte Hooks werden NIE entfernt, auch wenn ein `disallowed_hooks`-Pattern matcht (*protection wins*). GSD-Hooks überleben jeden doctor-Pass.
+- ⚡ **Auto-Update sicherer Wartung** *(v2.32.0)* — `sccs doctor update`/`optimize` führt Plugin-Install/Update, npx-Refresh (inkl. GSD), Marketplace- und Bundled-Skill-Schritte ohne Nachfrage aus; destruktive Actions (Uninstall, Hook-Removal) bleiben confirm-pflichtig.
 - 📦 **Selektiver Export/Import** als ZIP-Archiv (Checkbox-Auswahl) für Kundendeployments → [docs/usage/transfer.md](docs/usage/transfer.md)
 - 🧠 **Memory Bridge** — file-basierter persistenter Kontext zwischen Claude Code (Terminal) und Claude.ai (Web), inklusive `sccs memory` CRUD-CLI → [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md)
 - 🪟 **Plattformübergreifend** macOS, Linux, Windows mit nativer PowerShell-7-Unterstützung und Fish→PowerShell-Konvertierung → [docs/usage/platforms.md](docs/usage/platforms.md)
@@ -97,6 +99,8 @@ SCCS is a YAML-configured, bidirectional synchronization tool for Claude Code fi
 - 🩺 **System & plugin health check** (`sccs doctor`) for Node.js, the `claude` CLI, Claude plugins, npm helper tools, browser bundles and filesystem permissions — with surgical repair plans → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🧹 **`sccs doctor optimize`** *(v2.30.0)* — one-shot optimisation pass: install + update + drift warning for plugins/MCP servers outside the spec. With `--strict`, uninstall actions are queued per confirm.
 - 🔧 **`doctor.disallowed_hooks`** *(v2.31.0)* — substring patterns strip unwanted hooks from `~/.claude/settings.json` after every doctor pass (e.g. hooks re-injected by npx tools). Backup-aware, idempotent.
+- 🛡️ **`doctor.protected_hooks`** *(v2.32.0)* — hard guard (default `gsd-`): protected hooks are NEVER stripped, even when a `disallowed_hooks` pattern matches (*protection wins*). GSD hooks survive every doctor pass.
+- ⚡ **Auto-update for safe maintenance** *(v2.32.0)* — `sccs doctor update`/`optimize` runs plugin install/update, npx refresh (incl. GSD), marketplace and bundled-skill steps without prompts; destructive actions (uninstall, hook removal) keep their confirm gate.
 - 📦 **Selective export/import** as ZIP archives (checkbox selection) for customer deployments → [docs/usage/transfer.md](docs/usage/transfer.md)
 - 🧠 **Memory Bridge** — file-based persistent context between Claude Code (terminal) and Claude.ai (web), including a full `sccs memory` CRUD CLI → [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md)
 - 🪟 **Cross-platform** macOS, Linux, Windows with native PowerShell 7 support and Fish→PowerShell conversion → [docs/usage/platforms.md](docs/usage/platforms.md)
