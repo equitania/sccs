@@ -1,276 +1,268 @@
-<!-- refreshed: 2026-05-11 -->
+<!-- refreshed: 2026-05-26 -->
 # Codebase Structure
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-26
 
 ## Directory Layout
 
 ```
-sccs/                            # Project root
-├── sccs/                        # Main package
-│   ├── __init__.py              # Version 2.28.1; lazy __getattr__ imports
-│   ├── __main__.py              # python -m sccs entry point
-│   ├── cli.py                   # All Click commands and groups (~1686 lines)
-│   ├── config/                  # Config load/validate/migrate subsystem
-│   │   ├── __init__.py          # Public API: load_config, adopt_new_categories, etc.
-│   │   ├── schema.py            # Pydantic models (SccsConfig, SyncCategory, RepositoryConfig…)
-│   │   ├── loader.py            # YAML I/O: load_config(), save_config(), validate_config_file()
-│   │   ├── defaults.py          # Default config YAML text; generate_default_config()
-│   │   └── migration.py        # MigrationStateManager, detect_new_categories(), get_categories_to_offer()
-│   ├── sync/                    # Bidirectional sync engine
-│   │   ├── __init__.py          # Exports SyncEngine, SyncResult
-│   │   ├── engine.py            # SyncEngine orchestrator; merges doctor excludes
-│   │   ├── category.py          # CategoryHandler: scan_items(), detect_changes(), execute_actions()
-│   │   ├── actions.py           # ActionType enum + SyncAction dataclass + execute_action()
-│   │   ├── item.py              # SyncItem dataclass; scan_local_items(), scan_repo_items()
-│   │   ├── state.py             # StateManager, SyncState, ItemState → .sync_state.yaml
-│   │   └── settings.py          # SettingsEnsure execution (JSON settings patching post-sync)
-│   ├── doctor/                  # System health check subsystem
-│   │   ├── __init__.py          # Empty (no public API; CLI imports directly)
-│   │   ├── schema.py            # Pydantic specs: PluginSpec, NpxToolSpec, BundledSkillSpec,
-│   │   │                        #   PermissionCheckSpec, PathPrefixCheckSpec, NodeInstallSpec, DoctorConfig
-│   │   ├── defaults.py          # DEFAULT_CLAUDE_PLUGINS, DEFAULT_NPX_TOOLS,
-│   │   │                        #   DEFAULT_PERMISSION_CHECKS, DEFAULT_PATH_PREFIX_CHECKS,
-│   │   │                        #   get_node_install_spec()
-│   │   ├── detectors.py         # Read-only status dataclasses + detector classes:
-│   │   │                        #   NodeDetector, ClaudeCliDetector, ClaudePluginDetector,
-│   │   │                        #   ClaudeMarketplaceDetector, NpxToolDetector,
-│   │   │                        #   PermissionDetector, PathPrefixDetector,
-│   │   │                        #   BundledSkillDetector, BrowserBundleDetector
-│   │   ├── installer.py         # DoctorAction dataclass; build_install_plan(),
-│   │   │                        #   build_update_plan(), execute_plan(), ExecuteResult
-│   │   ├── reporter.py          # render_doctor_report(), has_problems(), render_execute_result()
-│   │   ├── runner.py            # _run() subprocess sandbox; DoctorError;
-│   │   │                        #   run_claude_plugin_list(), run_claude_marketplace_list(),
-│   │   │                        #   run_node_version(), which()
-│   │   ├── state.py             # DoctorStateManager; NpxToolMark → .doctor_state.yaml
-│   │   └── managed.py           # get_doctor_managed_excludes(); DEFAULT_MANAGED_PATTERNS
-│   ├── config/                  # (see above)
-│   ├── git/                     # Git operations
-│   │   ├── __init__.py          # Exports commit, push, pull, stage_all, get_remote_status, has_uncommitted_changes
-│   │   ├── operations.py        # Git CLI wrappers (no shell=True; list[str] argv)
-│   │   └── resolve.py           # DivergenceStrategy enum, prompt_divergence_strategy(),
-│   │                            #   apply_divergence_strategy()
-│   ├── output/                  # Terminal rendering (Rich)
-│   │   ├── __init__.py          # Exports Console, show_diff
-│   │   ├── console.py           # Console class: print_sync_result(), print_status(),
-│   │   │                        #   print_categories_list(), print_integrations_status(),
-│   │   │                        #   resolve_conflict(), confirm()
-│   │   ├── diff.py              # show_diff() unified diff display
-│   │   └── merge.py             # interactive_merge(), edit_in_editor()
-│   ├── integrations/            # External tool integrations
-│   │   ├── __init__.py
-│   │   ├── detectors.py         # AntigravityDetector, ClaudeDesktopDetector
-│   │   ├── antigravity.py       # migrate_skills_to_prompts()
-│   │   └── claude_desktop.py    # register_trusted_folder()
-│   ├── transfer/                # ZIP export/import
-│   │   ├── __init__.py
-│   │   ├── exporter.py          # Exporter: scan_available_items(), export_to_zip()
-│   │   ├── importer.py          # Importer: load_manifest(), apply()
-│   │   ├── manifest.py          # TransferManifest Pydantic model
-│   │   └── ui.py                # interactive_export_selection(), interactive_import_selection()
-│   ├── convert/                 # Shell config conversion
-│   │   ├── __init__.py          # Exports FishToPwshConverter
-│   │   ├── fish_to_pwsh.py      # FishToPwshConverter: convert_directory(), ConversionReport
-│   │   ├── rules.py             # Fish → PowerShell conversion rules
-│   │   └── templates.py         # PowerShell output templates
-│   ├── docs/                    # Hub README generation
-│   │   ├── __init__.py
-│   │   └── generator.py         # DocsGenerator: generate(), render_readme(), DocsResult
-│   └── utils/                   # Shared low-level helpers
-│       ├── __init__.py
-│       ├── paths.py             # safe_copy(), atomic_write(), create_backup(),
-│       │                        #   find_files(), ensure_dir()
-│       ├── hashing.py           # hash_file(), hash_content() — SHA-256
-│       ├── platform.py          # get_current_platform(), is_shell_available(),
-│       │                        #   is_platform_match(), get_platform_skipped_categories()
-│       └── logging.py           # configure_logging(), get_logger()
-├── tests/                       # Test suite
-│   ├── conftest.py              # Pytest fixtures (tmp_path, mock configs, etc.)
-│   ├── test_cli.py
-│   ├── test_config.py
-│   ├── test_sync.py
-│   ├── test_doctor.py
-│   ├── test_git_operations.py
-│   ├── test_git_resolve.py
-│   ├── test_convert.py
-│   ├── test_transfer.py
-│   ├── test_integrations.py
-│   ├── test_migration.py
-│   ├── test_settings.py
-│   ├── test_merge.py
-│   ├── test_diff.py
-│   ├── test_console.py
-│   ├── test_hashing.py
-│   ├── test_platform.py
-│   ├── test_platform_utils.py
-│   ├── test_paths_atomic.py
-│   ├── test_paths_security.py
-│   ├── test_conflict_resolution.py
-│   ├── test_importer_security.py
-│   └── test_docs.py
-├── docs/                        # Project documentation (Markdown)
-│   └── usage/                   # Usage guides (sync.md, memory-bridge.md, etc.)
-├── .claude/                     # Claude Code local config
-│   ├── commands/                # Project-specific slash commands
-│   └── skills/                  # Project-specific skills
-├── .planning/                   # GSD planning artefacts
-│   └── codebase/                # Codebase map documents (this directory)
-├── pyproject.toml               # Single source of truth for deps, build, tools
-├── CLAUDE.md                    # Project instructions for Claude Code
-└── .worktrees/                  # Git worktrees for feature branches
-    └── memory-bridge/           # Inactive worktree (memory bridge feature)
+sccs/                          # Project root
+├── sccs/                      # Main Python package
+│   ├── __init__.py            # Version (2.32.1), lazy __getattr__ exports
+│   ├── __main__.py            # python -m sccs entry point
+│   ├── cli.py                 # Click CLI: all command groups (1812 lines)
+│   ├── config/                # Config loading, schema, migration
+│   │   ├── __init__.py        # Public config API exports
+│   │   ├── schema.py          # Pydantic models: SccsConfig, SyncCategory, SettingsEnsure
+│   │   ├── loader.py          # load_config(), save_config(), adopt_new_categories()
+│   │   ├── defaults.py        # Default YAML template string
+│   │   └── migration.py       # MigrationStateManager, detect_new_categories()
+│   ├── sync/                  # Sync engine subsystem
+│   │   ├── __init__.py        # Public sync API exports
+│   │   ├── engine.py          # SyncEngine — multi-category orchestrator
+│   │   ├── category.py        # CategoryHandler — single-category logic
+│   │   ├── item.py            # SyncItem dataclass + scan_items_for_category()
+│   │   ├── actions.py         # ActionType enum, SyncAction, execute_action()
+│   │   ├── state.py           # StateManager — hash/timestamp persistence
+│   │   └── settings.py        # ensure_settings() — JSON deep-merge
+│   ├── doctor/                # System health check subsystem
+│   │   ├── __init__.py        # Public doctor API exports
+│   │   ├── schema.py          # DoctorConfig, PluginSpec, NpxToolSpec, StatusLineCheckSpec, etc.
+│   │   ├── defaults.py        # DEFAULT_CLAUDE_PLUGINS, DEFAULT_NPX_TOOLS, DEFAULT_*_CHECKS
+│   │   ├── detectors.py       # Read-only detectors: NodeDetector, ClaudePluginDetector, etc.
+│   │   ├── installer.py       # DoctorAction, InstallPlan, build_*_plan(), execute_plan()
+│   │   ├── runner.py          # Subprocess execution: _run(), allowlisted heads, DoctorError
+│   │   ├── reporter.py        # render_doctor_report(), has_problems(), render_execute_result()
+│   │   ├── state.py           # DoctorStateManager — npx tool mark persistence
+│   │   └── managed.py         # DEFAULT_MANAGED_PATTERNS, get_doctor_managed_excludes()
+│   ├── git/                   # Git subprocess wrapper
+│   │   ├── __init__.py        # Public git API exports
+│   │   ├── operations.py      # commit, push, pull, fetch, stage, get_remote_status, etc.
+│   │   └── resolve.py         # DivergenceStrategy, prompt_divergence_strategy(), apply_divergence_strategy()
+│   ├── output/                # Rich console output
+│   │   ├── __init__.py        # Public output API exports
+│   │   ├── console.py         # Console class (Rich wrapper, tables, status, prompts)
+│   │   ├── diff.py            # show_diff(), generate_diff(), show_conflict()
+│   │   └── merge.py           # interactive_merge(), edit_in_editor(), DiffHunk
+│   ├── transfer/              # ZIP export/import
+│   │   ├── __init__.py        # Public transfer API exports
+│   │   ├── exporter.py        # Exporter class, scan/select/export to ZIP
+│   │   ├── importer.py        # Importer class, load manifest/select/apply
+│   │   ├── manifest.py        # ExportManifest, ManifestItem, serialize/deserialize
+│   │   └── ui.py              # interactive_export_selection(), interactive_import_selection()
+│   ├── integrations/          # External tool bridges
+│   │   ├── __init__.py        # Public integrations API exports
+│   │   ├── detectors.py       # AntigravityDetector, ClaudeDesktopDetector
+│   │   ├── antigravity.py     # migrate_skills_to_prompts()
+│   │   └── claude_desktop.py  # register_trusted_folder()
+│   ├── convert/               # Shell config converters
+│   │   ├── __init__.py        # Public convert API exports
+│   │   ├── fish_to_pwsh.py    # FishToPwshConverter, ConversionReport
+│   │   ├── rules.py           # Conversion rule definitions
+│   │   └── templates.py       # PowerShell output templates
+│   ├── docs/                  # Hub README generator
+│   │   ├── __init__.py        # Public docs API exports
+│   │   └── generator.py       # DocsGenerator, DocsResult, _discover_readmes()
+│   └── utils/                 # Cross-cutting utilities
+│       ├── __init__.py        # Public utils API exports
+│       ├── paths.py           # atomic_write, safe_copy, safe_delete, create_backup, find_files
+│       ├── hashing.py         # file_hash(), directory_hash(), get_mtime()
+│       ├── platform.py        # get_current_platform(), is_platform_match(), is_shell_available()
+│       └── logging.py         # configure_logging()
+├── tests/                     # pytest test suite (24 files)
+│   ├── conftest.py            # Shared fixtures
+│   ├── test_cli.py            # CLI command smoke tests
+│   ├── test_config.py         # Config load/save/validate
+│   ├── test_sync.py           # SyncEngine integration tests
+│   ├── test_doctor.py         # Doctor detectors/installer/reporter
+│   ├── test_settings.py       # ensure_settings() unit tests
+│   ├── test_transfer.py       # Export/import round-trip tests
+│   ├── test_paths_atomic.py   # atomic_write() tests
+│   ├── test_paths_security.py # Path traversal / security tests
+│   ├── test_importer_security.py # ZIP security (path traversal)
+│   ├── test_platform.py       # Platform detection tests
+│   ├── test_platform_utils.py # Platform utility helpers
+│   ├── test_merge.py          # Interactive merge hunk tests
+│   ├── test_diff.py           # Diff generation tests
+│   ├── test_convert.py        # Fish→PowerShell conversion tests
+│   ├── test_docs.py           # Hub README generation tests
+│   ├── test_integrations.py   # Antigravity/Claude Desktop detector tests
+│   ├── test_migration.py      # Category migration state tests
+│   ├── test_conflict_resolution.py # Conflict resolve flow tests
+│   ├── test_console.py        # Console output tests
+│   ├── test_git_operations.py # Git wrapper tests
+│   ├── test_git_resolve.py    # DivergenceStrategy tests
+│   ├── test_hashing.py        # Hash utility tests
+│   └── test_cli.py            # (CLI integration tests)
+├── docs/                      # User documentation
+│   └── usage/                 # Usage guides
+├── .planning/                 # GSD planning artifacts (not committed)
+│   ├── codebase/              # Codebase map documents (this file)
+│   └── phases/                # Implementation phase plans
+├── .claude/                   # Claude Code config for this project
+│   ├── commands/              # Project slash commands
+│   └── skills/                # Project skills
+├── .github/
+│   └── workflows/             # CI workflows
+├── pyproject.toml             # Package metadata, dependencies, tool config
+├── CLAUDE.md                  # Project guidance for Claude Code
+└── README.md                  # User documentation
 ```
 
 ## Directory Purposes
 
-**`sccs/` (package root):**
-- `__init__.py`: Version constant (`2.28.1`), lazy `__getattr__` for heavy imports
-- `__main__.py`: Enables `python -m sccs`; calls `main()` from `cli.py`
-- `cli.py`: Monolithic CLI module — all Click groups and command implementations live here. Functions `_collect_doctor_statuses()` and `_load_doctor_config()` are module-level helpers that aggregate detector calls before passing to installer/reporter.
-
 **`sccs/config/`:**
-- `schema.py`: All Pydantic config models. Import `SccsConfig` from here.
-- `loader.py`: `load_config()` returns `SccsConfig`; `load_raw_user_data()` returns raw dict for migration checks; `validate_config_file()` returns `(bool, list[str])`
-- `defaults.py`: `generate_default_config()` returns default YAML string (used by `sccs config init`)
-- `migration.py`: `detect_new_categories(raw_data)`, `get_categories_to_offer(raw_data, mgr)`, `MigrationStateManager` (persists to `~/.config/sccs/.migration_state.yaml`)
+- Purpose: YAML config load/save, Pydantic schema validation, new-category migration
+- Key files: `schema.py` (all Pydantic models), `loader.py` (file I/O), `migration.py` (migration state), `defaults.py` (default YAML template)
+- Config lives at: `~/.config/sccs/config.yaml`
 
 **`sccs/sync/`:**
-- `engine.py`: `SyncEngine` is instantiated per CLI invocation with `SccsConfig`. Calls `get_doctor_managed_excludes()` at init to merge into `effective_global_exclude`.
-- `category.py`: `CategoryHandler` holds one `SyncCategory` config + `StateManager`. `detect_changes()` returns `list[SyncAction]`. `execute_actions()` writes files.
-- `state.py`: `StateManager` loads/saves `~/.config/sccs/.sync_state.yaml`. Keys are `"category:item_name"`.
-- `settings.py`: `SettingsEnsurer.ensure()` patches JSON settings files post-sync (e.g. VS Code settings.json). Called by CategoryHandler when `SyncCategory.settings_ensure` is set.
+- Purpose: Core bidirectional file sync logic
+- Key files: `engine.py` (top-level orchestrator), `category.py` (per-category handler), `actions.py` (action execution), `state.py` (persistence)
+- State lives at: `~/.config/sccs/.sync_state.yaml`
 
 **`sccs/doctor/`:**
-- `schema.py`: Pydantic specs are the config-facing contract. All field validators enforce a security allowlist (`_SAFE_NAME_PATTERN`). `DoctorConfig.effective_*()` methods merge user overrides with bundled defaults.
-- `defaults.py`: Bundled baselines — hardcoded `DEFAULT_CLAUDE_PLUGINS` and `DEFAULT_NPX_TOOLS` (e.g. `get-shit-done-cc`, `@playwright/cli`). `get_node_install_spec(platform)` returns platform-specific `NodeInstallSpec`.
-- `detectors.py`: Each detector class has one or two public methods (`get_status()` or `get_statuses(specs)`). All return `@dataclass` instances — never raise on "not found", return status objects with `installed=False` / `available=False`.
-- `installer.py`: `DoctorAction` is the central abstraction. `build_install_plan()` inspects status objects and emits actions. `execute_plan()` processes them sequentially, maintaining `blocked_components: set[str]` to skip cascade-dependent actions.
-- `managed.py`: `DEFAULT_MANAGED_PATTERNS` lists glob patterns for files written by doctor-installed tools (e.g. `gsd-*` skills). `get_doctor_managed_excludes(doctor_cfg)` merges these with `doctor_cfg.managed_excludes`.
+- Purpose: Claude Code environment health checks and maintenance automation
+- Key files: `schema.py` (spec dataclasses), `defaults.py` (bundled lists), `detectors.py` (read-only checks), `installer.py` (action planning + execution, 1460 lines), `runner.py` (subprocess layer), `reporter.py` (Rich output), `state.py` (npx persistence), `managed.py` (sync excludes)
+- Doctor state lives at: `~/.config/sccs/.doctor_state.yaml`
 
 **`sccs/git/`:**
-- `operations.py`: All git commands use `subprocess.run(["git", ...], ...)` pattern. `get_remote_status()` returns `dict` with `behind`, `ahead`, `diverged`, `up_to_date` keys.
-- `resolve.py`: `DivergenceStrategy` enum (`ABORT`, `PULL_REBASE`, `MERGE`, `PUSH_FORCE_WITH_LEASE`). In non-TTY contexts `prompt_divergence_strategy()` auto-returns `ABORT`.
+- Purpose: Thin wrapper over `git` subprocess; no business logic
+- Key files: `operations.py` (all git commands), `resolve.py` (divergence strategy)
 
-**`sccs/integrations/`:**
-- `detectors.py`: `AntigravityDetector.get_info()` checks `~/.antigravity/`; `get_skill_gaps()` returns skills in `~/.claude/skills/` not yet mirrored. `ClaudeDesktopDetector.get_info()` reads Claude Desktop config JSON; `is_repo_trusted()` checks `localAgentModeTrustedFolders`.
+**`sccs/output/`:**
+- Purpose: All user-facing terminal output
+- Key files: `console.py` (main `Console` class with `print_*` methods), `diff.py` (unified diff), `merge.py` (interactive hunk merge)
 
 **`sccs/transfer/`:**
-- Security note: `importer.py` validates all paths inside the ZIP against a traversal allowlist (see `test_importer_security.py`). Archives must contain a `manifest.json` (validated by `TransferManifest`).
+- Purpose: ZIP-based portable config export/import
+- Key files: `exporter.py`, `importer.py`, `manifest.py` (JSON manifest schema), `ui.py` (questionary TUI)
+
+**`sccs/integrations/`:**
+- Purpose: Optional bridges to Antigravity IDE and Claude Desktop
+- Key files: `detectors.py` (presence detection + gap analysis), `antigravity.py` (skill migration), `claude_desktop.py` (trusted folder registration)
+
+**`sccs/convert/`:**
+- Purpose: One-off Fish → PowerShell config translation
+- Key files: `fish_to_pwsh.py` (main converter), `rules.py` (conversion rules), `templates.py` (PS output templates)
 
 **`sccs/utils/`:**
-- `paths.py`: `atomic_write()` writes to a `.tmp` sibling then renames — no partial writes. `create_backup()` appends `.bak` suffix with category tag.
-- `platform.py`: Returns `"macos"`, `"linux"`, or `"windows"`. Used by both sync platform filtering and doctor node-install hint selection.
+- Purpose: Shared utilities with no sccs imports
+- Key files: `paths.py` (`atomic_write`, `safe_copy`, backup management, glob matching), `platform.py` (OS detection), `hashing.py` (SHA-256 file/dir hash)
+
+**`tests/`:**
+- Purpose: pytest test suite; co-located by concern, not by module
+- Key files: `conftest.py` (fixtures), `test_sync.py` (engine integration), `test_doctor.py` (doctor subsystem), `test_paths_security.py` + `test_importer_security.py` (security regression)
 
 ## Key File Locations
 
 **Entry Points:**
+- `sccs/cli.py`: All CLI commands (1812 lines) — primary entry point
 - `sccs/__main__.py`: `python -m sccs` entry
-- `sccs/cli.py:main()` (line 1679): `cli(obj={})` — Click root
-- `sccs/cli.py:cli` (line 67): Click group definition with global `-v` / `--no-color` flags
+- `sccs/__init__.py`: Version constant and lazy programmatic API
 
 **Configuration:**
-- `pyproject.toml`: All build metadata, dependencies (`click`, `rich`, `pydantic`, `pyyaml`, `questionary`), optional `[dev]` extras, ruff + mypy config
-- `~/.config/sccs/config.yaml`: Runtime user config (not in repo)
+- `pyproject.toml`: Package metadata, runtime deps, ruff/mypy/pytest/coverage config
+- `sccs/config/schema.py`: Root `SccsConfig` model (the schema the config.yaml must match)
+- `sccs/config/defaults.py`: Default YAML template used by `sccs config init`
+- `sccs/doctor/defaults.py`: Bundled DEFAULT_CLAUDE_PLUGINS and DEFAULT_NPX_TOOLS lists
 
 **Core Logic:**
-- `sccs/sync/engine.py`: `SyncEngine.sync()` — main sync orchestration
-- `sccs/sync/category.py`: `CategoryHandler.detect_changes()` — diff logic
-- `sccs/doctor/installer.py`: `build_install_plan()`, `execute_plan()` — doctor mutation logic
-- `sccs/doctor/detectors.py`: All 9 detector classes — doctor read-only logic
-- `sccs/config/schema.py:174`: `SccsConfig` — root config model
+- `sccs/sync/engine.py`: `SyncEngine` — sync entry point for the sync layer
+- `sccs/sync/category.py`: `CategoryHandler` — per-category scan/detect/execute
+- `sccs/sync/actions.py`: `ActionType` enum + `execute_action()` — actual file operations
+- `sccs/doctor/installer.py`: `build_install_plan()`, `build_update_plan()`, `build_optimize_plan()`, `execute_plan()` — entire doctor action pipeline (1460 lines)
+- `sccs/doctor/detectors.py`: All read-only health check classes
 
 **State Files (runtime, not in repo):**
-- `~/.config/sccs/.sync_state.yaml`: Sync item hashes
-- `~/.config/sccs/.doctor_state.yaml`: Npx tool install marks
-- `~/.config/sccs/.migration_state.yaml`: Adopted/declined categories
-
-**Testing:**
-- `tests/conftest.py`: Shared fixtures
-- `tests/test_doctor.py`: Doctor cascade tests (122+ tests as of v2.28.1)
-- `tests/test_sync.py`: SyncEngine + CategoryHandler tests
-- `tests/test_importer_security.py`: ZIP path-traversal security tests
-- `tests/test_paths_security.py`: Path utility security tests
+- `~/.config/sccs/config.yaml`: User configuration
+- `~/.config/sccs/.sync_state.yaml`: Last-sync hashes and timestamps
+- `~/.config/sccs/.doctor_state.yaml`: Successful npx tool run markers
+- `~/.config/sccs/migration_state.yaml`: Adopted/declined category migration state
 
 ## Naming Conventions
 
 **Files:**
-- Snake_case module names: `fish_to_pwsh.py`, `actions.py`, `engine.py`
-- No `_impl` / `_base` suffixes — one implementation per module
-- Test files: `test_<module_name>.py` in `tests/` (flat, not mirroring package structure)
+- `snake_case.py` throughout
+- `__init__.py` in every package directory with explicit public exports
 
 **Classes:**
-- Pydantic models: PascalCase + descriptive suffix (`SccsConfig`, `SyncCategory`, `DoctorConfig`, `PluginSpec`, `NpxToolSpec`)
-- Dataclasses: PascalCase (`SyncAction`, `SyncResult`, `DoctorAction`, `NodeStatus`, `ItemState`)
-- Click groups: `@cli.group("name")` with `_group` suffix on the Python function (`doctor_group`, `convert_group`, `integrations_group`)
-- Detector classes: `<Subject>Detector` (`NodeDetector`, `ClaudePluginDetector`, `PermissionDetector`)
-- Status dataclasses: `<Subject>Status` (`NodeStatus`, `PluginStatus`, `NpxToolStatus`)
+- `PascalCase` (e.g. `SyncEngine`, `CategoryHandler`, `DoctorAction`, `SccsConfig`)
+- Detector classes end in `Detector` (`NodeDetector`, `ClaudePluginDetector`)
+- Status dataclasses end in `Status` (`NodeStatus`, `PluginStatus`, `PermissionStatus`)
+- Config spec dataclasses end in `Spec` (`PluginSpec`, `NpxToolSpec`, `StatusLineCheckSpec`)
+- Result dataclasses end in `Result` (`SyncResult`, `ExecuteResult`, `DocsResult`)
 
 **Functions:**
-- Private helpers in `cli.py`: `_collect_doctor_statuses()`, `_load_doctor_config()`, `_run_migration_check()`, `_interactive_migration_prompt()`
-- Validator methods in Pydantic models: `_validate_<field>()` (class methods decorated with `@field_validator`)
-- Public CLI callbacks: named after the command (`sync`, `status`, `diff`, `doctor_check`, `doctor_install`)
+- `snake_case`; private helpers prefixed with `_` (e.g. `_run`, `_confirm`, `_validate_head`)
+- Builder functions follow `build_*_plan()` pattern (`build_install_plan`, `build_update_plan`, `build_optimize_plan`)
+- Detector methods follow `get_status()` / `get_statuses()` pattern
 
 **Constants:**
-- `DEFAULT_*` prefix for bundled baselines in `doctor/defaults.py`
-- `_SAFE_*_PATTERN` for security allowlist regexes (private, module-level)
+- `UPPER_SNAKE_CASE` for module-level constants (e.g. `DEFAULT_CLAUDE_PLUGINS`, `PERM_NPM_ROOT_GLOBAL`, `PATH_NPM_PREFIX_BIN`)
 
 ## Where to Add New Code
 
+**New sync category support (new item_type or scan logic):**
+- Item scanning: `sccs/sync/item.py` — extend `scan_items_for_category()` or add a new `_scan_*_items()` private function
+- Action logic: `sccs/sync/actions.py` — extend `determine_action()` if new ActionType needed
+- Schema: `sccs/config/schema.py` — add field to `SyncCategory` if new config knob needed
+
+**New doctor check (new detector):**
+- Spec model: `sccs/doctor/schema.py` — add a new `*CheckSpec` or `*Spec` Pydantic model
+- Default list: `sccs/doctor/defaults.py` — add `DEFAULT_*` constant
+- Detector: `sccs/doctor/detectors.py` — add a new `*Detector` class with `get_status()` / `get_statuses()`
+- DoctorConfig: `sccs/doctor/schema.py::DoctorConfig` — add field + `effective_*()` method
+- Plan builder: `sccs/doctor/installer.py` — add `_*_actions()` helper function, wire into `build_install_plan()` + `build_update_plan()` + `build_optimize_plan()`
+- Reporter: `sccs/doctor/reporter.py` — add `_*_row()` + `render_doctor_report()` entry + `has_problems()` entry
+- CLI: `sccs/cli.py::_collect_doctor_statuses()` — instantiate new detector
+
 **New CLI command:**
-- Add `@cli.command("name")` or `@cli.group("name")` in `sccs/cli.py`
-- Follow existing pattern: load config, create engine/detector, display via `console`
-- Add tests in `tests/test_cli.py`
-
-**New sync category (config default):**
-- Add entry to `DEFAULT_SYNC_CATEGORIES` in `sccs/config/defaults.py`
-- The migration system will detect and offer it to existing users automatically via `detect_new_categories()`
-
-**New doctor detector:**
-1. Add Pydantic spec model to `sccs/doctor/schema.py` (follow `PluginSpec` / `NpxToolSpec` pattern with `_SAFE_NAME_PATTERN` validation)
-2. Add default list to `sccs/doctor/defaults.py`
-3. Add `effective_<name>()` method to `DoctorConfig` in `sccs/doctor/schema.py`
-4. Add `@dataclass` status class and detector class to `sccs/doctor/detectors.py`
-5. Add action-building function to `sccs/doctor/installer.py`
-6. Add rendering rows to `sccs/doctor/reporter.py`
-7. Wire into `_collect_doctor_statuses()` and all three doctor commands in `sccs/cli.py`
+- Add to `sccs/cli.py` using `@cli.command()` or `@cli.group()` decorator pattern
+- Sub-commands use nested `@group.command("name")` pattern
 
 **New utility helper:**
-- File-system operations: `sccs/utils/paths.py`
-- Content hashing: `sccs/utils/hashing.py`
-- Platform checks: `sccs/utils/platform.py`
-- Logging: `sccs/utils/logging.py`
+- Filesystem helpers: `sccs/utils/paths.py`
+- Hashing: `sccs/utils/hashing.py`
+- Platform logic: `sccs/utils/platform.py`
 
-**New external integration:**
-- Add detector class to `sccs/integrations/detectors.py`
-- Add action module (e.g. `sccs/integrations/myapp.py`)
-- Wire into `sccs/cli.py` integrations group
+**New integration:**
+- Detector: `sccs/integrations/detectors.py` — add `*Info` dataclass + `*Detector` class
+- Action: new file `sccs/integrations/<name>.py`
+- Wire into: `sccs/cli.py::integrations_group` command group
 
-**New transfer format feature:**
-- Exporter changes: `sccs/transfer/exporter.py`
-- Importer changes: `sccs/transfer/importer.py`; always add security test to `tests/test_importer_security.py`
+**Tests:**
+- Co-locate by concern: `tests/test_<module>.py`
+- Security regression tests in `tests/test_paths_security.py` or `tests/test_importer_security.py`
+- Doctor-specific tests in `tests/test_doctor.py`
 
 ## Special Directories
 
 **`.planning/`:**
-- Purpose: GSD planning artefacts (phases, codebase maps)
-- Generated: Partially (by GSD tools)
-- Committed: Yes
-
-**`.worktrees/memory-bridge/`:**
-- Purpose: Git worktree for memory bridge feature branch
-- Contains its own copy of the `sccs/` package with additional `memory/` module
-- Status: Inactive / experimental; not part of main build
+- Purpose: GSD codebase map and phase plan documents
+- Generated: Partially (codebase docs are generated by `/gsd:map-codebase`)
+- Committed: Yes (to git)
 
 **`.claude/`:**
-- Purpose: Claude Code project-local config (commands + skills)
-- Committed: Yes (part of the SCCS sync payload itself)
+- Purpose: Claude Code project config (commands, skills for this project's development)
+- Generated: No
+- Committed: Yes
+
+**`.worktrees/`:**
+- Purpose: Git worktrees for parallel branch development (e.g. `memory-bridge` feature branch)
+- Generated: Yes (by git)
+- Committed: No
 
 **`dist/`:**
 - Purpose: Built wheel/sdist artifacts from `uv build`
 - Generated: Yes
 - Committed: No
 
+**`.venv/`:**
+- Purpose: UV-managed virtual environment
+- Generated: Yes
+- Committed: No
+
 ---
 
-*Structure analysis: 2026-05-11*
+*Structure analysis: 2026-05-26*

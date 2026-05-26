@@ -1,260 +1,317 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-26
 
 ## Test Framework
 
-**Runner:** pytest `>=8.0.0`
-- Config: `pyproject.toml` `[tool.pytest.ini_options]`
+**Runner:** pytest >= 8.0.0
+- Config: `pyproject.toml → [tool.pytest.ini_options]`
 - `testpaths = ["tests"]`
 - `python_files = ["test_*.py"]`
 - `python_functions = ["test_*"]`
 - `addopts = "-v --tb=short"`
 
-**Assertion library:** pytest built-in assertions (no unittest.TestCase assertions)
+**Assertion Library:** pytest built-in assertions (no third-party assertion library)
 
-**Coverage:** pytest-cov `>=6.0.0`
-- Source: `sccs/`
-- Omit: `tests/*`, `sccs/__main__.py`
-- Minimum: **66%** (enforced via `fail_under`)
-- Missing lines shown: `show_missing = true`
+**Coverage:** pytest-cov >= 6.0.0
+- Source: `sccs/` only (`tests/` and `sccs/__main__.py` omitted)
+- Current enforced floor: **66%** (see comment in `pyproject.toml` — target is 80%)
+- `show_missing = true`
 - Excluded from coverage: `pragma: no cover`, `if __name__ == .__main__.`, `if TYPE_CHECKING:`
 
 **Run Commands:**
 ```bash
-pytest                    # Run all tests
-pytest -v                 # Verbose (default via addopts)
-pytest --cov=sccs         # With coverage
-pytest tests/test_doctor.py  # Single test file
-pytest tests/test_doctor.py::TestNodeDetector  # Single class
+pytest                                                        # Run all tests (verbose, short traceback)
+pytest -v                                                     # Already default via addopts
+pytest --cov=sccs --cov-report=term-missing                  # With coverage
+pytest --cov=sccs --cov-report=term-missing --cov-fail-under=66  # Enforced baseline
+pytest tests/test_doctor.py                                   # Single file
+pytest tests/test_doctor.py::TestClaudePluginDetector        # Single class
+pytest tests/test_doctor.py::TestClaudePluginDetector::test_bare_name_match_when_marketplace_unspecified  # Single test
 ```
 
 ## Test File Organization
 
-**Location:** All tests in `tests/` directory (not co-located with source)
+**Location:** Separate `tests/` directory at repo root — not co-located with source.
 
 **Naming:** `test_<module_or_feature>.py`
 
-**Current test files:**
-- `tests/conftest.py` — shared fixtures
-- `tests/test_config.py` — config schema, loading, validation
-- `tests/test_sync.py` — sync engine
-- `tests/test_doctor.py` — doctor detectors, installer, runner security
-- `tests/test_settings.py` — settings.json merge logic
-- `tests/test_cli.py` — Click CLI
-- `tests/test_git_operations.py` — git commands
-- `tests/test_hashing.py` — SHA256 utilities
-- `tests/test_migration.py` — config migration
-- `tests/test_paths_security.py`, `tests/test_importer_security.py` — security regression tests
-- `tests/test_platform.py`, `tests/test_platform_utils.py` — platform detection
-- `tests/test_conflict_resolution.py`, `tests/test_merge.py`, `tests/test_diff.py`
-- `tests/test_transfer.py`, `tests/test_convert.py`, `tests/test_console.py`
-- `tests/test_docs.py`, `tests/test_integrations.py`
+**Current test files (v2.32.1):**
+```
+tests/
+├── conftest.py                     # Shared fixtures (temp dirs, mock claude dir, sample config)
+├── test_cli.py                     # Click CLI command integration (355 lines)
+├── test_config.py                  # Config loading/validation (222 lines)
+├── test_conflict_resolution.py     # Conflict resolution logic
+├── test_console.py                 # Rich console output
+├── test_convert.py                 # Fish→PowerShell converter (355 lines)
+├── test_diff.py                    # Diff display
+├── test_docs.py                    # Hub README generator
+├── test_doctor.py                  # Doctor subsystem — largest file (3813 lines)
+├── test_git_operations.py          # Git subprocess wrapper (436 lines)
+├── test_git_resolve.py             # Divergence resolution
+├── test_hashing.py                 # SHA256 content hashing
+├── test_importer_security.py       # Import ZIP path traversal guards
+├── test_integrations.py            # Antigravity + Claude Desktop detectors (377 lines)
+├── test_merge.py                   # Interactive merge
+├── test_migration.py               # New-category migration state
+├── test_paths_atomic.py            # Atomic write operations
+├── test_paths_security.py          # Symlink rejection guards (73 lines)
+├── test_platform.py                # Platform detection
+├── test_platform_utils.py          # Platform utility helpers
+├── test_settings.py                # settings_ensure JSON patching
+├── test_sync.py                    # Sync engine core (299 lines)
+└── test_transfer.py                # Export/Import ZIP archive
+```
 
 ## Test Structure
 
-**Suite organization — class-based, grouped by subject:**
+**Suite Organization:** Classes group related tests; plain functions for one-off checks.
 ```python
-class TestSchemaValidation:
-    def test_plugin_spec_rejects_leading_dash(self): ...
-    def test_plugin_spec_accepts_scoped_npm_name(self): ...
+class TestClaudePluginDetector:
+    """Tests for plugin detection logic."""
 
-class TestNodeDetector:
-    def test_missing_node_returns_not_installed(self, monkeypatch): ...
-    def test_current_node_passes(self, monkeypatch): ...
+    SAMPLE_OUTPUT = """Installed plugins: ..."""  # class-level test data
+
+    def test_marketplace_match_matches_full_target(self):
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE_OUTPUT)
+        statuses = detector.get_statuses([PluginSpec(name="skill-creator", marketplace="claude-plugins-official")])
+        assert statuses[0].installed is True
+
+    def test_missing_plugin_detected(self):
+        detector = ClaudePluginDetector(raw_output=self.SAMPLE_OUTPUT)
+        statuses = detector.get_statuses([PluginSpec(name="superpowers", marketplace="claude-plugins-official")])
+        assert statuses[0].installed is False
 ```
 
-**Section delimiters** used in larger test files:
+**Class-level test data:** Multiline strings stored as class attributes (e.g. `SAMPLE_OUTPUT`, `REAL_OUTPUT` in `TestClaudePluginDetector`). This avoids fixture overhead for pure data.
+
+**Docstrings on test methods:** Used for regression guards and non-obvious assertions. The docstring explains the `why`, not just the `what`:
 ```python
-# --------------------------------------------------------------------------- #
-# Schema validation                                                           #
-# --------------------------------------------------------------------------- #
+def test_word_boundary_prevents_false_match_against_longer_name(self):
+    """`superpowers@...` must not match the longer
+    `superpowers-developing-for-claude-code@...` line."""
 ```
 
-**Test naming convention:** `test_<what>_<expected_outcome>` or `test_<scenario>`:
-- `test_missing_node_returns_not_installed`
-- `test_rejects_option_like_remote`
-- `test_current_node_passes`
+## Mocking
 
-## Fixtures (tests/conftest.py)
+**Framework:** `unittest.mock` — `patch`, `MagicMock`, `monkeypatch`
 
-**`temp_dir`** → `Generator[Path, None, None]`
-- Wraps `tempfile.TemporaryDirectory()`
-- Use for any file I/O test
+**Two patterns in use:**
 
-**`temp_home(temp_dir, monkeypatch)`** → `Path`
-- Creates `<temp_dir>/home/`, sets `HOME` env var
-- Foundation for all tests that expand `~`
-
-**`mock_claude_dir(temp_home)`** → `Path`
-- Full `~/.claude/` directory structure with subdirs: `skills/`, `commands/`, `hooks/`, `scripts/`, `mcp/`
-- Writes all framework files (`CLAUDE.md`, `COMMANDS.md`, etc.) with test content
-- Creates one sample skill (`test-skill/SKILL.md`) and one sample command
-
-**`mock_repo(temp_dir)`** → `Path`
-- Bare repo directory with `.claude/framework/`, `.claude/skills/`, `.claude/commands/`
-
-**`sample_config(temp_home, mock_repo)`** → `dict`
-- Full YAML-ready config dict with three categories: `claude_framework`, `claude_skills`, `claude_commands`
-- `auto_commit: False`, `auto_push: False`
-
-**`config_file(temp_home, sample_config)`** → `Path`
-- Writes `sample_config` to `~/.config/sccs/config.yaml` via `yaml.dump()`
-
-**`state_file(temp_home)`** → `Path`
-- Returns path `~/.config/sccs/.sync_state.yaml` (creates parent dirs)
-
-**Local fixtures in test files** (not in conftest):
+### Pattern 1: `unittest.mock.patch` (context manager or decorator)
+Used for subprocess and module-level functions:
 ```python
-# tests/test_settings.py
-@pytest.fixture
-def settings_dir(tmp_path: Path) -> Path: ...
+from unittest.mock import patch
 
-@pytest.fixture
-def settings_file(settings_dir: Path) -> Path: ...
-```
-
-## Mocking Patterns
-
-**`monkeypatch.setattr`** — primary tool for replacing module-level functions:
-```python
-# Replace a runner function with a lambda
-monkeypatch.setattr("sccs.doctor.detectors.run_node_version", lambda: None)
-monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
-monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: "/usr/local/bin/claude")
-```
-
-**`monkeypatch.setenv`** — for environment variable tests:
-```python
-monkeypatch.setenv("HOME", str(home))
-monkeypatch.setenv("SCCS_CONFIG", str(config_file))
-```
-
-**`unittest.mock.patch`** — used when call args inspection is needed:
-```python
 with patch("sccs.doctor.runner.subprocess.run", return_value=fake) as run_mock:
     _run(["echo", "x"])
 kwargs = run_mock.call_args.kwargs
 assert kwargs["stdin"] is subprocess.DEVNULL
 ```
 
-**Synthetic CLI output** — detectors that parse CLI output (`ClaudePluginDetector`) accept raw string directly, no subprocess call needed:
+Stacking multiple patches (Python 3.10+ parenthesised `with`):
 ```python
-SAMPLE_OUTPUT = """Installed plugins:
-  ❯ claude-mem@thedotmack
-    Version: 12.6.0
-"""
-detector = ClaudePluginDetector(raw_output=SAMPLE_OUTPUT)
-statuses = detector.get_statuses([PluginSpec(name="claude-mem")])
+with (
+    patch("sccs.doctor.installer._run", return_value=fake_proc) as run_mock,
+    patch("sccs.doctor.installer.questionary") as q_mock,
+):
+    q_mock.confirm.return_value.ask.return_value = False
+    result = execute_plan(plan, assume_yes=False, print_fn=lambda _: None)
 ```
-This is the canonical pattern for testing all parser/detector logic without spawning real processes.
 
-**What to mock:**
-- `run_node_version`, `run_claude_plugin_list`, `which` — always mock in detector unit tests
-- `subprocess.run` — only when verifying call kwargs (e.g., `stdin=DEVNULL` regression)
-
-**What NOT to mock:**
-- Pydantic validation — tested by constructing models directly and catching `ValidationError`
-- File I/O — use `temp_dir`/`tmp_path` fixtures instead
-
-## Parametrize Pattern
-
-Used for allowlist/blocklist validation tests:
+### Pattern 2: `monkeypatch` fixture
+Used for patching module attributes, environment variables, and `which`:
 ```python
-@pytest.mark.parametrize(
-    "bad_remote",
-    [
-        "--upload-pack=/tmp/evil",
-        "-u",
-        "origin; rm -rf /",
-        "origin space",
-        "",
-    ],
+def test_missing_node_returns_not_installed(self, monkeypatch):
+    monkeypatch.setattr("sccs.doctor.detectors.run_node_version", lambda: None)
+    status = NodeDetector(platform_name="macos").get_status(min_major=20)
+    assert status.installed is False
+
+def test_missing_when_not_on_path(self, monkeypatch):
+    monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
+    status = ClaudeCliDetector().get_status()
+    assert status.installed is False
+```
+
+**What to Mock:**
+- `which` / `shutil.which` calls (platform detection)
+- `subprocess.run` (any subprocess invocation)
+- `run_node_version` (version string retrieval)
+- `questionary.confirm` (interactive prompt)
+- `HOME` environment variable (via `monkeypatch.setenv`)
+
+**What NOT to Mock:**
+- Pydantic `ValidationError` — test real validation with real schemas
+- File system operations — use `tmp_path` / `temp_dir` fixtures instead
+- `DoctorStateManager` — pass a real instance with `tmp_path` state file
+
+## Fixtures and Factories
+
+**Shared fixtures** in `tests/conftest.py`:
+
+```python
+@pytest.fixture
+def temp_dir() -> Generator[Path, None, None]:
+    """Create a temporary directory for tests."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
+
+@pytest.fixture
+def temp_home(temp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a temporary home directory — patches HOME env var."""
+    home = temp_dir / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+@pytest.fixture
+def mock_claude_dir(temp_home: Path) -> Path:
+    """Create a mock ~/.claude directory with subdirs, framework files, skill, and command."""
+
+@pytest.fixture
+def mock_repo(temp_dir: Path) -> Path:
+    """Create a mock repository directory with .claude subdirs."""
+
+@pytest.fixture
+def sample_config(temp_home: Path, mock_repo: Path) -> dict:
+    """Return a full config dict with three categories (framework, skills, commands)."""
+
+@pytest.fixture
+def config_file(temp_home: Path, sample_config: dict) -> Path:
+    """Write sample_config as YAML to ~/.config/sccs/config.yaml."""
+
+@pytest.fixture
+def state_file(temp_home: Path) -> Path:
+    """Return path for a fresh state file."""
+```
+
+**Local factory helper** (`_make_status_set` in `tests/test_doctor.py`):
+```python
+def _make_status_set(
+    node_ok=True,
+    cli_ok=True,
+    plugins_present=None,
+    tools_present=None,
+    plugin_found_marketplace=None,
+    plugin_detection_source=None,
+    specs=None,
+):
+    """Build the four detector results for plan tests."""
+    # Returns dict with "node", "claude_cli", "plugins", "npx_tools" keys
+```
+Use this pattern for test helpers that build complex status objects — keeps individual tests concise.
+
+**Location:** All shared fixtures in `tests/conftest.py`. Test-local helpers defined as module-level functions in the relevant test file.
+
+## Platform-Specific Tests
+
+Use `pytest.mark.skipif` for platform-specific behaviour:
+```python
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Symlink semantics differ on Windows and require elevated privileges",
 )
-def test_rejects_option_like_remote(self, temp_dir: Path, bad_remote: str):
-    with pytest.raises(ValidationError):
-        SccsConfig(repository={"path": str(temp_dir), "remote": bad_remote}, sync_categories={})
+```
+Example: `tests/test_paths_security.py` skips symlink tests on Windows.
 
-@pytest.mark.parametrize("good_remote", ["origin", "upstream", "fork-2", "my_remote"])
-def test_accepts_normal_remote(self, temp_dir: Path, good_remote: str):
-    config = SccsConfig(repository={"path": str(temp_dir), "remote": good_remote}, sync_categories={})
-    assert config.repository.remote == good_remote
+**CI matrix** (`.github/workflows/ci.yml`): Python 3.10, 3.11, 3.12, 3.13 on `ubuntu-latest`. Tests must pass on all four versions. No macOS or Windows CI runners — keep platform assumptions out of tests.
+
+## Coverage
+
+**Requirements:**
+- Enforced floor: **66%** (pyproject.toml `fail_under = 66`)
+- CI uses `--cov-fail-under=60` (slightly lower, confirmed in `.github/workflows/ci.yml`)
+- `# pragma: no cover` for unreachable branches (`if TYPE_CHECKING:`, `__main__` guard)
+
+**Weak areas** (noted in `pyproject.toml`): `sccs/cli.py` and `sccs/transfer/ui.py` — interactive TTY paths difficult to cover.
+
+**View Coverage:**
+```bash
+pytest --cov=sccs --cov-report=term-missing
+pytest --cov=sccs --cov-report=html   # generates htmlcov/
 ```
 
-## Doctor Detector Tests
+## Test Types
 
-**Pattern:** Construct detector with synthetic state, call `get_status()` / `get_statuses()`, assert fields.
+**Unit Tests (dominant pattern):**
+- Test individual classes/functions in isolation
+- Mock all external dependencies (subprocess, file system where practical)
+- Examples: `TestClaudePluginDetector`, `TestSchemaValidation`, `TestParseNodeMajor`, `TestSyncItem`
 
-**Node detection** (`TestNodeDetector`):
-- Monkeypatch `run_node_version` to return a version string or `None`
-- Pass `platform_name=` explicitly: `"macos"`, `"linux"`, `"windows"`
-- Assert `status.installed`, `status.meets_minimum`, `status.install_hint.cmd`
+**Integration Tests (via real temp FS):**
+- Use `temp_dir` / `temp_home` / `mock_claude_dir` / `mock_repo` fixtures
+- Touch the real file system in a temp directory
+- Examples: `TestScanItems`, `TestActions`, `TestDoctorStateManager`
+- No external process calls — subprocess is always mocked
 
-**Plugin detection** (`TestClaudePluginDetector`):
-- Class-level `SAMPLE_OUTPUT` / `REAL_OUTPUT` string constants — realistic `claude plugin list` text
-- `ClaudePluginDetector(raw_output=...)` — no subprocess
-- Test 4-tier detection: `"exact"`, `"alternative"`, `"bare"`, `"missing"`
-- Word-boundary regression: shorter plugin name must not match longer name prefix
+**Security / Regression Tests (dedicated test files):**
+- `tests/test_paths_security.py` — symlink rejection in `safe_copy` and `create_backup`
+- `tests/test_importer_security.py` — ZIP path traversal guards
+- `tests/test_doctor.py::TestRunnerSecurity` — argument-injection and sudo rejection
+- These are small, focused, and must never be removed
 
-**Npx tool detection** (`TestNpxToolDetector`):
-- Monkeypatch `which` to return path or `None`
-- Use `DEFAULT_NPX_TOOLS` constants from `sccs.doctor.defaults` for end-to-end spec verification
+**No E2E tests.** The CLI is tested via `CliRunner` (Click testing utility) in `tests/test_cli.py`, not via subprocess invocation.
 
-**Runner security** (`TestRunnerSecurity`):
-- Call private `_validate_head()` and `_run()` directly from `sccs.doctor.runner`
-- `DoctorError` (not `ValidationError`) is the expected exception type
-- Test `pytest.raises(DoctorError, match="Empty")` — use `match=` for error message verification
+## Common Patterns
 
-**Regression guards** — named tests that document why a specific invariant must hold:
+**Pydantic validation errors:**
+```python
+def test_plugin_spec_rejects_leading_dash(self):
+    with pytest.raises(ValidationError):
+        PluginSpec(name="--evil")
+```
+
+**Custom exception errors:**
+```python
+def test_run_rejects_empty_cmd(self):
+    with pytest.raises(DoctorError, match="Empty"):
+        _run([])
+```
+
+**Subprocess mocking:**
+```python
+fake = subprocess.CompletedProcess(args=["echo"], returncode=0, stdout="ok", stderr="")
+with patch("sccs.doctor.runner.subprocess.run", return_value=fake) as run_mock:
+    _run(["echo", "x"])
+run_mock.assert_called_once()
+```
+
+**State-file tests (use `tmp_path`, not `temp_dir`):**
+```python
+def test_marks_and_recognises_run(self, tmp_path):
+    state_path = tmp_path / ".doctor_state.yaml"
+    mgr = DoctorStateManager(state_path=state_path)
+    mgr.mark_npx_tool("tool-x", ["npx", "tool-x", "--global"])
+    assert mgr.is_npx_tool_marked("tool-x", ["npx", "tool-x", "--global"]) is True
+```
+
+**Corrupt-file resilience:**
+```python
+def test_load_handles_corrupt_yaml(self, tmp_path):
+    state_path = tmp_path / "broken.yaml"
+    state_path.write_text(":\n:\n: not valid", encoding="utf-8")
+    mgr = DoctorStateManager(state_path=state_path)
+    state = mgr.load()  # must not raise
+    assert state.npx_tools == {}
+```
+
+**File content written in tests:**
+```python
+test_file.write_text("test content", encoding="utf-8")   # Always explicit UTF-8
+```
+
+## Regression Comments in Tests
+
+Security fixes and non-obvious behaviour fixes get a comment in the test explaining the historical context:
 ```python
 def test_default_npx_get_shit_done_uses_dash_y(self):
-    # Without -y, npx prompts on stdout — hangs with capture_output=True
-    spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "get-shit-done-cc")
-    assert spec.invocation[1] == "-y"
+    # Without `-y`, npx prompts on stdout for "Need to install... Ok to
+    # proceed?" on Linux/fresh systems — and capture_output=True hides
+    # that prompt from the user. Regression guard for the v2.22.x Debian hang.
 ```
-
-## Settings Tests (test_settings.py)
-
-Tests for `sccs/sync/settings.py` JSON merge logic use local `tmp_path` fixtures:
-- `settings_file` fixture writes a real `settings.json` with existing content
-- `_make_config()` helper constructs `SettingsEnsure` model
-- Assertions on `result.success`, `result.keys_added`, `result.file_modified`
-- Verifies non-destructive: existing keys never overwritten
-
-## Error Testing
-
-```python
-# Pydantic ValidationError
-with pytest.raises(ValidationError):
-    PluginSpec(name="--evil")
-
-# Domain error with message match
-with pytest.raises(DoctorError, match="Empty"):
-    _run([])
-
-with pytest.raises(DoctorError, match="Command not found"):
-    _run(["this-binary-does-not-exist-xyz123"])
-
-# Standard Python exceptions
-with pytest.raises(FileNotFoundError):
-    load_config(temp_dir / "nonexistent.yaml")
-```
-
-## Helper Patterns
-
-**Module-level factory helpers** (not fixtures) used within a single test file:
-```python
-def _make_config(target: Path, entries: dict, **kwargs) -> SettingsEnsure:
-    return SettingsEnsure(target_file=str(target), entries=entries, ...)
-```
-
-**Iterating defaults** to pick a specific spec:
-```python
-spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
-```
-
-**Encoding:** All fixture file writes use `encoding="utf-8"` explicitly.
+Always add a regression comment when a test encodes a specific past bug fix.
 
 ---
 
-*Testing analysis: 2026-05-11*
+*Testing analysis: 2026-05-26*

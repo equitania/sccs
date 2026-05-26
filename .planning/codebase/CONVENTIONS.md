@@ -1,187 +1,217 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-26
 
 ## Naming Patterns
 
 **Files:**
-- Snake_case for all Python modules: `sync_engine.py`, `category.py`, `config_loader.py`
-- Test files prefixed `test_`: `test_doctor.py`, `test_config.py`, `test_sync.py`
-- Schema modules named `schema.py` per sub-package: `sccs/config/schema.py`, `sccs/doctor/schema.py`
+- Module files: `snake_case.py` (e.g. `sync_engine.py`, `fish_to_pwsh.py`)
+- Test files: `test_<module>.py` (e.g. `test_doctor.py`, `test_git_operations.py`)
+- No barrel index abuse — each module exports only what it owns
 
-**Classes:**
-- PascalCase throughout: `SyncEngine`, `CategoryHandler`, `DoctorConfig`, `PluginSpec`
-- Status result objects are frozen dataclasses (not Pydantic): `NodeStatus`, `ClaudeCliStatus`, `PluginStatus`
-- Pydantic models for config/schema: `SccsConfig`, `SyncCategory`, `DoctorConfig`, `PluginSpec`
-- Enums: PascalCase class, UPPER_CASE members: `SyncMode.BIDIRECTIONAL`, `ItemType.DIRECTORY`
-
-**Functions / methods:**
-- Snake_case: `get_enabled_categories()`, `build_install_plan()`, `execute_plan()`
-- Private helpers with leading underscore: `_validate_head()`, `_run()`, `_validate_safe_name()`
-- Detector entry point always `get_status()` (single) or `get_statuses(list)` (batch)
-- `effective_*()` methods on `DoctorConfig` resolve override-or-default lists: `effective_plugins()`, `effective_npx_tools()`
+**Functions:**
+- Public functions: `snake_case` (e.g. `load_config`, `expand_path`, `safe_copy`)
+- Private helpers: `_snake_case` with leading underscore (e.g. `_run_git`, `_validate_head`, `_run`, `_make_status_set`)
+- Class methods: `snake_case` (e.g. `get_enabled_categories`, `is_platform_match`)
+- Pydantic classmethods: named `_validate_<field>` or `expand_<thing>`
 
 **Variables:**
-- Snake_case: `config_path`, `temp_home`, `dry_run`
-- Single-letter names forbidden (ruff E741): use `lbl` not `l` in generator expressions
+- `snake_case` throughout; no abbreviations beyond standard (`cfg`, `mgr`, `spec`)
+- Boolean flags: `is_` or `has_` prefix (`is_platform_match`, `has_problems`, `has_issues`)
 
-**Constants / module-level:**
-- UPPER_SNAKE for compiled regexes and named sets: `_SAFE_NAME_PATTERN`, `_VALID_PATH_KINDS`
-- `DEFAULT_*` prefix for bundled defaults: `DEFAULT_CLAUDE_PLUGINS`, `DEFAULT_NPX_TOOLS`
+**Classes:**
+- `PascalCase` for all classes (e.g. `SyncEngine`, `DoctorConfig`, `PluginSpec`, `CategoryHandler`)
+- Enums: `PascalCase` class, `UPPER_SNAKE` members (e.g. `ActionType.COPY_TO_REPO`, `SyncMode.BIDIRECTIONAL`)
+- Dataclasses: `PascalCase`, prefer `@dataclass` for simple result containers (`SyncResult`, `CategorySyncResult`)
+
+**Constants:**
+- Module-level: `UPPER_SNAKE_CASE` (e.g. `DEFAULT_CLAUDE_PLUGINS`, `NODE_INSTALL`, `_SAFE_NAME_PATTERN`)
+
+**Compiled Regex:**
+- `_UPPER_SNAKE_PATTERN` with leading underscore for module-private compiled regex (e.g. `_GIT_REMOTE_PATTERN` in `sccs/config/schema.py`, `_SAFE_HEAD_PATTERN` in `sccs/doctor/runner.py`)
 
 ## Code Style
 
 **Formatter:** ruff format
-- Quote style: **double quotes** (`"string"`, not `'string'`)
+- Quote style: **double quotes**
 - Line length: **120 characters**
-- Target Python: 3.10
+- Applied via pre-commit hook (`ruff-format` id in `/.pre-commit-config.yaml`)
 
-**Linter:** ruff lint
-- Rule sets: `E`, `F`, `W`, `I`, `UP`, `B`, `SIM`
+**Linter:** ruff check with `--fix`
+- Selected rules: `E`, `F`, `W`, `I` (isort), `UP` (pyupgrade), `B` (bugbear), `SIM` (simplify)
 - Ignored: `E203`, `E266`, `SIM102`, `SIM105`, `SIM108`
-- isort integrated via ruff: `known-first-party = ["sccs"]`
+- Applied via pre-commit hook (`ruff` id)
 
 **Type checker:** mypy
-- `python_version = "3.10"`
+- `python_version = "3.10"` target (in `pyproject.toml`)
 - `warn_return_any = true`, `warn_unused_configs = true`
-- `ignore_missing_imports = true` (not strict mode)
-- `from __future__ import annotations` used in modules that need forward references
+- `ignore_missing_imports = true`
+- Applied via pre-commit hook (runs `mypy sccs/` — tests excluded)
+
+**Pre-commit hooks** (`.pre-commit-config.yaml`):
+- `ruff` (lint + auto-fix)
+- `ruff-format`
+- `mypy sccs/`
+- `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files`
 
 ## Import Organization
 
-**Order (enforced by ruff/isort):**
-1. `from __future__ import annotations` (when needed)
-2. Standard library (`os`, `re`, `sys`, `pathlib`, `dataclasses`, `subprocess`)
-3. Third-party (`click`, `pydantic`, `rich`, `yaml`, `questionary`)
-4. First-party sccs (`from sccs.config.schema import ...`)
+**Order** (enforced by ruff isort with `known-first-party = ["sccs"]`):
+1. `from __future__ import annotations` (when used — doctor modules use it for forward references)
+2. Standard library (`re`, `sys`, `pathlib`, `subprocess`, `dataclasses`, etc.)
+3. Third-party (`click`, `rich`, `pydantic`, `yaml`, `questionary`)
+4. First-party `sccs.*` — absolute imports only
 
-**Path aliases:** None — all imports use full dotted paths from `sccs.*`
+**Path Aliases:** None. All imports are absolute (`from sccs.sync.engine import SyncEngine`).
 
-**Lazy imports inside methods:** Used in `DoctorConfig.effective_*()` methods to break circular imports:
+**Late/Lazy imports:** Used inside Click command handlers for heavy optional subsystems (doctor, docs, transfer, integrations) to keep startup fast:
 ```python
-def effective_plugins(self) -> list[PluginSpec]:
-    from sccs.doctor.defaults import DEFAULT_CLAUDE_PLUGINS  # lazy
-    ...
+# Inside command handler, not at module top
+from sccs.docs.generator import DocsGenerator
+docs_gen = DocsGenerator(config)
 ```
+Also used in `sccs/__init__.py` via `__getattr__` for public API lazy loading.
 
-## Pydantic Model Patterns
+## Module Header Convention
 
-**Base class:** `pydantic.BaseModel` (Pydantic v2, `>=2.0.0`)
-
-**Validation entry point:** `SccsConfig.model_validate(yaml_data)` — never direct constructor for dicts
-
-**Field definitions:**
+Every source module begins with a short comment block:
 ```python
-name: str = Field(description="...")
-optional_field: str | None = Field(default=None, description="...")
-list_field: list[str] = Field(default_factory=list, description="...")
-bounded_int: int = Field(default=20, ge=10, le=99, description="...")
+# SCCS <Module Name>
+# <One-sentence description>
 ```
+Examples from codebase: `# SCCS Doctor Subprocess Runner`, `# SCCS Path Utilities`, `# SCCS Sync Engine`.
 
-**Field validators — always `@field_validator` + `@classmethod`:**
+## Version Header Convention
+
+`sccs/__init__.py` carries the authoritative version comment — increment on every release:
 ```python
-@field_validator("name")
-@classmethod
-def _validate_name(cls, v: str) -> str:
-    return _validate_safe_name(v, "Plugin name")
+# SCCS - SkillsCommandsConfigsSync
+# Unified YAML-configured synchronization for Claude Code files
+#
+# Version: 2.32.1
+# Date: 25.05.2026
 ```
-
-**Override-or-default pattern** (`None` = keep defaults, list = full replacement):
-```python
-plugins: list[PluginSpec] | None = Field(default=None, ...)
-extra_plugins: list[PluginSpec] = Field(default_factory=list, ...)
-```
-Resolved via `effective_*()` methods — never inline in callers.
-
-**Path expansion:** `~` expanded in `SyncCategory.local_path` via field validator — callers always receive expanded paths.
-
-## Frozen Dataclass Patterns (Status Objects)
-
-Detector results use `@dataclass` (not Pydantic) — read-only inspection results, not config:
-
-```python
-@dataclass
-class NodeStatus:
-    installed: bool
-    version: str | None
-    major: int | None
-    meets_minimum: bool
-    install_hint: NodeInstallSpec
-    platform: str
-```
-
-Located in `sccs/doctor/detectors.py`. All status dataclasses follow the same structure:
-- `installed: bool` or `available: bool` as first field
-- Optional string fields typed `str | None`
-- No default values on required fields
-
-## Security Validation Patterns
-
-**Argument-injection guard** — used across `sccs/doctor/schema.py`, `sccs/doctor/runner.py`, `sccs/config/schema.py`:
-
-```python
-_SAFE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./@\-]*$")
-
-def _validate_safe_name(value: str, field: str) -> str:
-    if value.startswith("-"):
-        raise ValueError(f"{field} must not start with '-': {value!r}")
-    if not _SAFE_NAME_PATTERN.match(value):
-        raise ValueError(f"{field} contains invalid characters: {value!r}")
-    return value
-```
-
-**Path safety** — reject shell metacharacters (`;`, `|`, `&`, `$`, `` ` ``, `\n`, `\r`):
-```python
-body = v[1:] if v.startswith("~") else v
-if any(ch in body for ch in (";", "|", "&", "$", "`", "\n", "\r")):
-    raise ValueError(f"path contains shell metacharacters: {v!r}")
-```
-
-**`sudo` ban** — `NodeInstallSpec._validate_cmd` explicitly rejects `sudo` as argv head.
-
-**Git remote guard** — `SccsConfig` rejects option-like remote names (`--upload-pack=…`, `-u`) via Pydantic validator.
+Version must also match `pyproject.toml → [project] version`. Date format: `DD.MM.YYYY`.
 
 ## Error Handling
 
-**Domain error class:** `DoctorError` in `sccs/doctor/runner.py` — raised for subprocess failures, empty commands, missing binaries, security rejections. Never raises raw `subprocess.SubprocessError`.
+**Custom Exception Classes:**
+Each major subsystem defines its own exception with an identical constructor signature:
+- `GitError` — `sccs/git/operations.py`
+- `DoctorError` — `sccs/doctor/runner.py`
 
-**Config validation:** Pydantic `ValidationError` propagates to CLI layer; callers use `pytest.raises(ValidationError)` in tests.
+Both carry `message: str`, `returncode: int = 1`, `stderr: str = ""`.
 
-**File not found:** `load_config()` raises `FileNotFoundError` (not wrapped).
+**CLI error pattern** (used consistently in all Click commands):
+```python
+try:
+    config = load_config()
+except FileNotFoundError as e:
+    console.print_error(str(e))
+    sys.exit(1)
+```
 
-**Validate-config return pattern:** `(bool, list[str])` tuple from `validate_config_file()` — no exceptions for invalid YAML, errors collected into list.
+**Non-fatal errors:** bare `except Exception: pass` only where the feature is cosmetic and non-blocking. Always annotated with `# noqa: BLE001` and a comment explaining why.
 
-## Subprocess Policy
+**Security-critical validation:**
+- All subprocess `argv[0]` values validated against an allowlist regex before exec (`_validate_head` in `sccs/doctor/runner.py`, `_GIT_REMOTE_PATTERN` in `sccs/config/schema.py`)
+- Pydantic `@field_validator` for schema-level input sanitisation
+- `subprocess` calls: always `shell=False`, command as `list[str]`, `stdin=subprocess.DEVNULL`
+- `# nosec B404` / `# nosec B603` comments suppress bandit false positives on intentional subprocess use
 
-- All subprocesses via `_run()` in `sccs/doctor/runner.py`
-- `stdin=subprocess.DEVNULL` always — prevents interactive prompts hanging
-- `capture_output=True` always
-- No shell=True anywhere
-- `FileNotFoundError` caught and re-raised as `DoctorError("Command not found: ...")`
+## Logging
 
-## Logging / Output
+**Framework:** `sccs/utils/logging.py` — wraps Python `logging` via `configure_logging()`
 
-- `rich` console via `sccs/output/console.py` — never bare `print()`
-- Verbose mode controlled by `config.output.verbose`
+**Patterns:**
+- Console output goes through `Console` (Rich-based), never `logging`
+- `logging` is used only for file-based output when `output.log_file` is configured
+- Console output methods: `console.print_info()`, `console.print_success()`, `console.print_error()`, `console.print_warning()`
+- Rich markup used directly in `console.print(f"[bold cyan]...[/bold cyan]")` for formatted output
 
 ## Comments
 
-**Module-level docstring:** `# SCCS <Module Name>\n# <One-line description>` — plain comment, not triple-quoted
-**Inline rationale comments:** Used extensively for security decisions and regression guards:
+**Module headers:** `# SCCS <Name>\n# <description>` instead of module docstrings.
+
+**Inline comments** explain:
+- Security decisions: `# Regression guard for the v2.22.x Debian hang`
+- Protocol contracts: HARD RULES block at top of `sccs/doctor/runner.py`
+- Non-obvious logic in diff/merge/state code
+
+**Docstrings:**
+- Public class methods use Google-style with `Args:` and `Returns:`:
 ```python
-# Defensive hardening: any doctor subprocess that asks for stdin
-# should fail fast instead of hanging the parent for `timeout` seconds.
+def get_handler(self, category_name: str) -> CategoryHandler | None:
+    """
+    Get handler for a category.
+
+    Args:
+        category_name: Name of the category.
+
+    Returns:
+        CategoryHandler or None if category doesn't exist.
+    """
 ```
-**Class/method docstrings:** Triple-quoted, present on all public Pydantic models and detector classes.
+- Short private helpers have one-line docstrings or none.
 
-## Git Commit Prefixes
+**noqa markers:**
+- `# nosec B404` / `# nosec B603` — bandit false-positive suppression
+- `# noqa: BLE001` — intentional broad exception catch
 
-- `[ADD]` — new features or extensions
-- `[CHG]` — modifications to existing code
-- `[FIX]` — bug fixes
+## Type Annotations
 
-**Version header rule:** Increment version in `pyproject.toml`, `sccs/__init__.py`, and `CLAUDE.md` header simultaneously. Format: `DD.MM.YYYY` for dates. New features require a version bump before tagging.
+**Policy:** Full type annotations on all public functions and class attributes.
+- Use `str | None` (union syntax), not `Optional[str]` — Python 3.10+ target
+- `from __future__ import annotations` in doctor modules for forward references
+- Lowercase generics: `list[str]`, `dict[str, Any]`, `tuple[str, ...]`
+- Return type `None` always explicit on CLI handlers: `def sync(...) -> None:`
+- `TYPE_CHECKING` guard for circular-import-only imports (excluded from coverage in `pyproject.toml`)
+
+## Pydantic Models
+
+All config models inherit `BaseModel` (Pydantic v2):
+- `Field(description="...")` on every field — serves as inline documentation
+- `@field_validator` with `@classmethod` for input sanitisation and `~` path expansion
+- `model_validate()` for dict-to-model conversion (not positional constructor)
+- Mutable defaults: `Field(default_factory=lambda: ["*"])`
+
+## Function Design
+
+**Size:** Click command handlers are long by design — they own the full workflow. Business logic is delegated to engine/handler classes. Utility functions are short (10–30 lines).
+
+**Parameters:**
+- Keyword-only for optional flags in internal helpers: `def _run(cmd, *, check=True, capture=True, timeout=60)`
+- Click options always include `help=` string
+
+**Return Values:**
+- Result objects (`SyncResult`, `InstallPlan`) instead of tuples for multi-value returns
+- `bool` return for simple success/failure in git operations (e.g. `push()`, `pull()`)
+- `None` explicit on CLI handlers (enforced by mypy)
+
+## Module Design
+
+**Exports:**
+- `__init__.py` files expose a curated public API via `__all__`
+- Sub-package `__init__.py` re-exports key names (no wildcard imports)
+- `sccs/__init__.py` uses `__getattr__` lazy loading for startup performance
+
+**Barrel Files:**
+- Each sub-package has `__init__.py` that re-exports specific names
+- Never `from module import *`
+
+## CLI Design (Click)
+
+- Top-level `cli` group with `--verbose` / `--no-color` global options
+- All subcommands use `@click.pass_context` and access `ctx.obj["console"]`
+- Command groups: `config`, `categories`, `convert`, `docs`, `doctor`, `integrations`
+- Exit codes: always explicit — `sys.exit(0)` success, `sys.exit(1)` error; never rely on implicit exit
+- Non-TTY / CI paths: interactive prompts guarded with `sys.stdout.isatty()`
+
+## Language Policy
+
+**Code and documentation:** English only (variable names, docstrings, comments, commit messages).
+**User-facing console strings:** English in code; German for platform hints emitted to interactive TTY (e.g. `_print_platform_hint` in `sccs/cli.py`).
 
 ---
 
-*Convention analysis: 2026-05-11*
+*Convention analysis: 2026-05-26*

@@ -1,226 +1,220 @@
 # External Integrations
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-26
 
 ## External Binaries (subprocess invocations)
 
-All subprocess calls go through one of two hardened wrappers:
-- `sccs/doctor/runner.py:_run()` — doctor subsystem; validates `argv[0]` against `_SAFE_HEAD_PATTERN`; `shell=False` always; `stdin=DEVNULL`
-- `sccs/git/operations.py:_run_git()` — git subsystem; prepends `["git"]`; `shell=False` always
+All subprocess calls go through validated wrappers — never `shell=True`. Two wrappers enforce this contract:
+
+- `sccs/git/operations.py:_run_git()` — git only; validates remote/branch names via regex
+- `sccs/doctor/runner.py:_run()` — doctor subprocesses; argv[0] validated against `_SAFE_HEAD_PATTERN`; `sudo` hard-blocked
 
 ### git
 
-**Purpose:** Sync repository operations (commit, push, pull, clone, status, fetch)
+**What:** Bidirectional file sync commit and push after category sync operations.
 
-**Invocation module:** `sccs/git/operations.py`
+**Invoked via:** `sccs/git/operations.py` — wraps `subprocess.run(["git", ...], shell=False)`
 
 **Commands used:**
-- `git rev-parse --show-toplevel` — repo root detection
-- `git status --porcelain` — change detection
-- `git add -A` / `git add -- <files>` — staging
-- `git commit -m <msg> [--author <name>]` — commits
-- `git push [-u] <remote> [<branch>]` — normal push
-- `git push --force-with-lease <remote> [<branch>]` — force push (uses `--force-with-lease`, not `--force`)
-- `git fetch` — remote refresh
-- `git pull [--rebase]` — pull
-- `git clone [--depth] -- <url> <dest>` — clone
-- `git init` — repo init
-- `git rev-list --left-right --count HEAD...origin/<branch>` — ahead/behind check
+- `git rev-parse`, `git status --porcelain`, `git add`, `git commit -m`, `git push`
+- `git clone` (for repo init), `git fetch`, `git pull`, `git init`
 
-**Security:** Remote names validated against `_GIT_REMOTE_PATTERN`; branch names against `_GIT_BRANCH_PATTERN`; author against `_GIT_AUTHOR_PATTERN`; clone URL checked for leading `-`
+**Triggered by:** `sccs sync` (when `auto_commit: true` or `auto_push: true` in config), `sccs/sync/engine.py`
+
+**Auth:** Relies on the user's ambient git credential configuration (SSH keys, credential helpers). SCCS does not manage git credentials.
+
+**Validation:** remote names validated by `_GIT_REMOTE_PATTERN`, branch names by `_GIT_BRANCH_PATTERN` (both block `-` prefix to prevent option injection). Force-push uses `--force-with-lease` only.
+
+---
 
 ### claude (Claude Code CLI)
 
-**Purpose:** Plugin management for Claude Code environment setup
+**What:** Doctor subsystem detects, installs, updates, and removes Claude Code plugins and MCP servers by shelling out to the `claude` CLI.
 
-**Invocation module:** `sccs/doctor/runner.py`, `sccs/doctor/installer.py`
-
-**Commands used:**
-- `claude plugin list` — detect installed plugins (`runner.run_claude_plugin_list()`)
-- `claude plugin marketplace list` — detect registered marketplaces (`runner.run_claude_marketplace_list()`)
-- `claude plugin marketplace update <name>` — refresh stale marketplace cache (auto-queued in install plan)
-- `claude plugin marketplace add <source>` — register a new marketplace (queued when `marketplace_source` configured)
-- `claude plugin install <name>[@<marketplace>]` — install missing plugin
-- `claude plugin update <name>[@<marketplace>] [--scope <scope>]` — update installed plugin
-
-**Detection:** `shutil.which("claude")` in `sccs/doctor/detectors.py:ClaudeCliDetector`
-
-**Install action (when missing):** `npm install -g @anthropic-ai/claude-code` — queued by `sccs/doctor/installer.py:_claude_cli_action()`
-
-### npm
-
-**Purpose:** Global package management for Node.js tools
-
-**Invocation module:** `sccs/doctor/detectors.py`, `sccs/doctor/installer.py`, `sccs/doctor/defaults.py`
+**Invoked via:** `sccs/doctor/runner.py:_run()` and helpers `run_claude_plugin_list()`, `run_claude_mcp_list()`, `run_claude_marketplace_list()`
 
 **Commands used:**
-- `npm root -g` — resolve global node_modules path (permission check + bundled skill copy)
-- `npm config get prefix` — resolve `<prefix>/bin` for PATH check
-- `npm install -g @anthropic-ai/claude-code` — install Claude CLI
-- `npm install -g @playwright/cli@latest` — install/update playwright-cli (defined in `sccs/doctor/defaults.py:DEFAULT_NPX_TOOLS`)
-- `npm config set prefix ~/.npm-global` — shown in manual fix block (print-only, never executed)
+- `claude plugin list` — detect installed plugins (`sccs/doctor/detectors.py:ClaudePluginDetector`)
+- `claude plugin install <name@marketplace>` — install missing plugins (`sccs/doctor/installer.py`)
+- `claude plugin update <name@marketplace> [--scope <scope>]` — update installed plugins
+- `claude plugin uninstall <name@marketplace> [--scope <scope>]` — remove foreign plugins (optimize --strict)
+- `claude plugin marketplace list` — detect registered marketplaces (`sccs/doctor/detectors.py:ClaudeMarketplaceDetector`)
+- `claude plugin marketplace update <name>` — refresh stale marketplace metadata (soft-fail)
+- `claude plugin marketplace add <source>` — register a missing marketplace
+- `claude mcp list` — detect registered MCP servers (`sccs/doctor/detectors.py:MCPServerDetector`)
+- `claude mcp remove <name> -s user` — remove foreign MCP servers (optimize --strict)
 
-### npx
+**Timeout:** 15 s for plugin list/marketplace list; 20 s for mcp list
 
-**Purpose:** Run one-shot Node.js tools without global install
+**Triggered by:** `sccs doctor check`, `sccs doctor install`, `sccs doctor update`, `sccs doctor optimize`
 
-**Invocation module:** `sccs/doctor/defaults.py`, `sccs/doctor/installer.py`
+**Detection:** `shutil.which("claude")` in `ClaudeCliDetector.get_status()` (`sccs/doctor/detectors.py`)
 
-**Commands used:**
-- `npx -y get-shit-done-cc --claude --global --force-statusline` — patches `~/.claude/` config (no binary dropped on PATH; detected via doctor state file)
-
-**Note:** `-y` flag is mandatory — without it, npx hangs on stdin on fresh Linux hosts because `capture_output=True` hides the prompt
-
-### playwright-cli
-
-**Purpose:** Browser automation; installed globally via npm
-
-**Invocation module:** `sccs/doctor/defaults.py` (post_install), `sccs/doctor/installer.py`
-
-**Commands used:**
-- `playwright-cli install-browser chromium` — download Chromium bundle
-- `playwright-cli install-browser firefox` — download Firefox bundle
-
-**Detection:** `shutil.which("playwright-cli")`
-
-**Browser cache:** Resolved at runtime via `$PLAYWRIGHT_BROWSERS_PATH` or platform default:
-- Linux: `~/.cache/ms-playwright/`
-- macOS: `~/Library/Caches/ms-playwright/`
-- Windows: `%LOCALAPPDATA%/ms-playwright/`
-
-### node
-
-**Purpose:** Node.js version detection
-
-**Invocation module:** `sccs/doctor/runner.py:run_node_version()`
-
-**Commands used:**
-- `node --version` — returns version string; parsed for major version by `parse_node_major()`
-
-**Minimum version:** 20 (defined in `sccs/doctor/defaults.py:MIN_NODE_MAJOR`)
-
-### brew (macOS only)
-
-**Purpose:** Node.js installation on macOS
-
-**Invocation module:** `sccs/doctor/defaults.py:NODE_INSTALL["macos"]`
-
-**Commands used:**
-- `brew install node` — only queued when Node.js is missing and platform is `macos`
-
-### winget (Windows only)
-
-**Purpose:** Node.js installation on Windows
-
-**Invocation module:** `sccs/doctor/defaults.py:NODE_INSTALL["windows"]`
-
-**Commands used:**
-- `winget install OpenJS.NodeJS` — only queued when Node.js is missing and platform is `windows`
+**Install action:** `npm install -g @anthropic-ai/claude-code` queued when CLI is absent
 
 ---
 
-## Data Storage
+### npm / npx
 
-**Config file:**
-- Location: `~/.config/sccs/config.yaml` (overridable via `$SCCS_CONFIG`)
-- Format: YAML, read/written by `sccs/config/loader.py`
-- Schema: `sccs/config/schema.py:SccsConfig` (Pydantic)
+**What:** Doctor manages Node.js-based tools via npm/npx.
 
-**Sync state:**
-- Location: `~/.config/sccs/.sync_state.yaml`
-- Format: YAML — maps `{category: {item: {hash, timestamp}}}`
-- Manager: `sccs/sync/state.py:StateManager`
+**Invoked via:** `sccs/doctor/runner.py:_run()`
 
-**Doctor state:**
-- Location: `~/.config/sccs/.doctor_state.yaml`
-- Format: YAML — records successful npx tool invocations for tools without PATH binary
-- Manager: `sccs/doctor/state.py:DoctorStateManager`
+**Commands used:**
+- `npm install -g @anthropic-ai/claude-code` — install Claude Code CLI
+- `npm install -g @playwright/cli@latest` — install/update playwright-cli
+- `npm root -g` — resolve npm global root directory (for bundled-skill copy)
+- `npm config get prefix` — resolve npm bin dir (PATH gap detection)
+- `npx -y get-shit-done-cc --claude --global --force-statusline` — GSD environment setup
 
-**Log file:**
-- Location: `~/.config/sccs/sync.log` (if configured)
-- Handler: `sccs/utils/logging.py:get_logger()`
+**Default npx tools** (configured in `sccs/doctor/defaults.py:DEFAULT_NPX_TOOLS`):
+- `get-shit-done-cc` — detected via doctor state file (no binary on PATH); runs `npx -y`
+- `playwright-cli` — detected via `shutil.which("playwright-cli")`; installed via `npm install -g`
 
----
+**Post-install steps** (also re-run on update):
+- `playwright-cli install-browser chromium`
+- `playwright-cli install-browser firefox`
 
-## Filesystem Touchpoints
-
-| Path | Purpose | Access |
-|------|---------|--------|
-| `~/.config/sccs/` | All SCCS state, config, logs | read/write |
-| `~/.config/sccs/config.yaml` | Main config | read/write |
-| `~/.config/sccs/.sync_state.yaml` | Sync state | read/write |
-| `~/.config/sccs/.doctor_state.yaml` | Doctor state | read/write |
-| `~/.claude/` | Claude Code config dir | read/write (sync target) |
-| `~/.claude/skills/` | Claude skills (sync category) | read/write |
-| `~/.claude/skills/playwright-cli/` | Bundled skill copy from npm | write (managed, excluded from sync) |
-| `~/.npm/` | npm cache — permission check target | read (ownership scan only) |
-| `~/.npm-global/` | User-local npm prefix (recommended fix) | mentioned in manual blocks |
-| `~/Library/Caches/ms-playwright/` | Playwright browser bundles (macOS) | read (bundle detection) |
-| `~/.cache/ms-playwright/` | Playwright browser bundles (Linux) | read (bundle detection) |
-| `~/.antigravity/` | Antigravity IDE install dir | read (detection in `sccs/integrations/detectors.py`) |
-| `~/.antigravity/prompts/` | Antigravity prompt files | read/write (skill sync) |
-| `/Applications/Claude.app` | Claude Desktop (macOS) | read (existence check) |
-| `~/Library/Application Support/Claude/claude_desktop_config.json` | Claude Desktop config | read (trusted folders) |
-| `<repo>/` | Sync repository (configured path) | read/write |
+**Bundled skill copy:** After `playwright-cli` install, `npm root -g` is called to locate `@playwright/cli/skills/playwright-cli/` and copy it to `~/.claude/skills/playwright-cli/`
 
 ---
 
-## Claude Plugin Marketplaces
+## Files Read and Written
 
-Configured in `sccs/doctor/defaults.py:DEFAULT_CLAUDE_PLUGINS`:
+### `~/.claude/settings.json` (Claude Code settings)
 
-| Plugin | Marketplace | Source |
-|--------|-------------|--------|
-| `skill-creator` | `claude-plugins-official` | — |
-| `superpowers` | `claude-plugins-official` | — |
-| `frontend-design` | `claude-plugins-official` | — |
-| `context-mode` | `context-mode` | `mksglu/context-mode` |
-| `claude-mem` | (bare name) | `thedotmack/claude-mem` |
+**Read by:**
+- `sccs/doctor/detectors.py:StatusLineDetector` — inspect `statusLine.command` for stale Cellar paths and missing binaries
+- `sccs/doctor/detectors.py:SettingsHookDetector` — find hook entries matching `disallowed_hooks` patterns
 
-Marketplace detection: `sccs/doctor/detectors.py:ClaudeMarketplaceDetector` parses `claude plugin marketplace list`
+**Written by:**
+- `sccs/doctor/installer.py:_status_line_actions()` — auto-fix stale Homebrew Cellar path in `statusLine.command` (writes backup before modify)
+- `sccs/doctor/installer.py:_settings_hook_cleanup_actions()` — remove disallowed hook entries (writes timestamped backup before modify, e.g. `settings.json.bak-20260526-143021`)
+- `sccs/sync/settings.py:ensure_settings()` — non-destructive JSON merge: adds missing keys from `settings_ensure` category config; never overwrites existing keys; writes backup before modify
 
----
+**Backup pattern:** `settings.json.bak-YYYYMMDD-HHMMSS` written alongside the original before any mutation
 
-## Third-Party Integrations (detection only, no subprocess)
-
-**Antigravity IDE:**
-- Detection: `~/.antigravity/` dir existence
-- Skill gap sync: `sccs/integrations/detectors.py:AntigravityDetector`
-- Copies `~/.claude/skills/<name>/SKILL.md` → `~/.antigravity/prompts/<name>.md`
-
-**Claude Desktop (macOS only):**
-- Detection: `/Applications/Claude.app` dir existence
-- Config read: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Used for: trusted folder check (`sccs/integrations/detectors.py:ClaudeDesktopDetector`)
+**Interaction:** All writes use `json.loads` / `json.dumps(indent=2) + "\n"` round-trip; UTF-8 throughout
 
 ---
 
-## CI/CD & Distribution
+### `~/.config/sccs/config.yaml` (SCCS configuration)
 
-**Hosting:**
-- PyPI — published as `sccs` package
-- GitHub: `https://github.com/equitania/sccs` (homepage, issues, docs)
+**Read by:** `sccs/config/loader.py:load_config()` — primary config load path on every command
 
-**CI Pipeline:**
-- Not detected in repo (no `.github/workflows/` or `.gitlab-ci.yml` found in source)
+**Written by:**
+- `sccs/config/loader.py` — `sccs config init`, `sccs config upgrade`, `sccs categories enable/disable`
+- `sccs/config/migration.py:MigrationStateManager` — records which default categories have been offered to the user
 
-**Build:**
-- `uv build` — produces wheel via hatchling
-- Wheel includes only `sccs/` package (`[tool.hatch.build.targets.wheel] packages = ["sccs"]`)
+**Path override:** `SCCS_CONFIG` environment variable overrides default path
+
+**Format:** YAML; loaded with `yaml.safe_load`, written with `yaml.dump`
 
 ---
 
-## Environment Variables
+### `~/.config/sccs/.sync_state.yaml` (sync state)
 
-**Required / important:**
+**Read/Written by:** `sccs/sync/state.py:StateManager` — tracks per-item content hashes and timestamps across sync runs; used for change detection in `sync/category.py`
+
+---
+
+### `~/.config/sccs/.doctor_state.yaml` (doctor state)
+
+**Read/Written by:** `sccs/doctor/state.py:DoctorStateManager` — records successful `npx` invocations for tools that do not drop a binary on PATH (notably `get-shit-done-cc`); used by `NpxToolDetector` as fallback when `shutil.which()` finds nothing
+
+---
+
+### `~/.config/sccs/sync.log` (optional log file)
+
+**Written by:** `sccs/utils/logging.py` — when logging is configured in `config.yaml`
+
+---
+
+## Claude Desktop Integration
+
+**File:** `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS only)
+
+**What:** `sccs/integrations/claude_desktop.py:register_trusted_folder()` reads and writes this file to add the SCCS sync repository to `preferences.localAgentModeTrustedFolders`
+
+**Platform:** macOS only; returns error on Linux/Windows
+
+**Triggered by:** `sccs config` commands that expose trust registration
+
+**Writes backup** via `sccs/utils/paths.py:create_backup()` before any modification
+
+---
+
+## Antigravity IDE Integration
+
+**What:** `sccs/integrations/antigravity.py` + `sccs/integrations/detectors.py` — migrate Claude Code `SKILL.md` files to Antigravity IDE prompt files
+
+**Files read:** `~/.claude/skills/*/SKILL.md` files
+
+**Files written:** Antigravity prompts directory (path resolved at runtime)
+
+**No subprocess calls** — pure filesystem copy via `sccs/utils/paths.py:atomic_write()`
+
+---
+
+## Node.js Environment Detection
+
+**What:** Doctor detects Node.js version and validates `min_node_major` (default: 20)
+
+**Via:** `sccs/doctor/runner.py:run_node_version()` — calls `node --version`
+
+**Install hints** (print-only, never executed by SCCS):
+- macOS: `brew install node`
+- Linux/Windows: manual URL blocks surfaced as text
+
+---
+
+## Filesystem Permission Checks
+
+**What:** Doctor scans known-fragile paths for foreign ownership that breaks npm/npx
+
+**Default paths checked** (`sccs/doctor/defaults.py:DEFAULT_PERMISSION_CHECKS`):
+- `~/.npm` — npm cache directory
+- `~/.claude` — Claude config directory
+- `~/.config/sccs` — SCCS config directory
+- `npm root -g` (resolved at runtime) — npm global root (lib/node_modules)
+- `npm config get prefix` + `/bin` (resolved at runtime) — npm global bin directory
+
+**Detection:** `sccs/doctor/detectors.py:PermissionDetector` — recursive ownership scan capped at 500 entries
+
+**Remediation:** print-only manual blocks (`sudo chown ...`); SCCS never calls sudo
+
+---
+
+## ZIP Transfer (Export/Import)
+
+**What:** `sccs/transfer/` — machine-to-machine config portability via ZIP archives
+
+**Format:** `.zip` file containing `sccs-manifest.json` + directory tree of selected items
+
+**No network calls** — purely local filesystem read/write via `zipfile` stdlib module
+
+**Triggered by:** `sccs export` / `sccs import` CLI commands
+
+---
+
+## Webhooks and Callbacks
+
+**Incoming:** None
+
+**Outgoing:** None — SCCS makes no HTTP requests; all operations are local filesystem + subprocess
+
+---
+
+## Environment Configuration Summary
+
+**Required variables:** None — all paths have defaults
+
+**Optional variables:**
 - `SCCS_CONFIG` — override config file path
-- `HOME` — used for `~` expansion throughout
-- `PATH` — inspected by `PathPrefixDetector` for npm-prefix-bin check
-- `PLAYWRIGHT_BROWSERS_PATH` — override Playwright browser cache root
+- `PLAYWRIGHT_BROWSERS_PATH` — override browser cache location
 
-**Never read (security):**
-- `.env` files — not used; no secrets stored
+**Secrets:** None — SCCS does not handle API keys, tokens, or credentials
 
 ---
 
-*Integration audit: 2026-05-11*
+*Integration audit: 2026-05-26*

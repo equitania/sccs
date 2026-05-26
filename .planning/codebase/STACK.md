@@ -1,6 +1,6 @@
 # Technology Stack
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-26
 
 ## Languages
 
@@ -8,79 +8,79 @@
 - Python 3.10–3.13 — all application code under `sccs/`
 
 **Secondary:**
-- YAML — configuration (`~/.config/sccs/config.yaml`), state files
-- TOML — project metadata (`pyproject.toml`)
+- None — pure Python project
 
 ## Runtime
 
 **Environment:**
-- CPython 3.10+ (minimum enforced in `pyproject.toml` `requires-python = ">=3.10"`)
-- Cross-platform: macOS, Linux, Windows (Windows skips POSIX permission checks)
+- CPython 3.10+ (minimum declared in `pyproject.toml`)
+- Tested against 3.10, 3.11, 3.12, 3.13 per classifiers
 
 **Package Manager:**
-- UV (project rule — never pip)
-- Lockfile: not present; `pyproject.toml` is the single source of truth
+- uv (development/install workflow per project CLAUDE.md)
+- pip-compatible (wheel published via hatchling)
+- Lockfile: `uv.lock` — present and committed
 
 ## Frameworks
 
 **Core:**
-- Click `>=8.1.0,<9.0.0` — CLI command groups and argument parsing (`sccs/cli.py`)
-- Pydantic `>=2.0.0,<3.0.0` — config/schema validation (`sccs/config/schema.py`, `sccs/doctor/schema.py`)
-- PyYAML `>=6.0,<7.0.0` — YAML load/save (`sccs/config/loader.py`, state files)
-- Rich `>=13.0.0,<15.0.0` — terminal output, tables, panels (`sccs/output/console.py`, `sccs/output/diff.py`)
-- questionary `>=2.0.0,<3.0.0` — interactive confirm prompts in installer (`sccs/doctor/installer.py`)
+- Click `>=8.1.0,<9.0.0` — CLI command group, options, arguments (`sccs/cli.py`)
+- Pydantic `>=2.0.0,<3.0.0` — config schema validation (`sccs/config/schema.py`, `sccs/doctor/schema.py`, `sccs/transfer/manifest.py`)
+- PyYAML `>=6.0,<7.0.0` — config file read/write (`sccs/config/loader.py`)
+- Rich `>=13.0.0,<15.0.0` — terminal output, tables, progress (`sccs/output/console.py`, `sccs/output/diff.py`)
+- questionary `>=2.0.0,<3.0.0` — interactive prompts during install/conflict resolution (`sccs/doctor/installer.py`, `sccs/transfer/ui.py`, `sccs/output/diff.py`)
 
 **Testing:**
-- pytest `>=8.0.0` — test runner, config in `pyproject.toml` `[tool.pytest.ini_options]`
-- pytest-cov `>=6.0.0` — coverage; floor `fail_under = 66` (`pyproject.toml`)
+- pytest `>=8.0.0` — test runner; config in `pyproject.toml` `[tool.pytest.ini_options]`
+- pytest-cov `>=6.0.0` — coverage; minimum 66% enforced (`[tool.coverage.report]`)
 
 **Build/Dev:**
-- hatchling — build backend (`pyproject.toml` `[build-system]`)
-- ruff `>=0.11.0` — linter + formatter, line-length 120, target py310 (`pyproject.toml` `[tool.ruff]`)
-- mypy `>=1.14.0` — static type checking, `python_version = "3.10"` (`pyproject.toml` `[tool.mypy]`)
+- hatchling — build backend declared in `[build-system]`
+- ruff `>=0.11.0` — linting + formatting (replaces black/isort); line-length 120, target py310
+- mypy `>=1.14.0` — type checking; `python_version = "3.10"`, `ignore_missing_imports = true`
 - pre-commit `>=4.0.0` — git hooks
-- bandit `>=1.9.0` — security linting (`pyproject.toml` dev deps)
+- bandit `>=1.9.0` — security linting (explicitly in dev dependencies)
 - types-PyYAML `>=6.0.0` — mypy stubs
 
 ## Key Dependencies
 
 **Critical:**
-- `click` — entry point wiring; `sccs/cli.py` registers all command groups; `pyproject.toml` `[project.scripts]` maps `sccs` → `sccs.cli:cli`
-- `pydantic` — `SccsConfig`, `SyncCategory`, `DoctorConfig`, `NpxToolSpec`, `PluginSpec` etc. all use `BaseModel.model_validate()`
-- `PyYAML` — config read/write in `sccs/config/loader.py`; state persistence in `sccs/sync/state.py` and `sccs/doctor/state.py`
-- `rich` — all terminal output; `sccs/output/console.py` wraps a `Console` instance
-- `questionary` — `_confirm()` in `sccs/doctor/installer.py` for interactive install prompts
+- `click` — the entire CLI surface lives on Click command groups/decorators
+- `pydantic` v2 — config models are the schema contract; v1 API is NOT used
+- `PyYAML` — all config I/O; `yaml.safe_load` / `yaml.dump` only
+- `rich` — all formatted terminal output; no bare `print()` in CLI paths
+- `questionary` — all interactive confirm/checkbox/select prompts
 
 **Infrastructure:**
-- `subprocess` (stdlib) — all external-binary calls via `sccs/doctor/runner.py:_run()` and `sccs/git/operations.py:_run_git()`
-- `shutil` (stdlib) — `which()` wrapper in `sccs/doctor/runner.py`; `copytree()` in `sccs/doctor/installer.py:_sync_bundled_skill()`
-- `pathlib` (stdlib) — universal path handling throughout
-- `hashlib` (stdlib) — SHA-256 content hashing in `sccs/utils/hashing.py`
+- Standard library only for subprocess, pathlib, json, shutil, hashlib, re, fnmatch, zipfile, tempfile, logging
 
 ## Configuration
 
 **Environment:**
-- `SCCS_CONFIG` — overrides config file path
-- `HOME` — user home directory for path expansion
-- `PLAYWRIGHT_BROWSERS_PATH` — overrides Playwright browser cache root (detected in `sccs/doctor/detectors.py:_resolve_playwright_cache()`)
-- `PATH` — inspected directly via `os.environ` in `sccs/doctor/detectors.py:PathPrefixDetector`
+- `SCCS_CONFIG` — override config file path (read in `sccs/config/loader.py:get_config_path()`)
+- `HOME` — resolved via `Path.home()` for all `~/` expansions
+- `PLAYWRIGHT_BROWSERS_PATH` — override Playwright browser cache dir (read in `sccs/doctor/detectors.py:_resolve_playwright_cache()`)
+- `PATH` — inspected directly via `os.environ["PATH"]` for doctor PATH checks (never mutated)
 
 **Build:**
-- `pyproject.toml` — single config file for build, dependencies, ruff, mypy, pytest, coverage
-- No `setup.py`, no `requirements.txt`, no `requirements-dev.txt`
+- `pyproject.toml` — single source of truth for dependencies, scripts, tool config, version
+- `uv.lock` — reproducible installs
+- No `requirements.txt` or `requirements-dev.txt` files
 
 ## Platform Requirements
 
 **Development:**
-- UV installed (`uv venv && uv pip install -e ".[dev]"`)
 - Python 3.10+
-- git binary on PATH (required for `sccs/git/operations.py`)
+- uv for environment management
+- git (for `sccs/git/operations.py` subprocess calls)
+- Node.js ≥20 recommended for `sccs doctor` targets (detected at runtime, not required to build/test)
 
 **Production:**
-- Distributed via PyPI as `sccs` package
-- Entry point: `sccs` CLI binary installed by pip/uv
-- Runtime deps only: click, rich, PyYAML, pydantic, questionary
+- macOS, Linux, Windows — all supported; platform-specific branches in `sccs/utils/platform.py`
+- Claude Desktop integration: macOS only (`sccs/integrations/claude_desktop.py`)
+- POSIX uid/gid permission checks: skipped on Windows (`sccs/doctor/detectors.py:PermissionDetector`)
+- Fish shell config sync: requires `fish` binary on PATH
 
 ---
 
-*Stack analysis: 2026-05-11*
+*Stack analysis: 2026-05-26*
