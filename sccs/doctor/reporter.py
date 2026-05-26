@@ -50,9 +50,13 @@ def _plugin_row(status: PluginStatus) -> tuple[str, str, str]:
     if not status.installed:
         return (f"plugin: {label}", _MISSING, "not in `claude plugin list`")
     if status.detection_source == "alternative" and status.found_marketplace:
+        # Installed under a different marketplace than configured. This is NOT
+        # "outdated": `claude plugin` has no update-available signal, and the
+        # status never converges (the plugin won't reappear under the configured
+        # marketplace). Report as INFO, not a yellow OUTDATED that nags forever.
         return (
             f"plugin: {label}",
-            _OUTDATED,
+            _INFO,
             f"installed via {status.found_marketplace}",
         )
     if status.detection_source == "bare":
@@ -277,7 +281,8 @@ def render_inline_summary(
         parts.append(f"[red]plugins missing: {len(missing_plugins)}[/red]")
     alt_plugins = [p for p in plugins if p.detection_source == "alternative"]
     if alt_plugins:
-        parts.append(f"[yellow]alt marketplace: {len(alt_plugins)}[/yellow]")
+        # Informational, not a problem: installed, just under another marketplace.
+        parts.append(f"[dim]alt marketplace: {len(alt_plugins)}[/dim]")
 
     missing_tools = [t.spec.name for t in npx_tools if not t.available]
     if missing_tools:

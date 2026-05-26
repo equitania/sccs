@@ -1532,7 +1532,13 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign:
     )
     from sccs.doctor.state import DoctorStateManager
 
-    plugin_specs = doctor_cfg.effective_plugins()
+    # Install-/marketplace-check list: excludes allowlist_only entries (LSPs,
+    # the second frontend-design copy) so they never produce a MISSING/OUTDATED
+    # row or an unresolvable marketplace block.
+    plugin_specs = doctor_cfg.checkable_plugins()
+    # Full list (incl. allowlist_only): ONLY for foreign-drift detection, so an
+    # installed LSP / frontend-design@claude-code-plugins is never flagged foreign.
+    plugin_specs_all = doctor_cfg.effective_plugins()
     npx_specs = doctor_cfg.effective_npx_tools()
     permission_specs = doctor_cfg.effective_permission_checks()
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
@@ -1567,7 +1573,7 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign:
         mcp_specs = doctor_cfg.effective_mcp_servers()
         ignored_patterns = doctor_cfg.effective_ignored_mcp_patterns()
         mcp_detector = MCPServerDetector()
-        result["foreign_plugins"] = plugin_detector.get_foreign_plugins(plugin_specs)
+        result["foreign_plugins"] = plugin_detector.get_foreign_plugins(plugin_specs_all)
         result["mcp_servers"] = mcp_detector.get_statuses(mcp_specs)
         result["foreign_mcp_servers"] = mcp_detector.get_foreign_servers(mcp_specs, ignored_patterns)
 

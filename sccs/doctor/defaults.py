@@ -23,20 +23,26 @@ DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
     PluginSpec(name="superpowers", marketplace="claude-plugins-official"),
     PluginSpec(name="frontend-design", marketplace="claude-plugins-official"),
     # frontend-design also ships from the anthropics/claude-code marketplace.
-    # Listing both marketplaces keeps a locally-disabled `@claude-code-plugins`
-    # copy from being flagged foreign by `optimize --strict`.
-    PluginSpec(name="frontend-design", marketplace="claude-code-plugins"),
-    # Official language-server plugins. Common in real setups — managed so the
-    # foreign-drift detector treats them as legitimate, not removal candidates.
-    PluginSpec(name="gopls-lsp", marketplace="claude-plugins-official"),
-    PluginSpec(name="pyright-lsp", marketplace="claude-plugins-official"),
-    PluginSpec(name="rust-analyzer-lsp", marketplace="claude-plugins-official"),
-    PluginSpec(name="swift-lsp", marketplace="claude-plugins-official"),
-    PluginSpec(name="typescript-lsp", marketplace="claude-plugins-official"),
+    # allowlist_only: keeps a locally-installed `@claude-code-plugins` copy from
+    # being flagged foreign by `optimize --strict`, WITHOUT producing an "ewig
+    # OUTDATED" row (it's detected as `alternative` under claude-plugins-official)
+    # or an unresolvable marketplace-registration block (claude-code-plugins has
+    # no marketplace_source and can't be `marketplace add`ed by name).
+    PluginSpec(name="frontend-design", marketplace="claude-code-plugins", allowlist_only=True),
+    # Official language-server plugins. allowlist_only: common in real setups,
+    # so the foreign-drift detector treats them as legitimate — but they must NOT
+    # be required (they'd show MISSING on hosts that don't use them, e.g. a
+    # headless Linux server running only Claude).
+    PluginSpec(name="gopls-lsp", marketplace="claude-plugins-official", allowlist_only=True),
+    PluginSpec(name="pyright-lsp", marketplace="claude-plugins-official", allowlist_only=True),
+    PluginSpec(name="rust-analyzer-lsp", marketplace="claude-plugins-official", allowlist_only=True),
+    PluginSpec(name="swift-lsp", marketplace="claude-plugins-official", allowlist_only=True),
+    PluginSpec(name="typescript-lsp", marketplace="claude-plugins-official", allowlist_only=True),
     PluginSpec(
         name="superpowers-developing-for-claude-code",
         marketplace="superpowers-marketplace",
         marketplace_source="obra/superpowers-marketplace",
+        allowlist_only=True,
     ),
     PluginSpec(
         name="context-mode",

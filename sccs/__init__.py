@@ -1,10 +1,10 @@
 # SCCS - SkillsCommandsConfigsSync
 # Unified YAML-configured synchronization for Claude Code files
 #
-# Version: 2.32.2
+# Version: 2.33.0
 # Date: 26.05.2026
 
-__version__ = "2.32.2"
+__version__ = "2.33.0"
 __author__ = "Equitania Software GmbH"
 
 

@@ -1,5 +1,20 @@
 # Release Notes
 
+## Version 2.33.0 (26.05.2026)
+
+### Added
+- **`PluginSpec.allowlist_only` field.** Marks a plugin entry as *foreign-drift allowlist only*: it keeps an installed plugin off `optimize --strict`'s removal list **without** being install-/marketplace-checked. Such entries produce no MISSING/OUTDATED row and no marketplace-registration block, but still count toward foreign-drift coverage via `effective_plugins()`. New resolver `DoctorConfig.checkable_plugins()` returns the install-check list (excludes `allowlist_only`); `effective_plugins()` is unchanged (full list, used only for foreign-drift detection).
+
+### Fixed
+- **`check` → `update` → `check` now converges for managed-but-not-installed plugins.** Root cause: the v2.32.0 entries added purely as a foreign-drift allowlist (the 5 LSP plugins `gopls-lsp`/`pyright-lsp`/`rust-analyzer-lsp`/`swift-lsp`/`typescript-lsp` and the second `frontend-design@claude-code-plugins` copy) were install-checked like real targets. Three non-converging symptoms, all fixed by tagging them `allowlist_only=True`:
+  - **LSP plugins showed red MISSING** on hosts that don't use them (e.g. a headless Linux server running only Claude). They now produce no row.
+  - **`frontend-design@claude-code-plugins` showed perpetual OUTDATED.** It is detected as `alternative` (installed under `claude-plugins-official`) and could never converge (the plugin never appears under `claude-code-plugins`, whose marketplace can't be registered). It now produces no row.
+  - **`claude-code-plugins` marketplace emitted an unresolvable manual block** ("not registered — no marketplace_source"; `claude plugin marketplace add claude-code-plugins` fails with "Invalid marketplace source format"). The marketplace is no longer derived, because `ClaudeMarketplaceDetector` is now fed `checkable_plugins()` — and the only entry referencing it is `allowlist_only`.
+- **`alternative` detection no longer mislabelled as OUTDATED.** A plugin installed under a different marketplace than configured is reported as blue **INFO** "installed via <marketplace>", not yellow OUTDATED. `claude plugin` exposes no update-available signal (`update_available` is always `None`), so OUTDATED nagged forever with no fix path. The `sccs status` inline summary likewise dims the "alt marketplace" counter (informational, not a problem).
+
+### Tests
+- 13 new tests in `tests/test_doctor.py`: `TestPluginSpecAllowlistOnly` (default/accept/loader-roundtrip), `TestCheckablePlugins` (filter vs full list; defaults' LSPs + 2nd frontend-design excluded), `TestAllowlistOnlyNotForeign` (regression: installed allowlist_only plugin never flagged foreign), `TestAllowlistOnlyNoMarketplaceBlock` (`claude-code-plugins` absent from marketplace statuses), `TestAlternativeReportedAsInfo` (alternative → INFO, not OUTDATED).
+
 ## Version 2.32.2 (26.05.2026)
 
 ### Fixed

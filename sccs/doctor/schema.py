@@ -42,6 +42,15 @@ class PluginSpec(BaseModel):
             "before installing. Required when the marketplace is not the default."
         ),
     )
+    allowlist_only: bool = Field(
+        default=False,
+        description=(
+            "If True, this entry exists ONLY to keep an installed plugin off the "
+            "foreign-drift removal list. It is never install-/marketplace-checked "
+            "(no MISSING/OUTDATED row, no marketplace registration block) but still "
+            "counts toward foreign-drift coverage via effective_plugins()."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -598,6 +607,15 @@ class DoctorConfig(BaseModel):
 
         base = list(self.plugins) if self.plugins is not None else list(DEFAULT_CLAUDE_PLUGINS)
         return base + list(self.extra_plugins)
+
+    def checkable_plugins(self) -> list[PluginSpec]:
+        """Plugins to install-/marketplace-check on this host.
+
+        Excludes ``allowlist_only`` entries — those count only toward
+        foreign-drift coverage (via ``effective_plugins()``) and must never
+        produce a MISSING/OUTDATED row or a marketplace-registration block.
+        """
+        return [s for s in self.effective_plugins() if not s.allowlist_only]
 
     def effective_npx_tools(self) -> list[NpxToolSpec]:
         """Return npx tools to check: override or default, plus extras."""

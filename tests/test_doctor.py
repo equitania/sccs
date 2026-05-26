@@ -3828,3 +3828,122 @@ class TestDoctorConfigProtectedHooks:
         )
         cfg = load_config(config_path)
         assert cfg.doctor.effective_protected_hooks() == ["gsd-", "my-hook.js"]
+
+
+class TestPluginSpecAllowlistOnly:
+    """allowlist_only field on PluginSpec."""
+
+    def test_default_is_false(self):
+        assert PluginSpec(name="foo").allowlist_only is False
+
+    def test_accepts_true(self):
+        assert PluginSpec(name="foo", marketplace="bar", allowlist_only=True).allowlist_only is True
+
+    def test_override_loads(self, tmp_path: Path):
+        import yaml as _yaml
+
+        from sccs.config.loader import load_config
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            _yaml.dump(
+                {
+                    "repository": {"path": str(tmp_path)},
+                    "sync_categories": {},
+                    "doctor": {
+                        "plugins": [
+                            {"name": "core", "marketplace": "m1"},
+                            {"name": "extra", "marketplace": "m2", "allowlist_only": True},
+                        ]
+                    },
+                }
+            )
+        )
+        cfg = load_config(config_path)
+        assert [p.allowlist_only for p in cfg.doctor.effective_plugins()] == [False, True]
+
+
+class TestCheckablePlugins:
+    """checkable_plugins() excludes allowlist_only; effective_plugins() keeps them."""
+
+    def test_checkable_excludes_allowlist_only(self):
+        cfg = DoctorConfig(
+            plugins=[
+                PluginSpec(name="core", marketplace="m1"),
+                PluginSpec(name="al", marketplace="m2", allowlist_only=True),
+            ]
+        )
+        assert [p.name for p in cfg.checkable_plugins()] == ["core"]
+
+    def test_effective_keeps_allowlist_only(self):
+        cfg = DoctorConfig(
+            plugins=[
+                PluginSpec(name="core", marketplace="m1"),
+                PluginSpec(name="al", marketplace="m2", allowlist_only=True),
+            ]
+        )
+        assert [p.name for p in cfg.effective_plugins()] == ["core", "al"]
+
+    def test_default_lsps_and_second_frontend_design_not_checkable(self):
+        checkable = {p.install_target for p in DoctorConfig().checkable_plugins()}
+        for entry in (
+            "gopls-lsp@claude-plugins-official",
+            "pyright-lsp@claude-plugins-official",
+            "rust-analyzer-lsp@claude-plugins-official",
+            "swift-lsp@claude-plugins-official",
+            "typescript-lsp@claude-plugins-official",
+            "frontend-design@claude-code-plugins",
+        ):
+            assert entry not in checkable
+        # The primary frontend-design copy stays a real install target.
+        assert "frontend-design@claude-plugins-official" in checkable
+
+
+class TestAllowlistOnlyNotForeign:
+    """Regression: an installed allowlist_only plugin is never flagged foreign."""
+
+    def test_lsp_and_second_frontend_design_not_foreign(self):
+        raw = (
+            "❯ typescript-lsp@claude-plugins-official\n"
+            "  Scope: user\n"
+            "❯ frontend-design@claude-code-plugins\n"
+            "  Scope: user\n"
+        )
+        detector = ClaudePluginDetector(raw_output=raw)
+        foreign_names = {f.name for f in detector.get_foreign_plugins(DoctorConfig().effective_plugins())}
+        assert "typescript-lsp" not in foreign_names
+        assert "frontend-design" not in foreign_names
+
+
+class TestAllowlistOnlyNoMarketplaceBlock:
+    """A marketplace referenced only by an allowlist_only entry (claude-code-plugins)
+    is not derived from checkable_plugins(), so it produces no registration block."""
+
+    def test_claude_code_plugins_absent_from_marketplace_statuses(self):
+        from sccs.doctor.detectors import ClaudeMarketplaceDetector
+
+        detector = ClaudeMarketplaceDetector(raw_output="❯ claude-plugins-official\n  Source: x/y\n")
+        names = {s.name for s in detector.get_statuses(DoctorConfig().checkable_plugins())}
+        assert "claude-code-plugins" not in names
+        assert "claude-plugins-official" in names
+
+
+class TestAlternativeReportedAsInfo:
+    """alternative detection -> INFO, not OUTDATED (it never converges and is installed)."""
+
+    def test_plugin_row_alternative_is_info(self):
+        from sccs.doctor.detectors import PluginStatus
+        from sccs.doctor.reporter import _INFO, _OUTDATED, _plugin_row
+
+        status = PluginStatus(
+            spec=PluginSpec(name="frontend-design", marketplace="claude-code-plugins"),
+            installed=True,
+            update_available=None,
+            detection_source="alternative",
+            found_marketplace="claude-plugins-official",
+            scope="user",
+        )
+        _, label, detail = _plugin_row(status)
+        assert label == _INFO
+        assert label != _OUTDATED
+        assert "installed via claude-plugins-official" in detail
