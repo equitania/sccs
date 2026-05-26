@@ -3753,6 +3753,23 @@ class TestSettingsHookCleanupAction:
         second_state = sp.read_text()
         assert first_state == second_state
 
+    def test_action_writes_settings_atomically(self, tmp_path: Path):
+        """Rewrite goes through atomic_write: no .tmp leftovers, and on POSIX
+        the file ends up 0600 (settings.json may hold MCP tokens). Regression
+        guard against reverting to a plain p.write_text()."""
+        import os
+
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": "/a/bad"}]}]}}))
+        v = SettingsHookViolation(event="PreToolUse", matcher=None, command="/a/bad", matched_pattern="bad")
+        actions = _settings_hook_cleanup_actions([v], settings_path=sp)
+        actions[0].python_callable()
+        # mkstemp + os.replace leaves no temp turds in the target directory.
+        assert not list(tmp_path.glob(".settings.json.*.tmp"))
+        # mkstemp creates the temp file 0600; os.replace preserves it. Not on Windows.
+        if os.name == "posix":
+            assert sp.stat().st_mode & 0o077 == 0
+
 
 class TestDoctorConfigDisallowedHooks:
     """Loader regression: doctor.disallowed_hooks must survive merge."""

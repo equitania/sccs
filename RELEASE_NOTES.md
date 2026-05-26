@@ -1,5 +1,16 @@
 # Release Notes
 
+## Version 2.32.2 (26.05.2026)
+
+### Fixed
+- **Non-atomic `settings.json` rewrites (security review MEDIUM-2).** Both doctor mutators — the statusline stale-Cellar auto-fix (`_status_line_actions._fix`) and the disallowed-hook sanitiser (`_settings_hook_cleanup_actions`) — wrote the file with a plain `p.write_text(json.dumps(...))`. A crash or disk-full mid-write could leave the user's `settings.json` truncated; recovery from the timestamped `.bak` was manual. Both now route through the existing `sccs.utils.paths.atomic_write` (temp file + `os.replace`), so the rewrite is all-or-nothing. Bonus: `mkstemp` creates the temp file `0600`, so the rewritten `settings.json` — which may hold MCP-server tokens — is no longer left group/world-readable on multi-user hosts.
+
+### Changed
+- **`uv.lock` refreshed.** The committed lock still referenced sccs `2.31.0`, stale since the v2.32.x releases; regenerated to pin the current `2.32.2` and present dependency set. (The lock was already tracked — pinning all 41 packages with hashes — so no supply-chain gap existed; this is housekeeping only.)
+
+### Tests
+- `TestSettingsHookCleanupAction::test_action_writes_settings_atomically` — regression guard: asserts no `.tmp` leftovers remain after the rewrite and (POSIX only) the file ends up `0600`, preventing a silent revert to `p.write_text()`.
+
 ## Version 2.32.1 (25.05.2026)
 
 ### Fixed

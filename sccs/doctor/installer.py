@@ -37,6 +37,7 @@ from sccs.doctor.runner import DoctorError, _run
 from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec
 from sccs.doctor.state import DoctorStateManager
 from sccs.utils.logging import get_logger
+from sccs.utils.paths import atomic_write
 
 logger = get_logger("doctor.installer")
 
@@ -451,7 +452,10 @@ def _status_line_actions(statuses: list[StatusLineStatus]) -> list[DoctorAction]
                     backup = p.with_name(f"{p.name}.bak-{timestamp}")
                     backup.write_text(text, encoding="utf-8")
                     sl["command"] = new
-                    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                    # Atomic write (temp + os.replace) so a crash mid-write cannot
+                    # leave settings.json truncated; mkstemp also yields 0600,
+                    # tightening perms on a file that may hold MCP tokens.
+                    atomic_write(p, json.dumps(data, indent=2) + "\n")
 
                 actions.append(
                     DoctorAction(
@@ -1032,7 +1036,8 @@ def _settings_hook_cleanup_actions(
             # else: drop the event key — no entries left.
 
         data["hooks"] = new_hooks
-        p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        # Atomic write (temp + os.replace) — see _status_line_actions for rationale.
+        atomic_write(p, json.dumps(data, indent=2) + "\n")
 
     return [
         DoctorAction(
