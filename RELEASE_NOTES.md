@@ -1,5 +1,14 @@
 # Release Notes
 
+## Version 2.33.1 (26.05.2026)
+
+### Changed
+- **`bandit` is now wired into CI and pre-commit** instead of being a declared-but-unused dev dependency. The lint job runs `bandit -r sccs/ -ll` (medium+ severity gate) and a local pre-commit hook mirrors it. The scan is clean: 0 medium/high findings — the 9 low results are the deliberate, list-arg `subprocess` calls that the runtime/git allowlist validators already guard.
+- **Coverage floor unified to a single source of truth.** CI no longer passes `--cov-fail-under`; the threshold lives solely in `pyproject.toml [tool.coverage.report]`, raised `66 → 70` (actual coverage ~72%, floor a notch below to absorb Linux-CI vs macOS variance). Target remains 80%.
+
+### Fixed
+- **Editor merge buffer hardened (security audit LOW).** `output/merge.py` now `chmod 0600`s the `NamedTemporaryFile` conflict-edit buffer explicitly. POSIX defaults to `0600` already, but the buffer can hold MCP tokens or shell config, so the guarantee is made explicit and platform-independent — matching the `atomic_write` hardening from 2.32.2.
+
 ## Version 2.33.0 (26.05.2026)
 
 ### Added

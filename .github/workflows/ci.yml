@@ -34,6 +34,9 @@ jobs:
       - name: Mypy type check
         run: uv run mypy sccs/
 
+      - name: Bandit security scan
+        run: uv run bandit -r sccs/ -ll
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -56,7 +59,9 @@ jobs:
           uv pip install -e ".[dev]"
 
       - name: Run tests with coverage
-        run: uv run pytest --cov=sccs --cov-report=term-missing --cov-fail-under=60
+        # Coverage floor lives in pyproject.toml [tool.coverage.report] —
+        # single source of truth, no --cov-fail-under override here.
+        run: uv run pytest --cov=sccs --cov-report=term-missing
 
   build:
     runs-on: ubuntu-latest

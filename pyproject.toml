@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sccs"
-version = "2.33.0"
+version = "2.33.1"
 description = "SkillsCommandsConfigsSync - Unified YAML-configured synchronization for Claude Code files"
 readme = "README.md"
 license = "AGPL-3.0"
@@ -88,10 +88,12 @@ source = ["sccs"]
 omit = ["tests/*", "sccs/__main__.py"]
 
 [tool.coverage.report]
-# Current baseline is 66% — raised from the previous 60% to lock in the
-# 2.17.1 security fixes. Target is 80%; raise this floor each time new
-# tests close a gap (cli.py and transfer/ui.py are the weakest areas).
-fail_under = 66
+# Single source of truth for the coverage floor — CI invokes pytest without
+# --cov-fail-under so this value governs both local and CI runs. Current
+# actual coverage is ~72%; floor sits a notch below to absorb platform
+# variance (Linux CI vs macOS). Target is 80%; raise this floor each time new
+# tests close a gap (transfer/ui.py at 42% and cli.py are the weakest areas).
+fail_under = 70
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

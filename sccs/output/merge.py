@@ -241,6 +241,12 @@ def edit_in_editor(content: str, suffix: str = ".txt") -> str | None:
             f.write(content)
             temp_path = f.name
 
+        # Lock down permissions explicitly (0600). NamedTemporaryFile already
+        # defaults to 0600 on POSIX, but make the guarantee explicit so the
+        # merge buffer (may hold MCP tokens or shell config) is never
+        # group/world-readable regardless of umask or platform.
+        os.chmod(temp_path, 0o600)
+
         result = subprocess.run([editor, temp_path])
 
         if result.returncode != 0:

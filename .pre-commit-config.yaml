@@ -17,6 +17,15 @@ repos:
         pass_filenames: false
         entry: mypy sccs/
 
+  - repo: local
+    hooks:
+      - id: bandit
+        name: bandit
+        entry: bandit -r sccs/ -ll
+        language: system
+        pass_filenames: false
+        types: [python]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
