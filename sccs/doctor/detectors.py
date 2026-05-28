@@ -12,6 +12,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sccs.doctor._paths import is_home_path
 from sccs.doctor.defaults import get_node_install_spec
 from sccs.doctor.runner import (
     DoctorError,
@@ -244,8 +245,25 @@ class PermissionStatus:
 
     @property
     def fix_command(self) -> str | None:
-        """Return the recommended fix command, or None when no fix is needed."""
+        """Return the recommended fix command, or None when no safe single-line fix exists.
+
+        `sudo chown -R UID:GID PATH` is only offered when it is BOTH safe and
+        complete. Returns None when:
+          * the status is OK (no fix needed),
+          * the directory is multi-user owned (chown would destroy other users'
+            installs — terminal-server scenario, see v2.28.1),
+          * the path lives outside $HOME (system prefix like /usr — chowning
+            the lib dir alone is incomplete and chowning /usr/bin is dangerous;
+            the correct remediation is a user-local npm prefix, surfaced by
+            `_npm_global_fix_block` in installer.py).
+        Callers (reporter, installer) must handle None by delegating to the
+        richer manual-fix block.
+        """
         if self.ok:
+            return None
+        if self.is_multi_user:
+            return None
+        if not is_home_path(self.resolved_path):
             return None
         # Always print the path WITHOUT shell expansion so a copy-paste works
         # in any shell. We chown the resolved absolute path.

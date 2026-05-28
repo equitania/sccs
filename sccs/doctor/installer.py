@@ -176,20 +176,7 @@ def _diagnose_hint(text: str) -> str | None:
     return None
 
 
-def _is_home_path(resolved: str) -> bool:
-    """True when `resolved` lives under the current user's home directory.
-
-    Distinguishes a user-local npm prefix (`~/.npm-global` — `sudo chown` is
-    safe AND complete because the sibling bin dir is also under home) from a
-    system prefix (`/usr` — chowning the lib dir alone leaves `/usr/bin`
-    root-owned, and chowning `/usr/bin` is dangerous). On systems without a
-    resolvable home (unlikely) we conservatively treat the path as a system
-    path so we never recommend chowning it.
-    """
-    try:
-        return Path(resolved).expanduser().resolve().is_relative_to(Path.home().resolve())
-    except (OSError, ValueError, RuntimeError):
-        return False
+from sccs.doctor._paths import is_home_path as _is_home_path  # noqa: E402
 
 
 def _user_local_prefix_lines(header: str) -> list[str]:
@@ -212,6 +199,13 @@ def _user_local_prefix_lines(header: str) -> list[str]:
     ]
 
 
+_RELOAD_HINT_LINES = [
+    "",
+    "# After applying the fix, restart your shell (or `exec $SHELL`) so the new",
+    "# $PATH / npm prefix is visible to the next `sccs doctor check`.",
+]
+
+
 def _npm_global_fix_block(st: PermissionStatus) -> list[str]:
     """Remediation for an unwritable npm global dir (root `lib` OR `bin`).
 
@@ -230,6 +224,11 @@ def _npm_global_fix_block(st: PermissionStatus) -> list[str]:
         bit the original report — the bin-dir symlink still fails with EACCES;
         and chowning `/usr/bin` is dangerous. The user-local prefix (Option A)
         relocates BOTH dirs under home in one step.
+
+    All branches end with a `restart your shell` hint (v2.33.2): the running
+    doctor process only sees the *current* shell's $PATH / npm prefix, so the
+    next `sccs doctor check` after an Option-A fix would otherwise still
+    report the old MISSING status.
     """
     lines: list[str] = []
     lines.append(f"# Detected: {st.resolved_path} is not writable by uid {st.expected_uid}.")
@@ -246,6 +245,7 @@ def _npm_global_fix_block(st: PermissionStatus) -> list[str]:
         lines.extend(
             _user_local_prefix_lines("# Option A (REQUIRED on multi-user systems): user-local npm prefix, no sudo")
         )
+        lines.extend(_RELOAD_HINT_LINES)
         return lines
 
     if not _is_home_path(st.resolved_path):
@@ -260,6 +260,7 @@ def _npm_global_fix_block(st: PermissionStatus) -> list[str]:
         lines.extend(
             _user_local_prefix_lines("# Option A (REQUIRED for system npm prefixes): user-local npm prefix, no sudo")
         )
+        lines.extend(_RELOAD_HINT_LINES)
         return lines
 
     lines.append("# Two fixes — pick ONE:")
@@ -267,7 +268,12 @@ def _npm_global_fix_block(st: PermissionStatus) -> list[str]:
     lines.extend(_user_local_prefix_lines("# Option A (recommended): user-local npm prefix, no sudo"))
     lines.append("")
     lines.append("# Option B: take ownership of the npm dir (safe here — it's under your home)")
-    lines.append(st.fix_command or f"sudo chown -R {st.expected_uid}:{st.expected_gid} {st.resolved_path}")
+    # st.fix_command is None for system / multi-user paths but reachable here
+    # only for the in-$HOME branch where chown is safe; fall back to the
+    # explicit string if a future caller bypasses the property.
+    chown_fallback = f"sudo chown -R {st.expected_uid}:{st.expected_gid} {st.resolved_path}"
+    lines.append(st.fix_command or chown_fallback)
+    lines.extend(_RELOAD_HINT_LINES)
     return lines
 
 

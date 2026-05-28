@@ -153,8 +153,13 @@ DEFAULT_PERMISSION_CHECKS: list[PermissionCheckSpec] = [
     # writability check gates the install on the bin dir too — and its manual
     # block steers system prefixes to a user-local prefix (chowning /usr/bin is
     # unsafe). Simple writability only: never recursively scanned or chowned.
+    # NOTE: the `path` field is a display label only — SCCS resolves the real
+    # directory at check-time via `npm config get prefix`/bin (see
+    # _resolve_npm_prefix_bin). We deliberately do NOT label this as
+    # `npm bin -g` because npm 9+ removed that subcommand, and a user copying
+    # the label would hit "Unknown command 'bin'".
     PermissionCheckSpec(
-        path="npm bin -g",
+        path="npm prefix bin",
         path_kind="npm-bin-global",
         label="npm global bin dir",
         purpose=(

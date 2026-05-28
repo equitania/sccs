@@ -18,7 +18,7 @@ from sccs.doctor.detectors import (
     PluginStatus,
     StatusLineStatus,
 )
-from sccs.doctor.installer import ExecuteResult
+from sccs.doctor.installer import ExecuteResult, _npm_global_fix_block
 from sccs.output.console import Console
 
 # Status icons reused across the reporter.
@@ -200,7 +200,8 @@ def render_doctor_report(
     console.print(f"[dim]Platform: {node.platform}[/dim]")
 
     # Detailed remediation block for permission issues — shown below the table
-    # so the user gets the exact `sudo chown` command to copy.
+    # so the user gets the exact `sudo chown` command (or the safe Option-A
+    # alternative for system / multi-user prefixes) to copy.
     if permissions:
         bad = [p for p in permissions if not p.ok]
         if bad:
@@ -213,6 +214,14 @@ def render_doctor_report(
                     console.print(f"    Examples:\n    {sample}")
                 if p.fix_command:
                     console.print(f"  [bold]{p.fix_command}[/bold]")
+                elif p.spec.path_kind in ("npm-root-global", "npm-bin-global"):
+                    # `fix_command` is None → system prefix or multi-user dir.
+                    # Reuse the installer's manual-fix block so the user never
+                    # sees `sudo chown /usr/bin` from `doctor check`.
+                    for line in _npm_global_fix_block(p):
+                        console.print(f"  {line}")
+                else:
+                    console.print("  [dim]No safe single-line fix — see `sccs doctor install` for guidance.[/dim]")
                 console.print()
 
 

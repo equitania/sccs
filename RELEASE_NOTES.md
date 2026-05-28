@@ -1,5 +1,21 @@
 # Release Notes
 
+## Version 2.33.2 (28.05.2026)
+
+### Fixed
+- **`sccs doctor check` no longer recommends `sudo chown -R /usr/bin`.** Linux real-session bug (uid 1000, system npm at `/usr`): the reporter's "Permission issues — run manually" block printed a one-line chown targeting `/usr/bin`, which would brick the system. The installer had the safe `_npm_global_fix_block` (Option-A user-local prefix) since v2.32.1, but the reporter rendered `PermissionStatus.fix_command` directly and bypassed the guard. `fix_command` now returns `None` when the path is outside `$HOME` (chown unsafe AND incomplete) or owned by ≥2 distinct non-root users (chown would destroy other users' installs); the reporter delegates to `_npm_global_fix_block` for these npm-root/bin-global cases, so `check` and `install` finally agree.
+- **Shared helper `is_home_path`** extracted from `installer.py` into `sccs/doctor/_paths.py` so `detectors.py` can reuse it without creating an import cycle.
+
+### Changed
+- **`npm bin -g` label renamed to `npm prefix bin`** (display only — the resolver still uses `npm config get prefix`/bin). npm 9+ removed the `npm bin` subcommand, so a user copying the old label from the doctor table would hit `Unknown command 'bin'`. The component identifier follows (`perm:npm prefix bin`), and the cascade-skip messages now read `depends on perm:npm prefix bin`.
+
+### Added
+- **Post-fix `restart your shell` hint** appended to every branch of `_npm_global_fix_block`. After `npm config set prefix ~/.npm-global` + PATH export, the *running* doctor process still sees the old `$PATH`, so the next `sccs doctor check` would mislead the user into thinking the fix didn't take. The hint explains the shell-reload requirement once, visible from both the reporter and installer paths.
+
+### Tests
+- 6 new tests in `tests/test_doctor.py`: `TestFixCommandSafetyGuards` (None for system/multi-user, present for in-$HOME single-user), `TestReporterSafeFixForSystemPrefix` (no `sudo chown 1000:1000 /usr/bin`, Option A appears, reload hint present, multi-user branch safe), `TestNpmBinLabelRename` (defaults expose new label).
+- 3 existing tests updated to monkeypatch `Path.home()` so chown-branch assertions still fire under the new home-only guard.
+
 ## Version 2.33.1 (26.05.2026)
 
 ### Changed

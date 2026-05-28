@@ -1007,12 +1007,21 @@ class TestPermissionDetector:
         # Simulate the Debian 13 case: tmp_path itself reports a different
         # owner than the current process. We patch os.getuid to return a uid
         # that nobody on the box uses — every stat() will then look "foreign".
+        # v2.33.2: also monkeypatch Path.home() to tmp_path so the resolved
+        # path lies *under* $HOME — the new fix_command safety guard returns
+        # None for paths outside $HOME (system prefixes like /usr) where
+        # chown is unsafe AND incomplete. tmp_path on macOS resolves to
+        # /private/var/folders/... which is OUTSIDE $HOME, so without this
+        # patch the chown branch never fires.
+        from pathlib import Path
+
         from sccs.doctor.detectors import PermissionDetector
         from sccs.doctor.schema import PermissionCheckSpec
 
         (tmp_path / "child.txt").write_text("hi", encoding="utf-8")
         monkeypatch.setattr("sccs.doctor.detectors.os.getuid", lambda: 999999)
         monkeypatch.setattr("sccs.doctor.detectors.os.getgid", lambda: 999999)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         spec = PermissionCheckSpec(
             path=str(tmp_path),
@@ -1077,9 +1086,14 @@ class TestPermissionInstallPlan:
         if not hasattr(__import__("os"), "getuid"):
             pytest.skip("POSIX-only")
 
+        # v2.33.2: fix_command returns None outside $HOME (system-prefix guard).
+        # The chown branch only fires for in-$HOME paths, so spoof Path.home().
+        from pathlib import Path
+
         (tmp_path / "x").write_text("hi", encoding="utf-8")
         monkeypatch.setattr("sccs.doctor.detectors.os.getuid", lambda: 999999)
         monkeypatch.setattr("sccs.doctor.detectors.os.getgid", lambda: 999999)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         spec = PermissionCheckSpec(path=str(tmp_path), label="cache", purpose="test cache")
         [perm_status] = PermissionDetector().get_statuses([spec])
@@ -1961,14 +1975,21 @@ class TestNpmRootGlobalPermission:
         assert "sudo chown -R" not in block
         assert "system director" in block.lower()  # explanatory warning
 
-    def test_literal_path_keeps_simple_chown_block(self, tmp_path):
+    def test_literal_path_keeps_simple_chown_block(self, tmp_path, monkeypatch):
         # Regression: literal paths (e.g. ~/.npm) must keep their old single-
         # option chown manual block — only npm-root-global gets the two-option
         # treatment. Otherwise we'd flood every permission issue with npm
         # advice that doesn't apply.
+        # v2.33.2: fix_command returns None outside $HOME. We simulate
+        # `/home/picard/.npm` on a Linux uid 1000 box — patch Path.home() so
+        # the resolved_path lies under the spoofed home and chown is offered.
+        from pathlib import Path
+
         import sccs.doctor.installer as installer_mod
         from sccs.doctor.detectors import PermissionStatus
         from sccs.doctor.schema import PermissionCheckSpec
+
+        monkeypatch.setattr(Path, "home", lambda: Path("/home/picard"))
 
         spec = PermissionCheckSpec(
             path="~/.npm",
@@ -2036,11 +2057,15 @@ class TestNpmBinGlobalPermission:
     """
 
     def test_default_includes_npm_bin_global_check(self):
+        # v2.33.2 renamed the label from "npm bin -g" → "npm prefix bin"
+        # because npm 9+ removed the `npm bin` subcommand (a user copying the
+        # old label would hit "Unknown command 'bin'"). The path_kind contract
+        # is what wires the dynamic resolver — the path string is display only.
         from sccs.doctor.defaults import DEFAULT_PERMISSION_CHECKS
 
         bin_specs = [c for c in DEFAULT_PERMISSION_CHECKS if c.path_kind == "npm-bin-global"]
         assert len(bin_specs) == 1
-        assert bin_specs[0].path == "npm bin -g"
+        assert bin_specs[0].path == "npm prefix bin"
 
     def test_skipped_when_npm_missing(self, monkeypatch):
         from sccs.doctor.detectors import PermissionDetector
@@ -2124,7 +2149,8 @@ class TestNpmBinGlobalPermission:
         from sccs.doctor.installer import _blocking_components
         from sccs.doctor.schema import PermissionCheckSpec
 
-        spec = PermissionCheckSpec(path="npm bin -g", path_kind="npm-bin-global", label="npm bin", purpose="...")
+        # v2.33.2: spec label is now "npm prefix bin" (npm 9+ removed `npm bin`).
+        spec = PermissionCheckSpec(path="npm prefix bin", path_kind="npm-bin-global", label="npm bin", purpose="...")
         bad = PermissionStatus(
             spec=spec,
             exists=True,
@@ -2135,8 +2161,9 @@ class TestNpmBinGlobalPermission:
             resolved_path="/usr/bin",
         )
         install_deps, use_deps = _blocking_components([bad], None)
-        assert "perm:npm bin -g" in install_deps
-        assert "perm:npm bin -g" in use_deps
+        # Component name mirrors PermissionCheckSpec.path (see installer.py:311).
+        assert "perm:npm prefix bin" in install_deps
+        assert "perm:npm prefix bin" in use_deps
 
 
 # --------------------------------------------------------------------------- #
@@ -3947,3 +3974,168 @@ class TestAlternativeReportedAsInfo:
         assert label == _INFO
         assert label != _OUTDATED
         assert "installed via claude-plugins-official" in detail
+
+
+# --------------------------------------------------------------------------- #
+# v2.33.2 — Safe fix_command + reporter delegation for system / multi-user    #
+# npm prefixes. Real-session bug: `sccs doctor check` on a Linux uid 1000     #
+# user with system npm (/usr) printed `sudo chown -R 1000:1000 /usr/bin` in   #
+# the "Permission issues" block, which would brick the system. The installer  #
+# already had the correct safe block (`_npm_global_fix_block`) but the        #
+# reporter rendered `p.fix_command` directly and bypassed the guard.          #
+# --------------------------------------------------------------------------- #
+
+
+class TestFixCommandSafetyGuards:
+    """`PermissionStatus.fix_command` must return None when chown is unsafe
+    or incomplete. Callers (reporter / installer) handle None by delegating
+    to the richer `_npm_global_fix_block`."""
+
+    @staticmethod
+    def _bad_status(resolved_path: str, foreign_uids=None):
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        spec = PermissionCheckSpec(
+            path="npm prefix bin",
+            path_kind="npm-bin-global",
+            label="npm global bin dir",
+            purpose="...",
+        )
+        return PermissionStatus(
+            spec=spec,
+            exists=True,
+            is_user_owned=True,
+            is_writable=False,
+            expected_uid=1000,
+            expected_gid=1000,
+            resolved_path=resolved_path,
+            foreign_uids=foreign_uids or set(),
+        )
+
+    def test_fix_command_none_for_system_prefix(self):
+        # /usr/bin is outside $HOME → chown is unsafe AND incomplete.
+        st = self._bad_status("/usr/bin")
+        assert st.fix_command is None
+
+    def test_fix_command_none_for_multi_user_dir(self):
+        # ≥2 distinct non-root owners → chown would destroy other users' installs.
+        # Use a $HOME path so the multi-user guard, not the system-path guard, fires.
+        from pathlib import Path
+
+        home_path = str(Path.home() / ".npm-global" / "bin")
+        st = self._bad_status(home_path, foreign_uids={1001, 1002})
+        assert st.is_multi_user is True
+        assert st.fix_command is None
+
+    def test_fix_command_present_for_in_home_single_user(self, tmp_path, monkeypatch):
+        # A user-owned ~/.npm-global chowned by stray `sudo npm` → chown IS the fix.
+        from pathlib import Path
+
+        from sccs.doctor.detectors import PermissionStatus
+        from sccs.doctor.schema import PermissionCheckSpec
+
+        # Force `Path.home()` to tmp_path so the resolved_path appears in-home.
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        in_home = tmp_path / ".npm-global" / "bin"
+        in_home.mkdir(parents=True)
+        spec = PermissionCheckSpec(
+            path="npm prefix bin",
+            path_kind="npm-bin-global",
+            label="npm global bin dir",
+            purpose="...",
+        )
+        st = PermissionStatus(
+            spec=spec,
+            exists=True,
+            is_user_owned=True,
+            is_writable=False,
+            expected_uid=1000,
+            expected_gid=1000,
+            resolved_path=str(in_home),
+        )
+        assert st.fix_command is not None
+        assert "sudo chown -R 1000:1000" in st.fix_command
+
+
+class TestReporterSafeFixForSystemPrefix:
+    """The reporter's "Permission issues" block must never recommend
+    `sudo chown /usr/bin`. It must delegate to `_npm_global_fix_block`
+    when `fix_command is None` for an npm-root/bin-global status.
+    """
+
+    def _capture_report(self, statuses):
+        # Capture the reporter output via a buffered rich.Console. The reporter
+        # only calls `console.print(...)`, so a lightweight rich Console is a
+        # drop-in replacement for the sccs Console facade in this context.
+        from io import StringIO
+
+        from rich.console import Console as RichConsole
+
+        from sccs.doctor.detectors import ClaudeCliStatus, NodeStatus
+        from sccs.doctor.reporter import render_doctor_report
+
+        buf = StringIO()
+        console = RichConsole(file=buf, width=200, force_terminal=False, color_system=None)
+        render_doctor_report(
+            console,
+            node=NodeStatus(
+                installed=True,
+                version="20.20.2",
+                major=20,
+                meets_minimum=True,
+                install_hint=None,
+                platform="linux",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            min_node_major=20,
+            plugins=[],
+            npx_tools=[],
+            permissions=statuses,
+            path_prefixes=[],
+            marketplaces=[],
+            bundled_skills=[],
+            browser_bundles=[],
+            status_lines=[],
+        )
+        return buf.getvalue()
+
+    def test_reporter_does_not_suggest_sudo_chown_usr_bin(self):
+        st = TestFixCommandSafetyGuards._bad_status("/usr/bin")
+        out = self._capture_report([st])
+        # The dangerous suggestion must never appear.
+        assert "sudo chown -R 1000:1000 /usr/bin" not in out
+        # The safe Option-A guidance must appear instead.
+        assert "WARNING" in out
+        assert "npm config set prefix ~/.npm-global" in out
+
+    def test_reporter_emits_reload_hint(self):
+        st = TestFixCommandSafetyGuards._bad_status("/usr/bin")
+        out = self._capture_report([st])
+        assert "restart your shell" in out.lower() or "exec $SHELL" in out
+
+    def test_reporter_safe_fix_for_multi_user_npm_dir(self):
+        from pathlib import Path
+
+        home_bin = str(Path.home() / ".npm-global" / "bin")
+        st = TestFixCommandSafetyGuards._bad_status(home_bin, foreign_uids={1001, 1002})
+        out = self._capture_report([st])
+        # No actionable chown COMMAND (the multi-user warning prose may mention
+        # `sudo chown -R` to explain *why* it's unsafe — that's fine; what must
+        # never appear is a chown command targeting our UID:GID:path).
+        assert "sudo chown -R 1000:1000" not in out
+        assert "multi-user" in out.lower() or "DESTROY" in out
+
+
+class TestNpmBinLabelRename:
+    """v2.33.2: the spec label was renamed from `npm bin -g` to
+    `npm prefix bin` because npm 9+ removed the `npm bin` subcommand.
+    A user copying the label would otherwise hit "Unknown command 'bin'"."""
+
+    def test_default_spec_uses_npm_prefix_bin_label(self):
+        from sccs.doctor.defaults import DEFAULT_PERMISSION_CHECKS
+
+        bin_specs = [s for s in DEFAULT_PERMISSION_CHECKS if s.path_kind == "npm-bin-global"]
+        assert len(bin_specs) == 1
+        assert bin_specs[0].path == "npm prefix bin"
+        assert bin_specs[0].path != "npm bin -g"
