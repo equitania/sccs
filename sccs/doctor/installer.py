@@ -418,14 +418,36 @@ def _rewrite_stale_cellar_command(cmd: str) -> str | None:
     return new_cmd if count > 0 else None
 
 
+# GSD renamed its statusline hook `hooks/statusline.js` -> `hooks/gsd-statusline.js`
+# during the get-shit-done-redux move. A command still pointing at the old name
+# leaves the statusline dead. Match only the `hooks/`-prefixed name (mirrors the
+# upstream redux #330 guard) so we never touch a third-party `statusline.js`.
+_STATUS_LINE_GSD_SCRIPT_RE = re.compile(r"hooks([/\\])statusline\.js")
+
+
+def _rewrite_stale_gsd_script_command(cmd: str) -> str | None:
+    """Rewrite `hooks/statusline.js` -> `hooks/gsd-statusline.js` (separator-preserving).
+
+    Returns the new string, or None if no rewrite applied. Operates on the raw
+    string to preserve user quoting/escaping. Idempotent: a string already
+    pointing at gsd-statusline.js has no `hooks/statusline.js` match and returns
+    None, so the caller skips the write.
+    """
+    new_cmd, count = _STATUS_LINE_GSD_SCRIPT_RE.subn(r"hooks\1gsd-statusline.js", cmd)
+    return new_cmd if count > 0 else None
+
+
 def _status_line_actions(statuses: list[StatusLineStatus]) -> list[DoctorAction]:
     """Surface statusline issues (stale Cellar path, missing binary, etc.).
 
-    Only `stale_cellar` produces an auto-fix action — the rewrite from a
-    Cellar path to the stable Homebrew bin-symlink is mechanical and safe
-    (backed up before write, idempotent). `missing_binary` / `missing_script`
-    / `missing` get manual blocks because the right fix depends on the user's
-    intent (reinstall? change tool? remove statusline entirely?).
+    Two states produce a mechanical, safe auto-fix action (backed up before
+    write, idempotent):
+      - `stale_cellar`: rewrite a Cellar path to the stable Homebrew bin-symlink.
+      - `missing_script`: rewrite the GSD rename hooks/statusline.js →
+        hooks/gsd-statusline.js, but only when the new script exists on disk.
+    Everything else — `missing_binary`, `missing`, generic `missing_script`
+    (non-GSD or new script absent) — gets a manual block because the right fix
+    depends on the user's intent (reinstall? change tool? remove statusline?).
 
     `blocks_downstream=False` for all — statusline failure does not cascade
     into other doctor components per CONTEXT.md D4.
@@ -473,6 +495,45 @@ def _status_line_actions(statuses: list[StatusLineStatus]) -> list[DoctorAction]
                     )
                 )
                 continue
+        if (
+            st.state == "missing_script"
+            and st.spec.auto_fix_stale_script
+            and st.raw_command is not None
+            and st.script is not None
+        ):
+            # Known, safe GSD rename: hooks/statusline.js -> hooks/gsd-statusline.js,
+            # and only when the new script actually exists on disk. Any other
+            # missing-script case falls through to the manual block — no guessing.
+            new_cmd_opt = _rewrite_stale_gsd_script_command(st.raw_command)
+            new_script_opt = _rewrite_stale_gsd_script_command(st.script)
+            if new_cmd_opt is not None and new_script_opt is not None and Path(new_script_opt).expanduser().is_file():
+                settings_path = Path(st.settings_path)
+                new_cmd = new_cmd_opt
+
+                def _fix_script(p: Path = settings_path, new: str = new_cmd) -> None:
+                    """Mutate settings.json in-place after writing a backup."""
+                    text = p.read_text(encoding="utf-8")
+                    data = json.loads(text)
+                    sl = data.get("statusLine")
+                    if not isinstance(sl, dict):
+                        raise DoctorError("statusLine key missing or non-dict")
+                    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+                    backup = p.with_name(f"{p.name}.bak-{timestamp}")
+                    backup.write_text(text, encoding="utf-8")
+                    sl["command"] = new
+                    atomic_write(p, json.dumps(data, indent=2) + "\n")
+
+                actions.append(
+                    DoctorAction(
+                        label=f"fix stale GSD statusline path in {settings_path.name} (→ gsd-statusline.js)",
+                        cmd=None,
+                        python_callable=_fix_script,
+                        component=component,
+                        blocks_downstream=False,
+                    )
+                )
+                continue
+            # else: new script missing or no match → fall through to manual block
         # Manual block for unfixable states (missing / missing_binary / missing_script
         # / stale_cellar without auto_fix enabled).
         block_lines: list[str] = [f"# Statusline issue: {st.detail}"]

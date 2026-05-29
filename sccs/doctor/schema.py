@@ -385,6 +385,17 @@ class StatusLineCheckSpec(BaseModel):
             "stable /opt/homebrew/bin/X symlink that Homebrew maintains."
         ),
     )
+    auto_fix_stale_script: bool = Field(
+        default=True,
+        description=(
+            "If True, doctor offers to rewrite a statusLine.command pointing at "
+            "the old GSD hooks/statusline.js to hooks/gsd-statusline.js — but "
+            "only when the new script exists on disk. GSD renamed the script "
+            "during the get-shit-done-redux move; a command still pointing at "
+            "the old name leaves the statusline dead (missing_script). Other "
+            "missing-script cases stay manual (no guessing where to rewrite)."
+        ),
+    )
 
     @field_validator("identifier")
     @classmethod

@@ -1,5 +1,14 @@
 # Release Notes
 
+## Version 2.35.0 (29.05.2026)
+
+### Added
+- **`sccs doctor` now auto-fixes the GSD statusline rename (`missing_script`).** GSD renamed its statusline hook `hooks/statusline.js` → `hooks/gsd-statusline.js` during the get-shit-done-redux move. A `statusLine.command` still pointing at the old name left the statusline dead, and `StatusLineDetector` only *reported* it (`missing_script`) while `_status_line_actions` printed a manual block. Doctor now offers an in-process auto-fix — modelled exactly on the existing `stale_cellar` rewrite: regex-rewrite on the raw command (quoting preserved), timestamped `.bak-YYYYMMDD-HHMMSS` backup, then `atomic_write`. New `StatusLineCheckSpec.auto_fix_stale_script` flag (default `True`). The settings.json rewrite stays `auto_confirm=False`, so the user is still prompted (delete-safety convention; `--yes` overrides).
+- **Deliberately narrow scope.** The rewrite fires *only* for the `hooks/`-prefixed `statusline.js` → `gsd-statusline.js` rename (mirrors upstream redux #330's guard against third-party `statusline.js` scripts) and *only* when the new `gsd-statusline.js` exists on disk. Every other `missing_script` case (foreign scripts, new script absent) keeps the existing manual block — no guessing where to rewrite. New helper `_rewrite_stale_gsd_script_command` (`sccs/doctor/installer.py`).
+
+### Tests
+- 4 new tests in `tests/test_doctor.py` (`TestStatusLineAutoFix`): rewrite + backup + key preservation, no-fix-when-new-script-absent, foreign-script-stays-manual (scope guard), and idempotency.
+
 ## Version 2.34.0 (29.05.2026)
 
 ### Changed

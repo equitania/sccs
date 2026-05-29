@@ -3261,6 +3261,126 @@ class TestStatusLineAutoFix:
             "not on path" in actions[0].manual_block.lower()
         )
 
+    def test_auto_fix_rewrites_gsd_script_and_backs_up(self, tmp_path):
+        """missing_script for the GSD rename hooks/statusline.js →
+        hooks/gsd-statusline.js auto-fixes when the new script exists, backs up
+        settings.json, and preserves every other key."""
+        import json as _json
+        import sys as _sys
+
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.installer import _status_line_actions
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        hooks = tmp_path / "hooks"
+        hooks.mkdir()
+        (hooks / "gsd-statusline.js").write_text("// stub", encoding="utf-8")  # new script exists
+        # Old script (hooks/statusline.js) is intentionally absent → missing_script.
+
+        real_bin = _sys.executable
+        original = {
+            "statusLine": {"type": "command", "command": f'"{real_bin}" "{hooks}/statusline.js"'},
+            "preserved": {"key": [1, 2, 3]},
+        }
+        sf = tmp_path / "settings.json"
+        sf.write_text(_json.dumps(original, indent=2), encoding="utf-8")
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        statuses = StatusLineDetector().get_statuses([spec])
+        assert statuses[0].state == "missing_script"
+
+        actions = _status_line_actions(statuses)
+        assert len(actions) == 1
+        action = actions[0]
+        assert action.python_callable is not None
+        assert action.blocks_downstream is False
+
+        action.python_callable()
+        after = _json.loads(sf.read_text())
+        assert after["statusLine"]["command"] == f'"{real_bin}" "{hooks}/gsd-statusline.js"'
+        assert after["preserved"] == {"key": [1, 2, 3]}
+        backups = list(tmp_path.glob("settings.json.bak-*"))
+        assert len(backups) == 1
+        assert _json.loads(backups[0].read_text()) == original
+
+    def test_no_auto_fix_when_new_gsd_script_absent(self, tmp_path):
+        """If hooks/gsd-statusline.js does not exist, the GSD rename is NOT
+        auto-fixed — it falls through to a manual block."""
+        import json as _json
+        import sys as _sys
+
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.installer import _status_line_actions
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        hooks = tmp_path / "hooks"
+        hooks.mkdir()
+        # Neither old nor new script exists → missing_script, but no safe target.
+        real_bin = _sys.executable
+        sf = tmp_path / "settings.json"
+        sf.write_text(
+            _json.dumps({"statusLine": {"type": "command", "command": f'"{real_bin}" "{hooks}/statusline.js"'}}),
+            encoding="utf-8",
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        actions = _status_line_actions(StatusLineDetector().get_statuses([spec]))
+        assert len(actions) == 1
+        assert actions[0].python_callable is None  # manual block, not auto-fix
+        assert actions[0].runnable is False
+
+    def test_foreign_missing_script_stays_manual(self, tmp_path):
+        """A non-GSD missing script (not hooks/statusline.js) must never be
+        auto-rewritten — scope guard."""
+        import json as _json
+        import sys as _sys
+
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.installer import _status_line_actions
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        real_bin = _sys.executable
+        sf = tmp_path / "settings.json"
+        sf.write_text(
+            _json.dumps(
+                {"statusLine": {"type": "command", "command": f'"{real_bin}" "{tmp_path}/custom-statusline.js"'}}
+            ),
+            encoding="utf-8",
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        actions = _status_line_actions(StatusLineDetector().get_statuses([spec]))
+        assert len(actions) == 1
+        assert actions[0].python_callable is None  # manual block — no rewrite target
+        assert actions[0].runnable is False
+
+    def test_auto_fix_gsd_script_idempotent(self, tmp_path):
+        """After the rewrite the command points at the existing
+        gsd-statusline.js, so a second pass detects 'ok' and produces no
+        further auto-fix."""
+        import json as _json
+        import sys as _sys
+
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.installer import _status_line_actions
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        hooks = tmp_path / "hooks"
+        hooks.mkdir()
+        (hooks / "gsd-statusline.js").write_text("// stub", encoding="utf-8")
+
+        real_bin = _sys.executable
+        sf = tmp_path / "settings.json"
+        sf.write_text(
+            _json.dumps({"statusLine": {"type": "command", "command": f'"{real_bin}" "{hooks}/statusline.js"'}}),
+            encoding="utf-8",
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+
+        first = _status_line_actions(StatusLineDetector().get_statuses([spec]))
+        assert len(first) == 1
+        first[0].python_callable()
+
+        second = _status_line_actions(StatusLineDetector().get_statuses([spec]))
+        assert all(a.python_callable is None for a in second)  # no auto-fix re-triggered
+
 
 # v2.30.0: foreign-plugin detection + doctor optimize sub-command.
 
