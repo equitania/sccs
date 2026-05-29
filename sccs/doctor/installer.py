@@ -1167,7 +1167,7 @@ def build_install_plan(
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     # Settings.json sanitisation runs LAST so that third-party tools
-    # (get-shit-done-cc, etc.) which overwrite settings.json during their
+    # (@opengsd/get-shit-done-redux, etc.) which overwrite settings.json during their
     # install step are followed by our cleanup pass.
     if settings_hook_violations and settings_path is not None:
         actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))

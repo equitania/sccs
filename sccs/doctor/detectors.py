@@ -1315,7 +1315,7 @@ class SettingsHookDetector:
     """Find hook entries in settings.json whose command matches a disallowed
     pattern.
 
-    Real driver: third-party doctor tools (npx get-shit-done-cc
+    Real driver: third-party doctor tools (npx @opengsd/get-shit-done-redux
     --force-statusline, …) overwrite settings.json on every run, re-
     injecting hooks the user explicitly removed in a setup audit. The
     detector surfaces those violations so `_settings_hook_cleanup_actions`

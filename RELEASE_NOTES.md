@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 2.34.0 (29.05.2026)
+
+### Changed
+- **Doctor's bundled GSD tool moved from the deprecated `get-shit-done-cc` npm package to `@opengsd/get-shit-done-redux`.** GSD officially relocated: the upstream `gsd-build/get-shit-done` README now reads *"GSD Has Moved … continues as GSD Redux in open-gsd/get-shit-done-redux"*, and the old `get-shit-done-cc` package is marked deprecated on npm (frozen at v1.42.3, 16.05.2026). The active line is `@opengsd/get-shit-done-redux` (releases from 22.05.2026). Its versioning reset (1.42.3 → 1.x) makes the number look lower, but it is the current, maintained package. Real driver: on a host where the user already runs redux, `sccs doctor update` was overwriting the install with the stale `get-shit-done-cc` tree, after which GSD's own update-banner hook reported "GSD update available — run /gsd-update". `DEFAULT_NPX_TOOLS` in `sccs/doctor/defaults.py` now invokes `npx -y @opengsd/get-shit-done-redux --claude --global --force-statusline` (flag compatibility verified against the redux `bin/install.js`). The `DEFAULT_MANAGED_PATTERNS` key in `sccs/doctor/managed.py` and the `NpxToolSpec.name` are updated in lockstep so the `gsd-*` sync-exclude and hook-protection keep matching.
+- **State-marker invalidation triggers a one-time reinstall onto the active package.** The `detect_via_state` marker carries a hash of the invocation argv (v2.21.1); changing the package name invalidates the stored marker, so the next `sccs doctor check/install/update` reports the tool as missing and reinstalls it via redux — no manual migration needed.
+
 ## Version 2.33.2 (28.05.2026)
 
 ### Fixed

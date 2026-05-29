@@ -55,7 +55,7 @@ class SyncEngine:
         self._handlers: dict[str, CategoryHandler] = {}
         # Merge doctor-managed glob patterns into the effective global
         # exclude list. Files installed by `sccs doctor install` (e.g. the
-        # gsd-* skills/agents/hooks dropped by `npx get-shit-done-cc`) are
+        # gsd-* skills/agents/hooks dropped by `npx @opengsd/get-shit-done-redux`) are
         # reproducible from the doctor manifest, so syncing them across
         # machines just produces conflicts. They are silently skipped here.
         self._doctor_excludes = get_doctor_managed_excludes(config.doctor)

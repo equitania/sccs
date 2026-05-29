@@ -53,12 +53,27 @@ DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
 
 DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
     NpxToolSpec(
-        name="get-shit-done-cc",
+        name="@opengsd/get-shit-done-redux",
         # `-y` auto-accepts npx's "Need to install... Ok to proceed?" prompt.
         # Without it, fresh Linux hosts hang on stdin (the prompt is hidden by
         # capture_output=True in runner._run).
-        invocation=["npx", "-y", "get-shit-done-cc", "--claude", "--global", "--force-statusline"],
-        # `get-shit-done-cc` only patches ~/.claude/ config — it never drops a
+        #
+        # Package note: GSD officially moved off the now-deprecated
+        # `get-shit-done-cc` npm package to `@opengsd/get-shit-done-redux`
+        # (the upstream README says "GSD Has Moved … continues as GSD Redux in
+        # open-gsd/get-shit-done-redux"). The new installer accepts the same
+        # `--claude --global --force-statusline` flags (verified in its
+        # bin/install.js). The redux versioning reset (1.42.3 → 1.x) makes the
+        # number look lower, but it is the active, current line.
+        invocation=[
+            "npx",
+            "-y",
+            "@opengsd/get-shit-done-redux",
+            "--claude",
+            "--global",
+            "--force-statusline",
+        ],
+        # `@opengsd/get-shit-done-redux` only patches ~/.claude/ config — it never drops a
         # binary on PATH. Detection therefore falls back to the doctor state
         # file once we've recorded a successful run.
         detect_via_state=True,
@@ -115,7 +130,7 @@ DEFAULT_PERMISSION_CHECKS: list[PermissionCheckSpec] = [
     PermissionCheckSpec(
         path="~/.npm",
         label="npm cache directory",
-        purpose="npx and npm install write here when fetching packages (e.g. get-shit-done-cc)",
+        purpose="npx and npm install write here when fetching packages (e.g. @opengsd/get-shit-done-redux)",
     ),
     PermissionCheckSpec(
         path="~/.claude",
@@ -271,10 +286,10 @@ DEFAULT_DISALLOWED_HOOKS: list[str] = []
 
 # Substring patterns identifying hook commands the sanitiser must NEVER
 # strip, even when a `disallowed_hooks` pattern would otherwise match them.
-# Protection wins over removal. Real driver: GSD (get-shit-done-cc) re-injects
-# its hooks (gsd-read-guard.js, …) into settings.json on every run; removing
-# them breaks the plugin. Matching is plain substring, symmetric with
+# Protection wins over removal. Real driver: GSD (@opengsd/get-shit-done-redux)
+# re-injects its hooks (gsd-read-guard.js, …) into settings.json on every run;
+# removing them breaks the plugin. Matching is plain substring, symmetric with
 # `disallowed_hooks`, and `gsd-` mirrors the `managed.py` convention
-# (`get-shit-done-cc: ["gsd-*"]`). Users may override via
+# (`@opengsd/get-shit-done-redux: ["gsd-*"]`). Users may override via
 # `doctor.protected_hooks:` in `~/.config/sccs/config.yaml`.
 DEFAULT_PROTECTED_HOOKS: list[str] = ["gsd-"]

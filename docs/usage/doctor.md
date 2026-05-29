@@ -31,7 +31,7 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 | **Node.js** | installiert + Mindestversion (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), Manual-Block für Linux (NodeSource, sudo) |
 | **`claude` CLI** | Binary auf PATH | `npm install -g @anthropic-ai/claude-code` |
 | **Claude-Plugins** | je nach Marketplace via `claude plugin list` | `claude plugin install/update <name>@<marketplace>` mit korrektem `--scope <user/project/local/managed>` |
-| **npx-Tools** (z.B. `get-shit-done-cc`, `playwright-cli`) | Binary auf PATH **oder** State-File-Marker (für Tools die kein Binary droppen) | `npm install -g <pkg>@latest` bzw. `npx -y <pkg> …` |
+| **npx-Tools** (z.B. `@opengsd/get-shit-done-redux`, `playwright-cli`) | Binary auf PATH **oder** State-File-Marker (für Tools die kein Binary droppen) | `npm install -g <pkg>@latest` bzw. `npx -y <pkg> …` |
 | **Bundled Skills** (z.B. `playwright-cli`-Skill) | `SKILL.md` im konfigurierten Target-Verzeichnis existiert | Kopiert das Skill-Verzeichnis aus dem npm-Paket nach `~/.claude/skills/<name>/` |
 | **Browser-Bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` Verzeichnisse vorhanden | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem-Permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` (lib) **und** `<npm prefix>/bin` (v2.32.1) schreibbar | Manual-Block — SCCS ruft niemals `sudo` auf; System-prefix → nur user-local Prefix |
@@ -48,7 +48,7 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 │ Node.js                         │ OK     │ v20.20.2                          │
 │ Claude CLI                      │ OK     │ /home/user/.local/bin/claude      │
 │ plugin: superpowers@…           │ OK     │ installed                         │
-│ npx: get-shit-done-cc           │ OK     │ installed (last run cached)       │
+│ npx: @opengsd/get-shit-done-r…  │ OK     │ installed (last run cached)       │
 │ npx: playwright-cli             │ OK     │ /home/user/.local/bin/playwright… │
 │ skill: playwright-cli           │ OK     │ ~/.claude/skills/playwright-cli/  │
 │ browsers: playwright-cli        │ OK     │ chromium, firefox                 │
@@ -139,7 +139,7 @@ zwei Optionen:
 ### Doctor-managed Files & Sync-Ausschluss
 
 Dateien, die der Doctor anlegt (z.B. `gsd-*`-Skills/Hooks/Agents von
-`get-shit-done-cc`, `~/.claude/skills/playwright-cli/`), sind in
+`@opengsd/get-shit-done-redux`, `~/.claude/skills/playwright-cli/`), sind in
 `sccs/doctor/managed.py::DEFAULT_MANAGED_PATTERNS` registriert und werden
 automatisch von `sccs sync` ausgeschlossen — andernfalls würden zwei
 Maschinen, die unabhängig `sccs doctor install` laufen lassen, sich beim
@@ -209,7 +209,7 @@ sccs doctor update               # Update plugins + refresh npx tools
 | **Node.js** | installed + minimum major version (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), manual block for Linux (NodeSource, sudo) |
 | **`claude` CLI** | binary on PATH | `npm install -g @anthropic-ai/claude-code` |
 | **Claude plugins** | per marketplace via `claude plugin list` | `claude plugin install/update <name>@<marketplace>` with the correct `--scope <user/project/local/managed>` |
-| **npx tools** (e.g. `get-shit-done-cc`, `playwright-cli`) | binary on PATH **or** state-file marker (for tools that don't drop a binary) | `npm install -g <pkg>@latest` resp. `npx -y <pkg> …` |
+| **npx tools** (e.g. `@opengsd/get-shit-done-redux`, `playwright-cli`) | binary on PATH **or** state-file marker (for tools that don't drop a binary) | `npm install -g <pkg>@latest` resp. `npx -y <pkg> …` |
 | **Bundled skills** (e.g. the `playwright-cli` skill) | `SKILL.md` exists in the configured target directory | Copies the skill directory out of the npm package into `~/.claude/skills/<name>/` |
 | **Browser bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` directories present | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` (lib) **and** `<npm prefix>/bin` (v2.32.1) writable | manual block — SCCS never invokes `sudo`; system prefix → user-local prefix only |
@@ -226,7 +226,7 @@ sccs doctor update               # Update plugins + refresh npx tools
 │ Node.js                         │ OK     │ v20.20.2                          │
 │ Claude CLI                      │ OK     │ /home/user/.local/bin/claude      │
 │ plugin: superpowers@…           │ OK     │ installed                         │
-│ npx: get-shit-done-cc           │ OK     │ installed (last run cached)       │
+│ npx: @opengsd/get-shit-done-r…  │ OK     │ installed (last run cached)       │
 │ npx: playwright-cli             │ OK     │ /home/user/.local/bin/playwright… │
 │ skill: playwright-cli           │ OK     │ ~/.claude/skills/playwright-cli/  │
 │ browsers: playwright-cli        │ OK     │ chromium, firefox                 │
@@ -319,7 +319,7 @@ options:
 ### Doctor-managed files & sync exclusion
 
 Files that Doctor creates (e.g. `gsd-*` skills/hooks/agents from
-`get-shit-done-cc`, `~/.claude/skills/playwright-cli/`) are registered in
+`@opengsd/get-shit-done-redux`, `~/.claude/skills/playwright-cli/`) are registered in
 `sccs/doctor/managed.py::DEFAULT_MANAGED_PATTERNS` and automatically
 excluded from `sccs sync`. Otherwise two machines that independently run
 `sccs doctor install` would overwrite each other's generated files on
