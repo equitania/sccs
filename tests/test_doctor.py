@@ -1632,7 +1632,7 @@ class TestBundledSkillReporter:
             target_path=str(tmp_path),
             skill_md_present=True,
         )
-        label, status, detail = _bundled_skill_row(st)
+        label, status, _, detail = _bundled_skill_row(st)
         assert label == "skill: playwright-cli"
         assert "OK" in status
         assert "SKILL.md" in detail
@@ -1654,7 +1654,7 @@ class TestBundledSkillReporter:
             target_path=str(tmp_path),
             skill_md_present=False,
         )
-        _, status, detail = _bundled_skill_row(st)
+        _, status, _, detail = _bundled_skill_row(st)
         assert "MISSING" in status
         assert str(tmp_path) in detail
 
@@ -1676,7 +1676,7 @@ class TestBrowserBundleReporter:
             present={"chromium": True, "firefox": True},
             all_present=True,
         )
-        label, status, detail = _browser_bundle_row(st)
+        label, status, _, detail = _browser_bundle_row(st)
         assert label == "browsers: playwright-cli"
         assert "OK" in status
         assert "chromium, firefox" in detail
@@ -1697,7 +1697,7 @@ class TestBrowserBundleReporter:
             present={"chromium": True, "firefox": False},
             all_present=False,
         )
-        _, status, detail = _browser_bundle_row(st)
+        _, status, _, detail = _browser_bundle_row(st)
         assert "MISSING" in status
         assert "firefox" in detail
         assert "chromium" not in detail  # only missing bundles listed
@@ -1718,7 +1718,7 @@ class TestBrowserBundleReporter:
             present={"chromium": False, "firefox": False},
             all_present=False,
         )
-        _, status, detail = _browser_bundle_row(st)
+        _, status, _, detail = _browser_bundle_row(st)
         assert "MISSING" in status
         assert "cache dir not found" in detail
 
@@ -4102,7 +4102,7 @@ class TestAlternativeReportedAsInfo:
             found_marketplace="claude-plugins-official",
             scope="user",
         )
-        _, label, detail = _plugin_row(status)
+        _, label, _, detail = _plugin_row(status)
         assert label == _INFO
         assert label != _OUTDATED
         assert "installed via claude-plugins-official" in detail
@@ -4271,3 +4271,171 @@ class TestNpmBinLabelRename:
         assert len(bin_specs) == 1
         assert bin_specs[0].path == "npm prefix bin"
         assert bin_specs[0].path != "npm bin -g"
+
+
+class TestVersionAndSourceReporting:
+    """v2.36.0: `doctor check` shows plugin/tool versions in a dedicated
+    column and the permanent-PATH instructions in the path manual block."""
+
+    # --- Plugin versions parsed from `claude plugin list` (zero extra call) ---
+
+    def test_plugin_version_parsed_from_block(self):
+        from sccs.doctor.detectors import ClaudePluginDetector
+
+        raw = "❯ skill-creator@claude-plugins-official\n  Version: 1.2.3\n  Scope: user\n  Status: enabled\n"
+        det = ClaudePluginDetector(raw_output=raw)
+        st = det.get_statuses([PluginSpec(name="skill-creator", marketplace="claude-plugins-official")])[0]
+        assert st.installed is True
+        assert st.version == "1.2.3"
+        assert st.scope == "user"
+
+    def test_plugin_version_absent_is_none(self):
+        from sccs.doctor.detectors import ClaudePluginDetector
+
+        raw = "❯ skill-creator@claude-plugins-official\n  Scope: user\n  Status: enabled\n"
+        det = ClaudePluginDetector(raw_output=raw)
+        st = det.get_statuses([PluginSpec(name="skill-creator", marketplace="claude-plugins-official")])[0]
+        assert st.installed is True
+        assert st.version is None
+
+    def test_plugin_version_unknown_is_none(self):
+        from sccs.doctor.detectors import ClaudePluginDetector
+
+        raw = "❯ skill-creator@claude-plugins-official\n  Version: unknown\n  Scope: user\n"
+        det = ClaudePluginDetector(raw_output=raw)
+        st = det.get_statuses([PluginSpec(name="skill-creator", marketplace="claude-plugins-official")])[0]
+        # `Version: unknown` must not render as a misleading `vunknown`.
+        assert st.version is None
+
+    def test_plugin_version_does_not_bleed_across_blocks(self):
+        from sccs.doctor.detectors import ClaudePluginDetector
+
+        raw = (
+            "❯ skill-creator@claude-plugins-official\n  Scope: user\n"
+            "❯ superpowers@claude-plugins-official\n  Version: 9.9.9\n  Scope: user\n"
+        )
+        det = ClaudePluginDetector(raw_output=raw)
+        st = det.get_statuses([PluginSpec(name="skill-creator", marketplace="claude-plugins-official")])[0]
+        # skill-creator's block has no Version line; must NOT pick up superpowers' 9.9.9.
+        assert st.version is None
+
+    # --- npx tool version resolution (version_file / version_args) ---
+
+    def test_npx_version_from_file(self, tmp_path):
+        from sccs.doctor.detectors import NpxToolDetector
+
+        vf = tmp_path / "VERSION"
+        vf.write_text("1.1.0\n", encoding="utf-8")
+        spec = NpxToolSpec(name="gsd", invocation=["npx", "gsd"], version_file=str(vf))
+        assert NpxToolDetector._resolve_version(spec) == "1.1.0"
+
+    def test_npx_version_file_missing_is_none(self, tmp_path):
+        from sccs.doctor.detectors import NpxToolDetector
+
+        spec = NpxToolSpec(name="gsd", invocation=["npx", "gsd"], version_file=str(tmp_path / "nope" / "VERSION"))
+        assert NpxToolDetector._resolve_version(spec) is None
+
+    def test_npx_version_from_args(self):
+        from sccs.doctor.detectors import NpxToolDetector
+
+        spec = NpxToolSpec(name="playwright-cli", invocation=["npm", "i"], version_args=["--version"])
+        fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="Version 0.4.1\n", stderr="")
+        with patch("sccs.doctor.detectors._run", return_value=fake):
+            assert NpxToolDetector._resolve_version(spec) == "0.4.1"
+
+    def test_npx_version_args_failure_is_none(self):
+        from sccs.doctor.detectors import NpxToolDetector
+
+        spec = NpxToolSpec(name="playwright-cli", invocation=["npm", "i"], version_args=["--version"])
+        with patch("sccs.doctor.detectors._run", side_effect=DoctorError("not found")):
+            assert NpxToolDetector._resolve_version(spec) is None
+
+    def test_npx_no_version_source_is_none(self):
+        from sccs.doctor.detectors import NpxToolDetector
+
+        spec = NpxToolSpec(name="plain", invocation=["npx", "plain"])
+        assert NpxToolDetector._resolve_version(spec) is None
+
+    # --- Reporter renders the Version column ---
+
+    def test_plugin_row_shows_version_and_source(self):
+        from sccs.doctor.detectors import PluginStatus
+        from sccs.doctor.reporter import _OK, _plugin_row
+
+        status = PluginStatus(
+            spec=PluginSpec(name="context-mode", marketplace="context-mode", marketplace_source="mksglu/context-mode"),
+            installed=True,
+            update_available=None,
+            detection_source="exact",
+            found_marketplace="context-mode",
+            scope="user",
+            version="0.9.0",
+        )
+        _, state, version, detail = _plugin_row(status)
+        assert state == _OK
+        assert version == "v0.9.0"
+        assert "mksglu/context-mode" in detail
+
+    def test_npx_row_shows_version(self):
+        from sccs.doctor.detectors import NpxToolStatus
+        from sccs.doctor.reporter import _OK, _npx_row
+
+        status = NpxToolStatus(
+            spec=NpxToolSpec(name="@opengsd/get-shit-done-redux", invocation=["npx", "x"], detect_via_state=True),
+            available=True,
+            binary_path=None,
+            detection_source="state",
+            version="1.1.0",
+        )
+        _, state, version, _detail = _npx_row(status)
+        assert state == _OK
+        assert version == "v1.1.0"
+
+    def test_plugin_row_no_version_leaves_column_blank(self):
+        from sccs.doctor.detectors import PluginStatus
+        from sccs.doctor.reporter import _plugin_row
+
+        status = PluginStatus(
+            spec=PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
+            installed=True,
+            update_available=None,
+            detection_source="exact",
+            found_marketplace="claude-plugins-official",
+            scope="user",
+            version=None,
+        )
+        _, _state, version, _detail = _plugin_row(status)
+        assert version == ""
+
+    # --- Permanent PATH instructions in the manual block ---
+
+    def test_path_block_includes_permanent_instructions(self):
+        from sccs.doctor.detectors import PathPrefixStatus
+        from sccs.doctor.installer import _path_prefix_actions
+        from sccs.doctor.schema import PathPrefixCheckSpec
+
+        st = PathPrefixStatus(
+            spec=PathPrefixCheckSpec(identifier="npm-prefix-bin", label="npm global bin in PATH", purpose="test"),
+            expected_path="/home/u/.npm-global/bin",
+            in_path=False,
+        )
+        actions = _path_prefix_actions([st])
+        assert len(actions) == 1
+        block = actions[0].manual_block
+        # Permanent guidance present:
+        assert "fish_add_path /home/u/.npm-global/bin" in block
+        assert "echo 'export PATH=\"/home/u/.npm-global/bin:$PATH\"' >> ~/.bashrc" in block
+        assert ">> ~/.zshrc" in block
+        # Temporary guidance still present:
+        assert 'export PATH="/home/u/.npm-global/bin:$PATH"' in block
+        assert "set -gx PATH /home/u/.npm-global/bin $PATH" in block
+
+    # --- Defaults declare the version sources ---
+
+    def test_default_npx_tools_declare_version_sources(self):
+        from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
+
+        redux = next(s for s in DEFAULT_NPX_TOOLS if s.name == "@opengsd/get-shit-done-redux")
+        assert redux.version_file == "~/.claude/get-shit-done/VERSION"
+        pw = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
+        assert pw.version_args == ["--version"]

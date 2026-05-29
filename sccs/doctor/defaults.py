@@ -77,6 +77,10 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
         # binary on PATH. Detection therefore falls back to the doctor state
         # file once we've recorded a successful run.
         detect_via_state=True,
+        # GSD writes its installed version here; reading it is zero-cost (no
+        # subprocess) and lets `doctor check` show e.g. v1.1.0 in the Version
+        # column — handy to confirm the redux package (not the frozen old one).
+        version_file="~/.claude/get-shit-done/VERSION",
     ),
     NpxToolSpec(
         name="playwright-cli",
@@ -92,6 +96,10 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
         # called `@playwright/cli` (scoped name).
         detect_command="playwright-cli",
         detect_via_state=False,
+        # One cheap `playwright-cli --version` call surfaces the installed
+        # version in `doctor check`. Failures (timeout, odd output) are
+        # swallowed → column stays blank, never breaks the check.
+        version_args=["--version"],
         # Browser bundles are downloaded separately. `playwright-cli
         # install-browser <name>` is idempotent: it skips when the requested
         # version is already in `~/.cache/ms-playwright/`, and downloads

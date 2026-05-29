@@ -172,6 +172,25 @@ class NpxToolSpec(BaseModel):
             "`sccs doctor check` and trigger re-install when missing."
         ),
     )
+    version_file: str | None = Field(
+        default=None,
+        description=(
+            "Optional tilde-expandable path whose stripped first line is the "
+            "installed version (e.g. '~/.claude/get-shit-done/VERSION'). Read "
+            "only for display in the doctor-check Version column; missing or "
+            "unreadable file → no version shown. Zero extra subprocess cost."
+        ),
+    )
+    version_args: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional args appended to `detect_command`/`name` to print the "
+            "version (e.g. ['--version']). The first semver-like token in the "
+            "output is shown in the Version column. Costs one subprocess per "
+            "check; failures are swallowed (no version shown). Ignored when "
+            "`version_file` is set."
+        ),
+    )
 
     @field_validator("name")
     @classmethod

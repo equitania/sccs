@@ -85,6 +85,10 @@ class PluginStatus:
     # otherwise default to `user` and fail with "Plugin … is not installed
     # at scope user" for plugins installed under a different scope.
     scope: str | None = None
+    # The version reported by the `Version:` line of `claude plugin list`, or
+    # None if the parser couldn't extract it. Display-only (the reporter shows
+    # it in the Version column); not used for any update decision.
+    version: str | None = None
 
 
 @dataclass
@@ -111,6 +115,10 @@ class NpxToolStatus:
     available: bool
     binary_path: str | None
     detection_source: str = "path"  # "path" | "state" | "missing"
+    # Installed version for display in the doctor-check Version column, or None
+    # when the spec declares no source (version_file/version_args) or the lookup
+    # failed. Never used for any install/update decision.
+    version: str | None = None
 
 
 @dataclass
@@ -341,20 +349,42 @@ class ClaudePluginDetector:
         return m.group(1) if m else None
 
     @staticmethod
+    def _extract_version_from_block(output: str, match_end: int) -> str | None:
+        """Read the `Version: <ver>` line that follows a plugin header match.
+
+        Same block-slicing strategy as `_extract_scope_from_block` (stop at the
+        next `❯ ` header). Display-only: the value feeds the doctor-check
+        Version column. Returns None when the CLI omits the line.
+        """
+        block = output[match_end : match_end + 300]
+        next_header = re.search(r"\n\s*❯", block)
+        if next_header:
+            block = block[: next_header.start()]
+        m = re.search(r"\bVersion:\s*(\S+)", block, re.IGNORECASE)
+        if not m:
+            return None
+        ver = m.group(1)
+        # `claude plugin list` prints `Version: unknown` for plugins that
+        # expose no version; treat that as "no version" so the reporter shows
+        # a blank cell instead of a misleading `vunknown`.
+        return None if ver.lower() == "unknown" else ver
+
+    @staticmethod
     def _detect_plugin(
         name: str,
         marketplace: str | None,
         output: str,
-    ) -> tuple[str, str | None, str | None]:
+    ) -> tuple[str, str | None, str | None, str | None]:
         """Classify a single plugin against the raw `claude plugin list` output.
 
-        Returns (detection_source, found_marketplace, scope). detection_source
-        is one of "exact", "alternative", "bare", "missing". `scope` is the
-        value of the `Scope:` line in the matched plugin's metadata block, or
-        None if no match or no scope line was found.
+        Returns (detection_source, found_marketplace, scope, version).
+        detection_source is one of "exact", "alternative", "bare", "missing".
+        `scope` is the value of the `Scope:` line in the matched plugin's
+        metadata block, `version` the `Version:` line — either None if no match
+        or the respective line was not found.
         """
         if not output:
-            return ("missing", None, None)
+            return ("missing", None, None, None)
 
         escaped_name = re.escape(name)
         # Pattern matches "<name>@<some-marketplace>" with a word boundary in
@@ -374,7 +404,8 @@ class ClaudePluginDetector:
             m = exact_re.search(output)
             if m:
                 scope = ClaudePluginDetector._extract_scope_from_block(output, m.end())
-                return ("exact", marketplace, scope)
+                version = ClaudePluginDetector._extract_version_from_block(output, m.end())
+                return ("exact", marketplace, scope, version)
 
         # Plugin name found under *some* marketplace — installed via a
         # different source than the user configured (or any source at all
@@ -383,9 +414,10 @@ class ClaudePluginDetector:
         if match:
             found = match.group(1)
             scope = ClaudePluginDetector._extract_scope_from_block(output, match.end())
+            version = ClaudePluginDetector._extract_version_from_block(output, match.end())
             if marketplace and found.lower() != marketplace.lower():
-                return ("alternative", found, scope)
-            return ("exact", found, scope)
+                return ("alternative", found, scope, version)
+            return ("exact", found, scope, version)
 
         # Plugin name appears as a bare token (rare CLI format that omits
         # the '@marketplace' suffix).
@@ -396,15 +428,16 @@ class ClaudePluginDetector:
         bare = bare_re.search(output)
         if bare:
             scope = ClaudePluginDetector._extract_scope_from_block(output, bare.end())
-            return ("bare", None, scope)
+            version = ClaudePluginDetector._extract_version_from_block(output, bare.end())
+            return ("bare", None, scope, version)
 
-        return ("missing", None, None)
+        return ("missing", None, None, None)
 
     def get_statuses(self, specs: list[PluginSpec]) -> list[PluginStatus]:
         output = self._output()
         statuses: list[PluginStatus] = []
         for spec in specs:
-            source, found, scope = self._detect_plugin(spec.name, spec.marketplace, output)
+            source, found, scope, version = self._detect_plugin(spec.name, spec.marketplace, output)
             statuses.append(
                 PluginStatus(
                     spec=spec,
@@ -415,6 +448,7 @@ class ClaudePluginDetector:
                     detection_source=source,
                     found_marketplace=found,
                     scope=scope,
+                    version=version,
                 )
             )
         return statuses
@@ -1248,6 +1282,36 @@ class NpxToolDetector:
     def __init__(self, state_manager: DoctorStateManager | None = None) -> None:
         self._state = state_manager
 
+    @staticmethod
+    def _resolve_version(spec: NpxToolSpec) -> str | None:
+        """Best-effort installed-version lookup for the Version column.
+
+        `version_file` (zero-cost file read) takes precedence over
+        `version_args` (one subprocess). Any failure — unreadable file, missing
+        binary, timeout, non-version output — returns None so the column simply
+        stays blank; it never raises into the detection flow.
+        """
+        if spec.version_file:
+            try:
+                text = Path(spec.version_file).expanduser().read_text(encoding="utf-8")
+            except OSError:
+                return None
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    return stripped
+            return None
+        if spec.version_args:
+            cmd = [spec.detect_command or spec.name, *spec.version_args]
+            try:
+                proc = _run(cmd, check=False, capture=True, timeout=10)
+            except DoctorError:
+                return None
+            blob = f"{proc.stdout or ''} {proc.stderr or ''}"
+            m = re.search(r"\d+\.\d+\.\d+\S*", blob)
+            return m.group(0) if m else None
+        return None
+
     def get_statuses(self, specs: list[NpxToolSpec]) -> list[NpxToolStatus]:
         out: list[NpxToolStatus] = []
         for spec in specs:
@@ -1260,6 +1324,7 @@ class NpxToolDetector:
                         available=True,
                         binary_path=path,
                         detection_source="path",
+                        version=self._resolve_version(spec),
                     )
                 )
                 continue
@@ -1273,6 +1338,7 @@ class NpxToolDetector:
                             available=True,
                             binary_path=None,
                             detection_source="state",
+                            version=self._resolve_version(spec),
                         )
                     )
                     continue

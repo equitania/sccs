@@ -192,10 +192,16 @@ def _user_local_prefix_lines(header: str) -> list[str]:
         header,
         "mkdir -p ~/.npm-global/lib ~/.npm-global/bin",
         "npm config set prefix ~/.npm-global",
-        "# Add to your shell rc (bash/zsh):",
-        'export PATH="$HOME/.npm-global/bin:$PATH"',
-        "# Or fish:",
-        "set -gx PATH $HOME/.npm-global/bin $PATH",
+        "# Add to your shell rc PERMANENTLY (survives new shells):",
+        "# fish (3.2+, idempotent):",
+        "fish_add_path $HOME/.npm-global/bin",
+        "# bash — append to ~/.bashrc:",
+        "echo 'export PATH=\"$HOME/.npm-global/bin:$PATH\"' >> ~/.bashrc",
+        "# zsh — append to ~/.zshrc:",
+        "echo 'export PATH=\"$HOME/.npm-global/bin:$PATH\"' >> ~/.zshrc",
+        "# Or temporarily (current session only):",
+        'export PATH="$HOME/.npm-global/bin:$PATH"   # bash/zsh',
+        "set -gx PATH $HOME/.npm-global/bin $PATH     # fish",
     ]
 
 
@@ -380,8 +386,16 @@ def _path_prefix_actions(statuses: list[PathPrefixStatus]) -> list[DoctorAction]
             block_lines.append(f"# Skipped: {st.skipped_reason}")
             continue
         block_lines.append(f"# Detected: {st.expected_path} is not on $PATH for this shell session.")
-        block_lines.append("# Add it to your shell rc and reload your shell:")
         block_lines.append("")
+        block_lines.append("# Add it PERMANENTLY (survives new shells):")
+        block_lines.append("# fish (3.2+, idempotent):")
+        block_lines.append(f"fish_add_path {st.expected_path}")
+        block_lines.append("# bash — append to ~/.bashrc:")
+        block_lines.append(f"echo 'export PATH=\"{st.expected_path}:$PATH\"' >> ~/.bashrc")
+        block_lines.append("# zsh — append to ~/.zshrc:")
+        block_lines.append(f"echo 'export PATH=\"{st.expected_path}:$PATH\"' >> ~/.zshrc")
+        block_lines.append("")
+        block_lines.append("# Or TEMPORARILY (current session only):")
         block_lines.append("# bash/zsh:")
         block_lines.append(f'export PATH="{st.expected_path}:$PATH"')
         block_lines.append("# fish:")

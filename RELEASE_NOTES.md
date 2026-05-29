@@ -1,5 +1,17 @@
 # Release Notes
 
+## Version 2.36.0 (29.05.2026)
+
+### Added
+- **`doctor check` now shows a Version column for plugins and npx tools.** The table gained a dedicated `Version` column so you can verify the whole list at a glance (e.g. confirm redux runs `v1.1.0`, not the frozen old package). Plugin versions are **zero-cost**: the `Version:` line already sits in the `claude plugin list` output and was previously parsed only for `Scope:` — a second regex (`_extract_version_from_block`) surfaces it. npx-tool versions come from two new declarative `NpxToolSpec` fields: `version_file` (a tilde-path whose first line is the version — `@opengsd/get-shit-done-redux` → `~/.claude/get-shit-done/VERSION`, zero subprocess) and `version_args` (e.g. `playwright-cli --version`, one cheap call, output scanned for the first semver token). Any lookup failure leaves the column blank — never breaks the check. New fields `PluginStatus.version` / `NpxToolStatus.version`; all reporter row functions return a 4-tuple `(Component, Status, Version, Detail)`.
+- **Plugin source in the Detail column.** When a `PluginSpec` declares a `marketplace_source` (the upstream repo, e.g. `mksglu/context-mode`), it now appears in the row detail; the marketplace itself was already visible in the `name@marketplace` component label.
+
+### Changed
+- **PATH manual block now explains how to make the entry permanent.** Previously the `npm global bin not on $PATH` block only printed the **temporary** commands (`set -gx PATH …` / `export PATH=…`), which vanish with the shell session — users had to re-enter them after every new shell. The block (and the Option-A snippet in `_npm_global_fix_block`) now lead with permanent instructions: `fish_add_path <dir>` (Fish 3.2+, idempotent) and `echo 'export PATH="<dir>:$PATH"' >> ~/.bashrc` / `~/.zshrc`, with the temporary form kept below. SCCS still never mutates rc files — it only prints the guidance.
+
+### Tests
+- 13 new tests (`TestVersionAndSourceReporting`): plugin-version parse (present/absent/no-bleed-across-blocks), npx `version_file`/`version_args` resolution + failure tolerance, reporter Version column + marketplace_source suffix, permanent-PATH block contents, and defaults declaring the version sources. Existing reporter row-unpacking tests updated to the 4-tuple shape.
+
 ## Version 2.35.0 (29.05.2026)
 
 ### Added

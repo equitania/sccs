@@ -31,24 +31,34 @@ _INFO = "[blue]INFO[/blue]"
 _UNKNOWN = "[dim]?[/dim]"
 
 
-def _node_row(status: NodeStatus, min_major: int) -> tuple[str, str, str]:
+# Each row function returns (Component, Status, Version, Detail). The Version
+# column is filled for components that carry a meaningful version (Node, the
+# Claude plugins, the npx tools); everything else passes "" so the column
+# stays aligned.
+
+
+def _node_row(status: NodeStatus, min_major: int) -> tuple[str, str, str, str]:
     if not status.installed:
-        return ("Node.js", _MISSING, f"need >= {min_major}.x")
+        return ("Node.js", _MISSING, "", f"need >= {min_major}.x")
     if not status.meets_minimum:
-        return ("Node.js", _OUTDATED, f"v{status.version} < {min_major}.x")
-    return ("Node.js", _OK, f"v{status.version}")
+        return ("Node.js", _OUTDATED, f"v{status.version}", f"< {min_major}.x required")
+    return ("Node.js", _OK, f"v{status.version}", "")
 
 
-def _claude_cli_row(status: ClaudeCliStatus) -> tuple[str, str, str]:
+def _claude_cli_row(status: ClaudeCliStatus) -> tuple[str, str, str, str]:
     if not status.installed:
-        return ("Claude CLI", _MISSING, "binary 'claude' not on PATH")
-    return ("Claude CLI", _OK, status.binary_path or "found")
+        return ("Claude CLI", _MISSING, "", "binary 'claude' not on PATH")
+    return ("Claude CLI", _OK, "", status.binary_path or "found")
 
 
-def _plugin_row(status: PluginStatus) -> tuple[str, str, str]:
+def _plugin_row(status: PluginStatus) -> tuple[str, str, str, str]:
     label = status.spec.install_target
+    version = f"v{status.version}" if status.version else ""
+    # Source suffix: the marketplace is already in the Component label
+    # (name@marketplace); marketplace_source adds the upstream repo when set.
+    src = f" · {status.spec.marketplace_source}" if status.spec.marketplace_source else ""
     if not status.installed:
-        return (f"plugin: {label}", _MISSING, "not in `claude plugin list`")
+        return (f"plugin: {label}", _MISSING, "", "not in `claude plugin list`")
     if status.detection_source == "alternative" and status.found_marketplace:
         # Installed under a different marketplace than configured. This is NOT
         # "outdated": `claude plugin` has no update-available signal, and the
@@ -57,97 +67,98 @@ def _plugin_row(status: PluginStatus) -> tuple[str, str, str]:
         return (
             f"plugin: {label}",
             _INFO,
+            version,
             f"installed via {status.found_marketplace}",
         )
     if status.detection_source == "bare":
-        return (f"plugin: {label}", _OK, "installed (no marketplace shown)")
-    return (f"plugin: {label}", _OK, "installed")
+        return (f"plugin: {label}", _OK, version, f"installed (no marketplace shown){src}")
+    return (f"plugin: {label}", _OK, version, f"installed{src}")
 
 
-def _marketplace_row(status: MarketplaceStatus) -> tuple[str, str, str]:
+def _marketplace_row(status: MarketplaceStatus) -> tuple[str, str, str, str]:
     label = f"marketplace: {status.name}"
     if status.skipped_reason:
-        return (label, _UNKNOWN, status.skipped_reason)
+        return (label, _UNKNOWN, "", status.skipped_reason)
     if status.registered:
-        return (label, _OK, "registered")
+        return (label, _OK, "", "registered")
     if status.suggested_source:
-        return (label, _MISSING, f"not registered — try `claude plugin marketplace add {status.suggested_source}`")
-    return (label, _MISSING, "not registered — no marketplace_source configured")
+        return (label, _MISSING, "", f"not registered — try `claude plugin marketplace add {status.suggested_source}`")
+    return (label, _MISSING, "", "not registered — no marketplace_source configured")
 
 
-def _path_prefix_row(status: PathPrefixStatus) -> tuple[str, str, str]:
+def _path_prefix_row(status: PathPrefixStatus) -> tuple[str, str, str, str]:
     label = f"path: {status.spec.identifier}"
     if status.skipped_reason:
-        return (label, _UNKNOWN, status.skipped_reason)
+        return (label, _UNKNOWN, "", status.skipped_reason)
     if status.in_path:
-        return (label, _OK, status.expected_path)
-    return (label, _MISSING, f"{status.expected_path} not on $PATH")
+        return (label, _OK, "", status.expected_path)
+    return (label, _MISSING, "", f"{status.expected_path} not on $PATH")
 
 
-def _status_line_row(status: StatusLineStatus) -> tuple[str, str, str]:
+def _status_line_row(status: StatusLineStatus) -> tuple[str, str, str, str]:
     label = f"statusline: {status.spec.identifier}"
     state = status.state
     if state == "ok":
-        return (label, _OK, status.detail)
+        return (label, _OK, "", status.detail)
     if state == "missing":
-        return (label, _MISSING, status.detail)
+        return (label, _MISSING, "", status.detail)
     if state == "missing_binary":
-        return (label, _MISSING, status.detail)
+        return (label, _MISSING, "", status.detail)
     if state == "missing_script":
-        return (label, _MISSING, status.detail)
+        return (label, _MISSING, "", status.detail)
     if state == "stale_cellar":
-        return (label, _STALE, status.detail)
+        return (label, _STALE, "", status.detail)
     if state == "opaque":
-        return (label, _INFO, status.detail)
+        return (label, _INFO, "", status.detail)
     if state == "no_settings_file":
-        return (label, _UNKNOWN, status.detail)
-    return (label, _UNKNOWN, status.detail)  # pragma: no cover
+        return (label, _UNKNOWN, "", status.detail)
+    return (label, _UNKNOWN, "", status.detail)  # pragma: no cover
 
 
-def _permission_row(status: PermissionStatus) -> tuple[str, str, str]:
+def _permission_row(status: PermissionStatus) -> tuple[str, str, str, str]:
     label = f"perm: {status.spec.path}"
     if status.skipped_reason:
-        return (label, _UNKNOWN, status.skipped_reason)
+        return (label, _UNKNOWN, "", status.skipped_reason)
     if not status.exists:
-        return (label, _OK, "will be created on first use")
+        return (label, _OK, "", "will be created on first use")
     if status.ok:
-        return (label, _OK, "user-owned, writable")
+        return (label, _OK, "", "user-owned, writable")
     bits: list[str] = []
     if not status.is_writable:
         bits.append("not writable")
     if status.offending_paths:
         bits.append(f"{len(status.offending_paths)}+ foreign-owned")
-    return (label, _MISSING, ", ".join(bits) or "permission issue")
+    return (label, _MISSING, "", ", ".join(bits) or "permission issue")
 
 
-def _npx_row(status: NpxToolStatus) -> tuple[str, str, str]:
+def _npx_row(status: NpxToolStatus) -> tuple[str, str, str, str]:
     label = f"npx: {status.spec.name}"
+    version = f"v{status.version}" if status.version else ""
     if not status.available:
         if status.spec.detect_via_state:
-            return (label, _MISSING, "no successful run on record")
-        return (label, _MISSING, "binary not on PATH")
+            return (label, _MISSING, "", "no successful run on record")
+        return (label, _MISSING, "", "binary not on PATH")
     if status.detection_source == "state":
-        mark_detail = "installed (last run cached)"
-        return (label, _OK, mark_detail)
-    return (label, _OK, status.binary_path or "found")
+        return (label, _OK, version, "installed (last run cached)")
+    return (label, _OK, version, status.binary_path or "found")
 
 
-def _bundled_skill_row(status: BundledSkillStatus) -> tuple[str, str, str]:
+def _bundled_skill_row(status: BundledSkillStatus) -> tuple[str, str, str, str]:
     label = f"skill: {status.spec.name}"
     if status.skill_md_present:
-        return (label, _OK, f"{status.target_path}/SKILL.md")
-    return (label, _MISSING, f"SKILL.md missing at {status.target_path}")
+        return (label, _OK, "", f"{status.target_path}/SKILL.md")
+    return (label, _MISSING, "", f"SKILL.md missing at {status.target_path}")
 
 
-def _browser_bundle_row(status: BrowserBundleStatus) -> tuple[str, str, str]:
+def _browser_bundle_row(status: BrowserBundleStatus) -> tuple[str, str, str, str]:
     label = f"browsers: {status.spec.name}"
     declared = list(status.present.keys())
     if status.all_present:
-        return (label, _OK, ", ".join(declared))
+        return (label, _OK, "", ", ".join(declared))
     if not status.cache_dir_exists:
-        return (label, _MISSING, f"cache dir not found: {status.cache_dir}")
+        return (label, _MISSING, "", f"cache dir not found: {status.cache_dir}")
     missing = [name for name, ok in status.present.items() if not ok]
-    return (label, _MISSING, f"missing: {', '.join(missing)}")
+    return (label, _MISSING, "", f"missing: {', '.join(missing)}")
 
 
 def render_doctor_report(
@@ -169,6 +180,7 @@ def render_doctor_report(
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
     table.add_column("Component", style="bold")
     table.add_column("Status")
+    table.add_column("Version", style="cyan")
     table.add_column("Detail", style="dim")
 
     table.add_row(*_node_row(node, min_node_major))
