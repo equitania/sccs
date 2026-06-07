@@ -1,5 +1,15 @@
 # Release Notes
 
+## Version 2.36.1 (07.06.2026)
+
+### Fixed
+- **Dependency hygiene (project audit follow-up).** The `rich` upper bound was an off-by-one (`<15.0.0`) that blocked the current stable release — widened to `<16.0.0` so fresh installs resolve up to 15.x. `uv.lock` was stale at `2.33.1` across three releases — regenerated to `2.36.1`.
+- **`settings.json` writes now pass an explicit `mode=0o600`.** `atomic_write()` gained an optional `mode=` parameter; the sensitive settings.json writers (doctor statusline auto-fix, hook sanitiser, settings sync) set it explicitly. Note: this is defence-in-depth, not a bugfix — `os.replace` is `rename(2)`, so the target already inherits the temp file's `0600` perms (mkstemp default); the audit finding M-1 ("settings.json left world-readable") was a false positive, verified by regression test. Docstrings/comments corrected.
+
+### Changed
+- **Test coverage raised from ~73% to ~83%.** The coverage floor in `pyproject.toml` (single source of truth) went `70 → 82`. Newly covered: `output/merge.py` (36%→94%), `sync/engine.py` (65%→96%), `cli.py` (32%→75%, via CliRunner across every command group), and `transfer/ui.py` (42%→100%, questionary prompts mocked). 890 tests total.
+- **CLAUDE.md architecture diagram synced with the real source tree** (added `doctor/`, `transfer/`, `integrations/`, `convert/`, `docs/` and the missing per-module files).
+
 ## Version 2.36.0 (29.05.2026)
 
 ### Added
