@@ -90,10 +90,11 @@ omit = ["tests/*", "sccs/__main__.py"]
 [tool.coverage.report]
 # Single source of truth for the coverage floor — CI invokes pytest without
 # --cov-fail-under so this value governs both local and CI runs. Current
-# actual coverage is ~72%; floor sits a notch below to absorb platform
+# actual coverage is ~76%; floor sits a notch below to absorb platform
 # variance (Linux CI vs macOS). Target is 80%; raise this floor each time new
-# tests close a gap (transfer/ui.py at 42% and cli.py are the weakest areas).
-fail_under = 70
+# tests close a gap. merge.py (94%) and engine.py (96%) are now covered;
+# transfer/ui.py at 42% and cli.py remain the weakest areas.
+fail_under = 74
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

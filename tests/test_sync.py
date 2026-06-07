@@ -297,3 +297,150 @@ class TestSyncEngine:
 
         assert result is not None
         assert result.success is True
+
+    def test_get_handler_caches_and_returns_none_for_unknown(self, sample_config: dict):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+
+        h1 = engine.get_handler("claude_skills")
+        h2 = engine.get_handler("claude_skills")
+        assert h1 is not None and h1 is h2  # cached, same instance
+        assert engine.get_handler("does_not_exist") is None
+
+    def test_get_all_categories_includes_disabled(self, sample_config: dict):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        all_cats = engine.get_all_categories()
+        assert set(all_cats) == set(config.sync_categories.keys())
+
+    def test_get_status_specific_category(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        statuses = engine.get_status(category_name="claude_skills")
+        assert list(statuses.keys()) == ["claude_skills"]
+
+    def test_sync_specific_category(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        result = engine.sync(category_name="claude_skills", dry_run=True)
+        assert result.total_categories == 1
+        assert "claude_skills" in result.category_results
+
+    def test_sync_unknown_category_is_skipped(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        result = engine.sync(category_name="ghost", dry_run=True)
+        # handler is None -> loop continues, nothing synced, still successful
+        assert result.total_categories == 1
+        assert result.category_results == {}
+        assert result.success is True
+
+    def test_sync_all_delegates(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        result = engine.sync_all(dry_run=True)
+        assert result.total_categories == len(engine.get_enabled_categories())
+
+    def test_sync_category_raises_for_unknown(self, sample_config: dict):
+        import pytest
+
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        with pytest.raises(KeyError):
+            engine.sync_category("ghost", dry_run=True)
+
+    def test_get_category_status_raises_for_unknown(self, sample_config: dict):
+        import pytest
+
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        with pytest.raises(KeyError):
+            engine.get_category_status("ghost")
+
+    def test_reset_state_single_resets_cache_keeps_handler(
+        self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path
+    ):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        handler = engine.get_handler("claude_skills")
+        called = {"reset": False}
+        handler.reset_cache = lambda: called.__setitem__("reset", True)  # type: ignore[method-assign]
+
+        engine.reset_state(category_name="claude_skills")
+        # Single-category reset clears the handler's cache but keeps the instance.
+        assert called["reset"] is True
+        assert "claude_skills" in engine._handlers
+
+    def test_reset_state_all_clears_handlers(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        engine.get_handler("claude_skills")
+        engine.reset_state()
+        assert engine._handlers == {}
+
+    def test_ensure_repo_structure_creates_dirs(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        created = engine.ensure_repo_structure()
+        # All returned paths must now exist on disk.
+        assert all(p.exists() for p in created)
+
+    def test_sync_result_has_issues(self):
+        from sccs.sync.engine import SyncResult
+
+        assert SyncResult(success=True, conflicts=1).has_issues is True
+        assert SyncResult(success=True, errors=2).has_issues is True
+        assert SyncResult(success=True).has_issues is False
+
+    def test_sync_counts_settings_ensured(self, sample_config: dict):
+        from sccs.sync.category import CategorySyncResult
+        from sccs.sync.settings import SettingsEnsureResult
+
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+
+        settings = SettingsEnsureResult(target_file=Path("settings.json"))
+        settings.file_modified = True
+        cat_result = CategorySyncResult(name="claude_skills", success=True, total=1, synced=1, settings_result=settings)
+
+        class _FakeHandler:
+            def sync(self, **kwargs):
+                return cat_result
+
+        engine._handlers["claude_skills"] = _FakeHandler()  # type: ignore[assignment]
+        result = engine.sync(category_name="claude_skills")
+        assert result.settings_ensured == 1
+        assert result.synced_categories == 1
+
+    def test_sync_aborts_and_stops(self, sample_config: dict):
+        from sccs.sync.category import CategorySyncResult
+
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+
+        class _AbortHandler:
+            def sync(self, **kwargs):
+                return CategorySyncResult(name=first, success=False, aborted=True)
+
+        # Inject the abort handler for the first enabled category.
+        first = engine.get_enabled_categories()[0]
+        engine._handlers[first] = _AbortHandler()  # type: ignore[assignment]
+        result = engine.sync()
+        assert result.aborted is True
+        assert result.success is False
+
+    def test_sync_marks_failure_without_abort(self, sample_config: dict):
+        from sccs.sync.category import CategorySyncResult
+
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+
+        class _FailHandler:
+            def sync(self, **kwargs):
+                return CategorySyncResult(name="claude_skills", success=False, errors=1)
+
+        engine._handlers["claude_skills"] = _FailHandler()  # type: ignore[assignment]
+        result = engine.sync(category_name="claude_skills")
+        assert result.success is False
+        assert result.aborted is False
+        assert result.errors == 1

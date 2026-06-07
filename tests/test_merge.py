@@ -1,15 +1,56 @@
 # SCCS Merge Tests
 # Tests for interactive merge functionality
 
+from __future__ import annotations
+
+import shutil
+import sys
+from collections.abc import Iterable
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+from rich.console import Console as RichConsole
+
+from sccs.config.schema import ItemType
 from sccs.output.merge import (
     DiffHunk,
     MergeResult,
     _detect_syntax,
+    _show_file_metadata,
     edit_in_editor,
+    interactive_merge,
+    prompt_hunk_resolution,
+    show_hunk,
     split_into_hunks,
 )
+from sccs.sync.actions import ActionType, SyncAction
+from sccs.sync.item import SyncItem
+
+# Resolve real binaries instead of assuming /bin paths — `true` lives in
+# /usr/bin on macOS, /bin on many Linuxes. shutil.which() finds whichever.
+_TRUE = shutil.which("true")
+_FALSE = shutil.which("false")
+_CAT = shutil.which("cat")
+
+
+def _scripted_console(inputs: Iterable[str]) -> RichConsole:
+    """A recording Rich console whose .input() replays a scripted sequence."""
+    console = RichConsole(record=True, width=120)
+    it = iter(inputs)
+    console.input = lambda *a, **k: next(it)  # type: ignore[method-assign]
+    return console
+
+
+def _conflict_action(local: Path, repo: Path) -> SyncAction:
+    item = SyncItem(
+        name=local.name,
+        category="test",
+        item_type=ItemType.FILE,
+        local_path=local,
+        repo_path=repo,
+    )
+    return SyncAction(item=item, action_type=ActionType.CONFLICT)
 
 
 class TestSplitIntoHunks:
@@ -206,9 +247,200 @@ class TestEditInEditor:
         result = edit_in_editor("test content")
         assert result is None
 
-    @patch.dict("os.environ", {"EDITOR": "/bin/true"}, clear=False)
-    def test_editor_success(self, tmp_path):
-        """Successful editor should return content."""
-        # This test is tricky because it needs a real editor
-        # We test the fallback behavior instead
-        pass
+    @pytest.mark.skipif(not _TRUE, reason="no `true` binary available")
+    def test_editor_success_unchanged(self, monkeypatch):
+        """A no-op editor (exit 0, no write) returns the original content."""
+        monkeypatch.setenv("EDITOR", _TRUE)
+        assert edit_in_editor("original content") == "original content"
+
+    @pytest.mark.skipif(not _FALSE, reason="no `false` binary available")
+    def test_editor_nonzero_returncode_returns_none(self, monkeypatch):
+        """A non-zero editor exit code yields None (edit discarded)."""
+        monkeypatch.setenv("EDITOR", _FALSE)
+        assert edit_in_editor("content") is None
+
+    @pytest.mark.skipif(not _CAT, reason="no resolvable editor binary available")
+    def test_editor_writes_modified_content(self, monkeypatch):
+        """When the editor mutates the temp file, the new content is returned."""
+
+        def fake_run(cmd, *a, **k):
+            # cmd == [editor, temp_path]; rewrite the buffer as a real editor would.
+            Path(cmd[1]).write_text("EDITED", encoding="utf-8")
+
+            class _R:
+                returncode = 0
+
+            return _R()
+
+        monkeypatch.setenv("EDITOR", _CAT)  # any which-resolvable binary; run is mocked
+        monkeypatch.setattr("sccs.output.merge.subprocess.run", fake_run)
+        assert edit_in_editor("before") == "EDITED"
+
+    @pytest.mark.skipif(not _CAT or sys.platform == "win32", reason="POSIX perms only")
+    def test_editor_buffer_is_private(self, monkeypatch):
+        """The merge buffer (may hold tokens) must be chmod'd 0600 before editing."""
+        seen = {}
+
+        def fake_run(cmd, *a, **k):
+            import os
+            import stat
+
+            seen["mode"] = stat.S_IMODE(os.stat(cmd[1]).st_mode)
+
+            class _R:
+                returncode = 0
+
+            return _R()
+
+        monkeypatch.setenv("EDITOR", _CAT)
+        monkeypatch.setattr("sccs.output.merge.subprocess.run", fake_run)
+        edit_in_editor("secret")
+        assert seen["mode"] == 0o600
+
+
+class TestShowHunk:
+    """Tests for show_hunk() rendering."""
+
+    def test_renders_modification(self):
+        console = RichConsole(record=True, width=120)
+        hunk = DiffHunk(
+            tag="replace",
+            local_lines=["new\n"],
+            repo_lines=["old\n"],
+            local_start=0,
+            local_end=1,
+            repo_start=0,
+            repo_end=1,
+        )
+        show_hunk(hunk, 1, 3, console, syntax="text")
+        out = console.export_text()
+        assert "Hunk 1/3" in out
+        assert "modified" in out
+
+    def test_renders_addition_and_deletion_titles(self):
+        console = RichConsole(record=True, width=120)
+        add = DiffHunk("insert", ["a\n"], [], 0, 1, 0, 0)
+        rem = DiffHunk("delete", [], ["b\n"], 0, 0, 0, 1)
+        show_hunk(add, 1, 2, console)
+        show_hunk(rem, 2, 2, console)
+        out = console.export_text()
+        assert "added in local" in out
+        assert "removed in local" in out
+
+
+class TestPromptHunkResolution:
+    """Tests for prompt_hunk_resolution()."""
+
+    @pytest.mark.parametrize(
+        "typed,expected",
+        [
+            ("l", "local"),
+            ("local", "local"),
+            ("r", "repo"),
+            ("b", "both"),
+            ("e", "edit"),
+            ("s", "skip"),
+        ],
+    )
+    def test_valid_choices(self, typed, expected):
+        console = _scripted_console([typed])
+        assert prompt_hunk_resolution(console) == expected
+
+    def test_invalid_then_valid(self):
+        console = _scripted_console(["x", "?", "r"])
+        assert prompt_hunk_resolution(console) == "repo"
+        assert "Invalid choice" in console.export_text()
+
+
+class TestShowFileMetadata:
+    """Tests for _show_file_metadata()."""
+
+    def test_renders_sizes_and_newer_indicator(self, tmp_path):
+        local = tmp_path / "f.txt"
+        repo = tmp_path / "repo_f.txt"
+        repo.write_text("short", encoding="utf-8")
+        local.write_text("a much longer local body", encoding="utf-8")
+        # Make local strictly newer than repo.
+        import os
+
+        os.utime(repo, (1_000_000, 1_000_000))
+        os.utime(local, (2_000_000, 2_000_000))
+
+        console = RichConsole(record=True, width=120)
+        _show_file_metadata(_conflict_action(local, repo), console)
+        out = console.export_text()
+        assert "File Comparison" in out
+        assert "bytes" in out
+        assert "LOCAL" in out  # newer indicator points at local
+
+
+class TestInteractiveMerge:
+    """End-to-end tests for interactive_merge() with scripted input."""
+
+    def _make_files(self, tmp_path: Path) -> tuple[Path, Path]:
+        local = tmp_path / "item.txt"
+        repo = tmp_path / "repo" / "item.txt"
+        repo.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text("line 1\nLOCAL\nline 3\n", encoding="utf-8")
+        repo.write_text("line 1\nREPO\nline 3\n", encoding="utf-8")
+        return local, repo
+
+    def test_no_differences_short_circuits(self, tmp_path):
+        local = tmp_path / "a.txt"
+        repo = tmp_path / "b.txt"
+        local.write_text("same\n", encoding="utf-8")
+        repo.write_text("same\n", encoding="utf-8")
+        console = RichConsole(record=True, width=120)
+        result = interactive_merge(_conflict_action(local, repo), console)
+        assert result.is_complete
+        assert result.merged_content == "same\n"
+        assert "No differences" in console.export_text()
+
+    def test_choose_local_and_accept_writes_both(self, tmp_path):
+        local, repo = self._make_files(tmp_path)
+        console = _scripted_console(["l", "y"])  # one hunk -> local, then accept
+        result = interactive_merge(_conflict_action(local, repo), console)
+        assert result.is_complete
+        assert result.hunks_local == 1
+        assert "LOCAL" in local.read_text(encoding="utf-8")
+        assert "LOCAL" in repo.read_text(encoding="utf-8")
+
+    def test_choose_repo(self, tmp_path):
+        local, repo = self._make_files(tmp_path)
+        console = _scripted_console(["r", "y"])
+        result = interactive_merge(_conflict_action(local, repo), console)
+        assert result.hunks_repo == 1
+        assert "REPO" in local.read_text(encoding="utf-8")
+
+    def test_choose_both(self, tmp_path):
+        local, repo = self._make_files(tmp_path)
+        console = _scripted_console(["b", "y"])
+        result = interactive_merge(_conflict_action(local, repo), console)
+        assert result.hunks_both == 1
+        body = local.read_text(encoding="utf-8")
+        assert "REPO" in body and "LOCAL" in body
+
+    def test_abort_on_reject_does_not_write(self, tmp_path):
+        local, repo = self._make_files(tmp_path)
+        original = repo.read_text(encoding="utf-8")
+        console = _scripted_console(["l", "n"])  # choose local, then reject
+        result = interactive_merge(_conflict_action(local, repo), console)
+        assert result.aborted
+        assert not result.is_complete
+        assert repo.read_text(encoding="utf-8") == original  # untouched
+
+    def test_edit_choice_uses_editor_output(self, tmp_path, monkeypatch):
+        local, repo = self._make_files(tmp_path)
+        monkeypatch.setattr("sccs.output.merge.edit_in_editor", lambda content, suffix=".txt": "MERGED\n")
+        console = _scripted_console(["e", "y"])
+        result = interactive_merge(_conflict_action(local, repo), console)
+        assert result.hunks_edited == 1
+        assert "MERGED" in local.read_text(encoding="utf-8")
+
+    def test_edit_failure_falls_back_to_local(self, tmp_path, monkeypatch):
+        local, repo = self._make_files(tmp_path)
+        monkeypatch.setattr("sccs.output.merge.edit_in_editor", lambda content, suffix=".txt": None)
+        console = _scripted_console(["e", "y"])
+        result = interactive_merge(_conflict_action(local, repo), console)
+        assert result.hunks_local == 1
+        assert "Editor failed" in console.export_text()
