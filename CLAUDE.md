@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.36.0
+**Version**: 2.36.1
 
 ### Key Features
 
@@ -70,36 +70,66 @@ mypy sccs/                # Type checking
 sccs/
 ├── __init__.py           # Version, lazy imports
 ├── __main__.py           # Entry point for python -m sccs
-├── cli.py                # Click CLI with command groups
+├── cli.py                # Click CLI with command groups (largest file)
 ├── config/
-│   ├── __init__.py       # Config module exports
 │   ├── schema.py         # Pydantic models (SccsConfig, SyncCategory)
 │   ├── loader.py         # YAML loading/saving/validation
 │   ├── defaults.py       # Default configuration
 │   └── migration.py      # New-category detection, MigrationStateManager
 ├── sync/
-│   ├── __init__.py       # Sync module exports
 │   ├── item.py           # SyncItem model, scan functions
 │   ├── actions.py        # ActionType enum, SyncAction, execute_action
 │   ├── state.py          # SyncState, StateManager
 │   ├── category.py       # CategoryHandler, CategoryStatus
+│   ├── settings.py       # settings.json deep-merge sync (atomic, 0600)
 │   └── engine.py         # SyncEngine (main orchestrator)
+├── doctor/               # System/plugin health checks (largest subsystem)
+│   ├── defaults.py       # Hardcoded plugin/npx-tool/permission-check defaults
+│   ├── schema.py         # DoctorConfig, PluginSpec, NpxToolSpec, validators
+│   ├── runner.py         # subprocess(shell=False, stdin=DEVNULL) + allowlist
+│   ├── detectors.py      # Node/CLI/plugin/npx-tool/permission detectors
+│   ├── installer.py      # build_install_plan / build_update_plan / execute_plan
+│   ├── state.py          # DoctorStateManager (.doctor_state.yaml)
+│   ├── reporter.py       # Rich status table + chown fix block
+│   ├── managed.py        # DEFAULT_MANAGED_PATTERNS (gsd-* exclude from sync)
+│   └── _paths.py         # is_home_path helper (avoids import cycle)
+├── transfer/             # ZIP export/import
+│   ├── manifest.py       # Pydantic models for ZIP manifest
+│   ├── exporter.py       # Scan + ZIP creation
+│   ├── importer.py       # ZIP extraction (zip-slip + symlink rejection)
+│   └── ui.py             # questionary checkbox helpers
+├── integrations/         # Antigravity IDE + Claude Desktop
+│   ├── detectors.py      # AntigravityDetector, ClaudeDesktopDetector
+│   ├── antigravity.py    # Skill→Prompt migration logic
+│   └── claude_desktop.py # Trusted-folder registration
+├── convert/              # Fish → PowerShell profile conversion
+│   ├── fish_to_pwsh.py   # Converter entry
+│   ├── rules.py          # alias/set/fish_add_path translation rules
+│   └── templates.py      # PowerShell profile templates
+├── docs/
+│   └── generator.py      # Hub README auto-generation
 ├── git/
-│   ├── __init__.py       # Git module exports
-│   └── operations.py     # Git commands (commit, push, status)
+│   ├── operations.py     # Git commands (commit, push, pull, status; validated)
+│   └── resolve.py        # Interactive divergence resolver
 ├── output/
-│   ├── __init__.py       # Output module exports
 │   ├── console.py        # Rich console output
-│   └── diff.py           # Diff display and conflict resolution
+│   ├── diff.py           # Diff display and conflict resolution
+│   └── merge.py          # Editor-based 3-way merge (atomic, 0600 buffer)
 └── utils/
-    ├── __init__.py       # Utils module exports
-    ├── paths.py          # Path utilities, safe_copy, find_files
-    └── hashing.py        # Content hashing (SHA256)
+    ├── paths.py          # safe_copy, atomic_write (mode=), expand_path
+    ├── hashing.py        # Content hashing (SHA256)
+    ├── logging.py        # configure_logging, get_logger
+    └── platform.py       # OS detection helpers
 
-tests/
+tests/                    # 24 test files; test_doctor.py is the largest
 ├── conftest.py           # Pytest fixtures
 ├── test_config.py        # Config tests
-└── test_sync.py          # Sync engine tests
+├── test_sync.py          # Sync engine tests
+├── test_doctor.py        # Doctor subsystem (largest suite)
+├── test_transfer.py      # ZIP export/import
+├── test_importer_security.py  # Zip-slip / symlink rejection
+├── test_paths_atomic.py  # atomic_write cross-platform + mode perms
+└── ...                   # git, integrations, convert, settings, conflicts
 ```
 
 ### Key Classes

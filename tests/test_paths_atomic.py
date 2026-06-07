@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import os
+import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -91,6 +94,40 @@ class TestNoLegacyRename:
         target = tmp_path / "subdir" / "f.txt"
         atomic_write(target, "content")
         assert target.read_text(encoding="utf-8") == "content"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits not meaningful on Windows")
+class TestAtomicWriteModePermissions:
+    """v2.36.1: os.replace is rename(2) — the target inherits the temp file's
+    inode+perms (mkstemp creates it 0600), NOT the pre-existing target's perms.
+    So atomic_write already yields a private file; mode=0o600 makes that explicit
+    at sensitive call sites (settings.json) as defence-in-depth."""
+
+    def test_mode_yields_private_perms_over_preexisting_world_readable_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "settings.json"
+        target.write_text('{"token": "old"}', encoding="utf-8")
+        os.chmod(target, 0o644)  # even if the prior file was world-readable...
+
+        atomic_write(target, '{"token": "new"}', mode=0o600)
+
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600  # ...the result is 0600
+        assert target.read_text(encoding="utf-8") == '{"token": "new"}'
+
+    def test_mode_applies_on_fresh_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "fresh.json"
+        atomic_write(target, "{}", mode=0o600)
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+    def test_default_yields_private_perms_from_mkstemp(self, tmp_path: Path) -> None:
+        # Even without an explicit mode, rename(2) hands the target the temp
+        # file's 0600 perms — atomic_write never leaves a world-readable file.
+        target = tmp_path / "skill.md"
+        target.write_text("old", encoding="utf-8")
+        os.chmod(target, 0o644)
+
+        atomic_write(target, "new")
+
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
 @pytest.mark.parametrize("size", [0, 1, 1024, 65536])

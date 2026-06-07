@@ -195,7 +195,7 @@ def safe_delete(path: Path, *, missing_ok: bool = False) -> bool:
     return True
 
 
-def atomic_write(path: Path, content: str | bytes, *, encoding: str = "utf-8") -> None:
+def atomic_write(path: Path, content: str | bytes, *, encoding: str = "utf-8", mode: int | None = None) -> None:
     """
     Atomically write content to file.
 
@@ -205,6 +205,15 @@ def atomic_write(path: Path, content: str | bytes, *, encoding: str = "utf-8") -
         path: Target file path.
         content: Content to write (str or bytes).
         encoding: Encoding for string content (default utf-8).
+        mode: Optional final file permissions (e.g. 0o600). When set, the
+            target is chmod'd *after* the rename. NOTE: os.replace is rename(2),
+            so the target ends up with the temp file's inode and permissions —
+            mkstemp creates that as 0600, meaning atomic_write already yields a
+            private file by default. Passing mode=0o600 makes that guarantee
+            explicit at the call site for files that may hold secrets (MCP
+            tokens, API keys) — defence-in-depth against any future change to
+            the temp-file creation path. Default None relies on the mkstemp
+            default and applies no extra chmod.
     """
     ensure_dir(path.parent)
 
@@ -221,6 +230,11 @@ def atomic_write(path: Path, content: str | bytes, *, encoding: str = "utf-8") -
         # whereas os.rename raises FileExistsError under Windows when the
         # target already exists (WinError 183).
         os.replace(temp_path, path)
+        # rename(2) gives the target the temp file's inode+perms (mkstemp=0600),
+        # so the file is already private by default; an explicit chmod here makes
+        # the intended mode unambiguous and survives future temp-path changes.
+        if mode is not None:
+            os.chmod(path, mode)
     except Exception:
         # Cleanup on failure
         try:

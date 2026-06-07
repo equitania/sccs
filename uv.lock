@@ -759,7 +759,7 @@ wheels = [
 
 [[package]]
 name = "sccs"
-version = "2.33.1"
+version = "2.36.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -791,7 +791,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "pyyaml", specifier = ">=6.0,<7.0.0" },
     { name = "questionary", specifier = ">=2.0.0,<3.0.0" },
-    { name = "rich", specifier = ">=13.0.0,<15.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<16.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.0" },
 ]

@@ -495,9 +495,10 @@ def _status_line_actions(statuses: list[StatusLineStatus]) -> list[DoctorAction]
                     backup.write_text(text, encoding="utf-8")
                     sl["command"] = new
                     # Atomic write (temp + os.replace) so a crash mid-write cannot
-                    # leave settings.json truncated; mkstemp also yields 0600,
-                    # tightening perms on a file that may hold MCP tokens.
-                    atomic_write(p, json.dumps(data, indent=2) + "\n")
+                    # leave settings.json truncated; mode=0o600 forces private
+                    # perms on a file that may hold MCP tokens (os.replace would
+                    # otherwise inherit the prior, possibly world-readable, mode).
+                    atomic_write(p, json.dumps(data, indent=2) + "\n", mode=0o600)
 
                 actions.append(
                     DoctorAction(
@@ -535,7 +536,7 @@ def _status_line_actions(statuses: list[StatusLineStatus]) -> list[DoctorAction]
                     backup = p.with_name(f"{p.name}.bak-{timestamp}")
                     backup.write_text(text, encoding="utf-8")
                     sl["command"] = new
-                    atomic_write(p, json.dumps(data, indent=2) + "\n")
+                    atomic_write(p, json.dumps(data, indent=2) + "\n", mode=0o600)
 
                 actions.append(
                     DoctorAction(
@@ -1118,7 +1119,7 @@ def _settings_hook_cleanup_actions(
 
         data["hooks"] = new_hooks
         # Atomic write (temp + os.replace) — see _status_line_actions for rationale.
-        atomic_write(p, json.dumps(data, indent=2) + "\n")
+        atomic_write(p, json.dumps(data, indent=2) + "\n", mode=0o600)
 
     return [
         DoctorAction(

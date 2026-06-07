@@ -131,7 +131,9 @@ def ensure_settings(
     try:
         ensure_dir(target.parent)
         content = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
-        atomic_write(target, content)
+        # settings.json may carry MCP tokens / API keys — force 0600 (os.replace
+        # would otherwise inherit the target's prior, possibly world-readable, mode).
+        atomic_write(target, content, mode=0o600)
     except PermissionError:
         result.error = f"Permission denied writing {target}"
         return result
