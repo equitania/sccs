@@ -1339,7 +1339,12 @@ def integrations_status(ctx: click.Context) -> None:
     except FileNotFoundError:
         pass
 
-    if ag_info is None and cd_info is None:
+    from sccs.integrations.opencode import OpenCodeDetector
+
+    oc_detector = OpenCodeDetector()
+    oc_info = oc_detector.get_info()
+
+    if ag_info is None and cd_info is None and oc_info is None:
         console.print("[dim]No integrations detected[/dim]")
         return
 
@@ -1351,6 +1356,20 @@ def integrations_status(ctx: click.Context) -> None:
         for gap in ag_gaps:
             label = "[yellow]outdated[/yellow]" if gap.needs_update else "[red]missing[/red]"
             console.print(f"  {gap.name} — {label}")
+
+    # OpenCode section
+    if oc_info is not None:
+        console.print(f"\n[bold]OpenCode[/bold] detected at {oc_info.config_dir}")
+        if oc_info.reads_claude_skills:
+            console.print("  [green]✓[/green] reads ~/.claude/skills natively (no skill export needed)")
+        agent_gaps = oc_detector.get_agent_gaps()
+        command_gaps = oc_detector.get_command_gaps()
+        mcp_status = oc_detector.get_mcp_status()
+        console.print(
+            f"  agents to export: {len(agent_gaps)} · "
+            f"commands to export: {len(command_gaps)} · "
+            f"MCP servers missing: {len(mcp_status['missing'])}"
+        )
 
 
 @integrations_group.command("migrate-skills")
@@ -1484,6 +1503,349 @@ def integrations_trust_repo(ctx: click.Context, dry_run: bool) -> None:
     else:
         console.print_error(result.error or "Unknown error")
         sys.exit(1)
+
+
+# --- OpenCode integration sub-group ---
+
+
+@integrations_group.group("opencode")
+def opencode_group() -> None:
+    """Export Claude Code artefacts to OpenCode (opencode.ai).
+
+    \b
+    OpenCode reads ~/.claude/skills/ and CLAUDE.md natively, so skills and
+    rules need no action. Agents, commands and MCP servers have a different
+    format and are converted + materialised into ~/.config/opencode/.
+
+    \b
+    Examples:
+        sccs integrations opencode status            Show OpenCode integration status
+        sccs integrations opencode map-models        Assign Claude models to OpenCode models
+        sccs integrations opencode export-agents     Convert CC agents -> OpenCode
+        sccs integrations opencode export-commands   Convert CC commands -> OpenCode
+        sccs integrations opencode merge-mcp         Merge MCP servers into opencode.json
+    """
+
+
+def _print_conversion_result(console, result, *, dry_run: bool, verbose: bool, unit: str) -> None:
+    """Render a ConversionResult (shared by export-agents / export-commands)."""
+    verb = "Would create" if dry_run else "Created"
+    verb_upd = "Would update" if dry_run else "Updated"
+
+    if result.target_dir_created:
+        action = "Would create" if dry_run else "Created"
+        console.print_info(f"{action} target directory")
+
+    if result.created:
+        console.print_success(f"{verb}: {len(result.created)} {unit}")
+        if verbose:
+            for name in result.created:
+                console.print(f"  [green]+[/green] {name}")
+
+    if result.updated:
+        console.print_success(f"{verb_upd}: {len(result.updated)} {unit}")
+        if verbose:
+            for name in result.updated:
+                console.print(f"  [yellow]~[/yellow] {name}")
+
+    if result.skipped:
+        console.print(f"[dim]Skipped: {len(result.skipped)} (already exist, use --overwrite)[/dim]")
+
+    if result.warnings:
+        console.print(f"[yellow]Warnings for {len(result.warnings)} {unit}:[/yellow]")
+        for name, warns in result.warnings.items():
+            for warn in warns:
+                console.print(f"  [yellow]![/yellow] {name}: {warn}")
+
+    if result.errors:
+        console.print_error(f"Errors: {len(result.errors)}")
+        for name, error in result.errors.items():
+            console.print(f"  [red]✗[/red] {name}: {error}")
+        sys.exit(1)
+
+
+def _resolve_opencode_model_map(*, discover: bool = True) -> dict:
+    """Build the effective Claude->OpenCode model map for a CLI run.
+
+    Loads the user config defensively (None when absent) and delegates to
+    resolve_model_map (config map > live discovery > static default).
+    """
+    from sccs.integrations.opencode import resolve_model_map
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        config = None
+    return resolve_model_map(config, discover=discover)
+
+
+@opencode_group.command("status")
+@click.pass_context
+def opencode_status(ctx: click.Context) -> None:
+    """Show OpenCode installation and conversion gaps."""
+    from sccs.integrations.opencode import OpenCodeDetector
+
+    console = ctx.obj["console"]
+    detector = OpenCodeDetector()
+    info = detector.get_info()
+
+    if info is None:
+        console.print("[dim]OpenCode is not installed (~/.config/opencode/ not found)[/dim]")
+        return
+
+    console.print(f"[bold]OpenCode[/bold] detected at {info.config_dir}")
+    if info.reads_claude_skills:
+        console.print("  [green]✓[/green] reads ~/.claude/skills natively (no skill export needed)")
+
+    agent_gaps = detector.get_agent_gaps()
+    command_gaps = detector.get_command_gaps()
+    mcp_status = detector.get_mcp_status()
+
+    console.print(f"\n[bold]Agents to export ({len(agent_gaps)}):[/bold]")
+    for gap in agent_gaps:
+        label = "[yellow]outdated[/yellow]" if gap.needs_update else "[red]missing[/red]"
+        console.print(f"  {gap.name} — {label}")
+
+    console.print(f"\n[bold]Commands to export ({len(command_gaps)}):[/bold]")
+    for gap in command_gaps:
+        label = "[yellow]outdated[/yellow]" if gap.needs_update else "[red]missing[/red]"
+        console.print(f"  {gap.name} — {label}")
+
+    if mcp_status["missing"]:
+        console.print(f"\n[bold]MCP servers not yet in opencode.json ({len(mcp_status['missing'])}):[/bold]")
+        for name in mcp_status["missing"]:
+            console.print(f"  [red]·[/red] {name}")
+
+
+@opencode_group.command("export-agents")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing agents (default: yes)")
+@click.option("-a", "--agent", "agents", multiple=True, help="Limit to specific agent (repeatable)")
+@click.pass_context
+def opencode_export_agents(
+    ctx: click.Context,
+    dry_run: bool,
+    overwrite: bool,
+    agents: tuple[str, ...],
+) -> None:
+    """Convert Claude agents into OpenCode agents (~/.config/opencode/agent/)."""
+    from sccs.integrations.opencode import OpenCodeDetector, convert_agents_to_opencode
+
+    console = ctx.obj["console"]
+    detector = OpenCodeDetector()
+    if not detector.is_installed():
+        console.print_error("OpenCode is not installed (~/.config/opencode/ not found)")
+        sys.exit(1)
+
+    gaps = detector.get_agent_gaps(_resolve_opencode_model_map())
+    if not gaps:
+        console.print_success("All agents are already up to date in OpenCode")
+        return
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    result = convert_agents_to_opencode(
+        gaps,
+        dry_run=dry_run,
+        overwrite_existing=overwrite,
+        selected=list(agents) if agents else None,
+    )
+    _print_conversion_result(console, result, dry_run=dry_run, verbose=ctx.obj["verbose"], unit="agents")
+
+
+@opencode_group.command("export-commands")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing commands (default: yes)")
+@click.option("-c", "--command", "commands", multiple=True, help="Limit to specific command (repeatable)")
+@click.pass_context
+def opencode_export_commands(
+    ctx: click.Context,
+    dry_run: bool,
+    overwrite: bool,
+    commands: tuple[str, ...],
+) -> None:
+    """Convert Claude commands into OpenCode commands (~/.config/opencode/command/)."""
+    from sccs.integrations.opencode import OpenCodeDetector, convert_commands_to_opencode
+
+    console = ctx.obj["console"]
+    detector = OpenCodeDetector()
+    if not detector.is_installed():
+        console.print_error("OpenCode is not installed (~/.config/opencode/ not found)")
+        sys.exit(1)
+
+    gaps = detector.get_command_gaps(_resolve_opencode_model_map())
+    if not gaps:
+        console.print_success("All commands are already up to date in OpenCode")
+        return
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    result = convert_commands_to_opencode(
+        gaps,
+        dry_run=dry_run,
+        overwrite_existing=overwrite,
+        selected=list(commands) if commands else None,
+    )
+    _print_conversion_result(console, result, dry_run=dry_run, verbose=ctx.obj["verbose"], unit="commands")
+
+
+@opencode_group.command("merge-mcp")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite", is_flag=True, help="Overwrite MCP servers already in opencode.json")
+@click.option("-s", "--server", "servers", multiple=True, help="Limit to specific MCP server (repeatable)")
+@click.pass_context
+def opencode_merge_mcp(
+    ctx: click.Context,
+    dry_run: bool,
+    overwrite: bool,
+    servers: tuple[str, ...],
+) -> None:
+    """Merge Claude MCP servers into opencode.json (~/.config/opencode/)."""
+    from sccs.integrations.opencode import OpenCodeDetector, merge_mcp_to_opencode
+
+    console = ctx.obj["console"]
+    detector = OpenCodeDetector()
+    if not detector.is_installed():
+        console.print_error("OpenCode is not installed (~/.config/opencode/ not found)")
+        sys.exit(1)
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    result = merge_mcp_to_opencode(
+        server_names=list(servers) if servers else None,
+        dry_run=dry_run,
+        overwrite_existing=overwrite,
+    )
+
+    if not result.success:
+        console.print_error(result.error or "Unknown error")
+        sys.exit(1)
+
+    verb = "Would add" if dry_run else "Added"
+    verb_upd = "Would update" if dry_run else "Updated"
+    if result.added:
+        console.print_success(f"{verb}: {len(result.added)} MCP servers")
+        for name in result.added:
+            console.print(f"  [green]+[/green] {name}")
+    if result.updated:
+        console.print_success(f"{verb_upd}: {len(result.updated)} MCP servers")
+        for name in result.updated:
+            console.print(f"  [yellow]~[/yellow] {name}")
+    if result.already_present:
+        console.print(f"[dim]Already present: {len(result.already_present)} (use --overwrite)[/dim]")
+    if result.warnings:
+        for name, warns in result.warnings.items():
+            for warn in warns:
+                console.print(f"  [yellow]![/yellow] {name}: {warn}")
+    if not result.added and not result.updated:
+        console.print_info("Nothing to merge")
+
+
+def _collect_cc_model_tokens() -> list[str]:
+    """Distinct Claude model aliases actually used by local agents/commands.
+
+    Scans ~/.claude/agents/*.md and ~/.claude/commands/*.md frontmatter for
+    `model:` values, keeping only bare aliases (no provider slash, not
+    inherit/empty) — those are the ones that need an explicit OpenCode mapping.
+    """
+    from sccs.convert.frontmatter import parse_frontmatter
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+    bases = [Path.home() / ".claude" / "agents", Path.home() / ".claude" / "commands"]
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for md in sorted(base.glob("*.md")):
+            if md.name.startswith(("_", ".")) or md.name.endswith(".local.md"):
+                continue
+            try:
+                meta, _ = parse_frontmatter(md.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+            model = meta.get("model")
+            if not model:
+                continue
+            value = str(model).strip()
+            if "/" in value or value.lower() in {"inherit", ""}:
+                continue
+            if value not in seen:
+                seen.add(value)
+                tokens.append(value)
+    return tokens
+
+
+@opencode_group.command("map-models")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview the mapping without writing config")
+@click.pass_context
+def opencode_map_models(ctx: click.Context, dry_run: bool) -> None:
+    """Interactively assign Claude model aliases to available OpenCode models.
+
+    \b
+    Lists the Claude models your agents/commands use and the models your local
+    OpenCode install actually offers, then lets you assign each one. The result
+    is saved to opencode.model_map in ~/.config/sccs/config.yaml and used by
+    export-agents / export-commands.
+    """
+    import questionary
+
+    from sccs.config.loader import save_opencode_model_map
+    from sccs.convert.claude_to_opencode import match_models
+    from sccs.integrations.opencode import OpenCodeDetector, list_opencode_models
+
+    console = ctx.obj["console"]
+    detector = OpenCodeDetector()
+    if not detector.is_installed():
+        console.print_error("OpenCode is not installed (~/.config/opencode/ not found)")
+        sys.exit(1)
+
+    cc_tokens = _collect_cc_model_tokens()
+    if not cc_tokens:
+        console.print_info("No Claude agents/commands use a mappable model alias — nothing to map")
+        return
+
+    available = list_opencode_models()
+    if not available:
+        console.print_error(
+            "`opencode models` returned nothing — authenticate a provider in OpenCode first "
+            "(e.g. `opencode auth login`), then re-run"
+        )
+        sys.exit(1)
+
+    # Resolve config for preferred-provider order used in the suggestion.
+    try:
+        config = load_config()
+        preferred = list(config.opencode.preferred_providers)
+    except FileNotFoundError:
+        preferred = ["anthropic"]
+
+    mapping: dict[str, str] = {}
+    for token in cc_tokens:
+        suggested, _ = match_models([token], available, preferred_providers=preferred)
+        default = suggested.get(token)
+        answer = questionary.select(
+            f"OpenCode model for Claude '{token}':",
+            choices=available,
+            default=default if default in available else None,
+        ).ask()
+        if answer is None:
+            console.print_info("Cancelled — no changes written")
+            return
+        mapping[token] = answer
+
+    console.print("\n[bold]Planned model map:[/bold]")
+    for token, model in mapping.items():
+        console.print(f"  {token} → {model}")
+
+    if dry_run:
+        console.print_info("\nDry run — config not modified")
+        return
+
+    save_opencode_model_map(mapping)
+    console.print_success(f"\nSaved {len(mapping)} model mappings to config (opencode.model_map)")
 
 
 # --- Doctor command group ---

@@ -961,6 +961,7 @@ class TestIntegrationsCommand:
         with (
             patch("sccs.integrations.detectors.AntigravityDetector") as mock_ag_cls,
             patch("sccs.integrations.detectors.ClaudeDesktopDetector") as mock_cd_cls,
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_oc_cls,
         ):
             mock_ag = MagicMock()
             mock_ag.get_info.return_value = None
@@ -971,6 +972,11 @@ class TestIntegrationsCommand:
             mock_cd.get_info.return_value = None
             mock_cd.is_installed.return_value = False
             mock_cd_cls.return_value = mock_cd
+
+            mock_oc = MagicMock()
+            mock_oc.get_info.return_value = None
+            mock_oc.is_installed.return_value = False
+            mock_oc_cls.return_value = mock_oc
 
             result = runner.invoke(cli, ["integrations", "status"])
         assert result.exit_code == 0
@@ -1802,3 +1808,192 @@ class TestPlatformHint:
         _print_platform_hint(console, cfg)
 
         assert console.text == ""
+
+
+class TestOpenCodeCli:
+    """Tests for the `sccs integrations opencode` sub-group."""
+
+    def test_group_help(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["integrations", "opencode", "--help"])
+        assert result.exit_code == 0
+        assert "OpenCode" in result.output
+
+    def test_status_not_installed(self):
+        runner = CliRunner()
+        with patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls:
+            mock_cls.return_value.get_info.return_value = None
+            result = runner.invoke(cli, ["integrations", "opencode", "status"])
+        assert result.exit_code == 0
+        assert "not installed" in result.output
+
+    def test_status_installed(self):
+        runner = CliRunner()
+        info = MagicMock(config_dir="/x/opencode", reads_claude_skills=True)
+        with patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls:
+            inst = mock_cls.return_value
+            inst.get_info.return_value = info
+            inst.get_agent_gaps.return_value = []
+            inst.get_command_gaps.return_value = []
+            inst.get_mcp_status.return_value = {"missing": []}
+            result = runner.invoke(cli, ["integrations", "opencode", "status"])
+        assert result.exit_code == 0
+        assert "OpenCode" in result.output
+
+    def test_export_agents_not_installed(self):
+        runner = CliRunner()
+        with patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls:
+            mock_cls.return_value.is_installed.return_value = False
+            result = runner.invoke(cli, ["integrations", "opencode", "export-agents"])
+        assert result.exit_code == 1
+        assert "not installed" in result.output
+
+    def test_export_agents_up_to_date(self):
+        runner = CliRunner()
+        with patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls:
+            inst = mock_cls.return_value
+            inst.is_installed.return_value = True
+            inst.get_agent_gaps.return_value = []
+            result = runner.invoke(cli, ["integrations", "opencode", "export-agents"])
+        assert result.exit_code == 0
+        assert "up to date" in result.output
+
+    def test_export_agents_dry_run(self):
+        runner = CliRunner()
+        gap = MagicMock(name="a1")
+        result_obj = MagicMock(created=["a1"], updated=[], skipped=[], errors={}, warnings={}, target_dir_created=False)
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.integrations.opencode.convert_agents_to_opencode", return_value=result_obj),
+        ):
+            inst = mock_cls.return_value
+            inst.is_installed.return_value = True
+            inst.get_agent_gaps.return_value = [gap]
+            result = runner.invoke(cli, ["integrations", "opencode", "export-agents", "--dry-run"])
+        assert result.exit_code == 0
+        assert "Would create" in result.output
+
+    def test_export_commands_dry_run(self):
+        runner = CliRunner()
+        gap = MagicMock()
+        result_obj = MagicMock(created=["c1"], updated=[], skipped=[], errors={}, warnings={}, target_dir_created=False)
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.integrations.opencode.convert_commands_to_opencode", return_value=result_obj),
+        ):
+            inst = mock_cls.return_value
+            inst.is_installed.return_value = True
+            inst.get_command_gaps.return_value = [gap]
+            result = runner.invoke(cli, ["integrations", "opencode", "export-commands", "--dry-run"])
+        assert result.exit_code == 0
+        assert "Would create" in result.output
+
+    def test_merge_mcp_success(self):
+        runner = CliRunner()
+        result_obj = MagicMock(
+            success=True, added=["context7"], updated=[], already_present=[], warnings={}, error=None
+        )
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.integrations.opencode.merge_mcp_to_opencode", return_value=result_obj),
+        ):
+            mock_cls.return_value.is_installed.return_value = True
+            result = runner.invoke(cli, ["integrations", "opencode", "merge-mcp"])
+        assert result.exit_code == 0
+        assert "context7" in result.output
+
+    def test_merge_mcp_failure(self):
+        runner = CliRunner()
+        result_obj = MagicMock(success=False, error="boom")
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.integrations.opencode.merge_mcp_to_opencode", return_value=result_obj),
+        ):
+            mock_cls.return_value.is_installed.return_value = True
+            result = runner.invoke(cli, ["integrations", "opencode", "merge-mcp"])
+        assert result.exit_code == 1
+        assert "boom" in result.output
+
+    def test_map_models_not_installed(self):
+        runner = CliRunner()
+        with patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls:
+            mock_cls.return_value.is_installed.return_value = False
+            result = runner.invoke(cli, ["integrations", "opencode", "map-models"])
+        assert result.exit_code == 1
+        assert "not installed" in result.output
+
+    def test_map_models_no_tokens(self):
+        runner = CliRunner()
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.cli._collect_cc_model_tokens", return_value=[]),
+        ):
+            mock_cls.return_value.is_installed.return_value = True
+            result = runner.invoke(cli, ["integrations", "opencode", "map-models"])
+        assert result.exit_code == 0
+        assert "nothing to map" in result.output
+
+    def test_map_models_no_opencode_models(self):
+        runner = CliRunner()
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.cli._collect_cc_model_tokens", return_value=["sonnet"]),
+            patch("sccs.integrations.opencode.list_opencode_models", return_value=[]),
+        ):
+            mock_cls.return_value.is_installed.return_value = True
+            result = runner.invoke(cli, ["integrations", "opencode", "map-models"])
+        assert result.exit_code == 1
+        assert "authenticate a provider" in result.output
+
+    def test_map_models_dry_run(self):
+        runner = CliRunner()
+        select_mock = MagicMock()
+        select_mock.ask.return_value = "anthropic/claude-sonnet-4-5"
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.cli._collect_cc_model_tokens", return_value=["sonnet"]),
+            patch("sccs.integrations.opencode.list_opencode_models", return_value=["anthropic/claude-sonnet-4-5"]),
+            patch("sccs.cli.load_config", side_effect=FileNotFoundError),
+            patch("questionary.select", return_value=select_mock),
+            patch("sccs.config.loader.save_opencode_model_map") as mock_save,
+        ):
+            mock_cls.return_value.is_installed.return_value = True
+            result = runner.invoke(cli, ["integrations", "opencode", "map-models", "--dry-run"])
+        assert result.exit_code == 0
+        assert "sonnet" in result.output
+        mock_save.assert_not_called()
+
+    def test_map_models_persists(self):
+        runner = CliRunner()
+        select_mock = MagicMock()
+        select_mock.ask.return_value = "anthropic/claude-sonnet-4-5"
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.cli._collect_cc_model_tokens", return_value=["sonnet"]),
+            patch("sccs.integrations.opencode.list_opencode_models", return_value=["anthropic/claude-sonnet-4-5"]),
+            patch("sccs.cli.load_config", side_effect=FileNotFoundError),
+            patch("questionary.select", return_value=select_mock),
+            patch("sccs.config.loader.save_opencode_model_map") as mock_save,
+        ):
+            mock_cls.return_value.is_installed.return_value = True
+            result = runner.invoke(cli, ["integrations", "opencode", "map-models"])
+        assert result.exit_code == 0
+        mock_save.assert_called_once_with({"sonnet": "anthropic/claude-sonnet-4-5"})
+
+    def test_map_models_cancelled(self):
+        runner = CliRunner()
+        select_mock = MagicMock()
+        select_mock.ask.return_value = None  # user hit Ctrl-C
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.cli._collect_cc_model_tokens", return_value=["sonnet"]),
+            patch("sccs.integrations.opencode.list_opencode_models", return_value=["anthropic/claude-sonnet-4-5"]),
+            patch("sccs.cli.load_config", side_effect=FileNotFoundError),
+            patch("questionary.select", return_value=select_mock),
+            patch("sccs.config.loader.save_opencode_model_map") as mock_save,
+        ):
+            mock_cls.return_value.is_installed.return_value = True
+            result = runner.invoke(cli, ["integrations", "opencode", "map-models"])
+        assert result.exit_code == 0
+        assert "Cancelled" in result.output
+        mock_save.assert_not_called()

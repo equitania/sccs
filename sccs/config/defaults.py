@@ -324,6 +324,51 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "sync_mode": "bidirectional",
             "item_type": "file",
         },
+        # OpenCode Agents (converted from Claude agents; disabled by default).
+        # One-way: Claude is the source of truth. Materialised by
+        # `sccs integrations opencode export-agents`, then synced like any
+        # other category. macos/linux only — ~/.config/ is not the Windows
+        # OpenCode config root.
+        "opencode_agents": {
+            "enabled": False,
+            "description": "OpenCode Agent Definitions (converted from Claude agents)",
+            "local_path": "~/.config/opencode/agent",
+            "repo_path": ".opencode/agent",
+            "sync_mode": "local_to_repo",
+            "item_type": "file",
+            "item_pattern": "*.md",
+            "include": ["*.md"],
+            "exclude": ["_*.md", "*.local.md", "*.tmp"],
+            "platforms": ["macos", "linux"],
+        },
+        # OpenCode Commands (converted from Claude commands; disabled by default)
+        "opencode_commands": {
+            "enabled": False,
+            "description": "OpenCode Command Definitions (converted from Claude commands)",
+            "local_path": "~/.config/opencode/command",
+            "repo_path": ".opencode/command",
+            "sync_mode": "local_to_repo",
+            "item_type": "file",
+            "item_pattern": "*.md",
+            "include": ["*.md"],
+            "exclude": ["_*.md", "*.local.md", "*.tmp"],
+            "platforms": ["macos", "linux"],
+        },
+        # OpenCode Skills (explicit copy; disabled by default).
+        # NOTE: OpenCode reads ~/.claude/skills/ natively, so most users do NOT
+        # need this. Enable it only to maintain a separate OpenCode skill set.
+        "opencode_skills": {
+            "enabled": False,
+            "description": "OpenCode Skills - explicit copy (OpenCode reads ~/.claude/skills natively otherwise)",
+            "local_path": "~/.config/opencode/skills",
+            "repo_path": ".opencode/skills",
+            "sync_mode": "local_to_repo",
+            "item_type": "directory",
+            "item_marker": "SKILL.md",
+            "include": ["*"],
+            "exclude": ["_archive/*", "_deprecated/*", "*.tmp"],
+            "platforms": ["macos", "linux"],
+        },
         # Project Templates (disabled by default)
         "project_templates": {
             "enabled": False,

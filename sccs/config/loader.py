@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
 from sccs.config.schema import SccsConfig
+from sccs.utils.paths import create_backup
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +254,45 @@ def adopt_new_categories(
     return load_config(config_path)
 
 
+def save_opencode_model_map(model_map: dict[str, str], config_path: Path | None = None) -> SccsConfig:
+    """Persist an explicit OpenCode model map into the user's config.yaml.
+
+    Operates on the raw YAML dict (like adopt_categories) so we only touch the
+    user's file and never inflate it with all merged defaults. A timestamped
+    backup is written before overwriting. Only the `opencode.model_map` key is
+    modified; any other `opencode:` settings are preserved.
+
+    Args:
+        model_map: alias -> 'provider/model' assignments to store.
+        config_path: Optional path to config file.
+
+    Returns:
+        Updated SccsConfig after reloading.
+    """
+    if config_path is None:
+        config_path = get_config_path()
+
+    raw = load_raw_user_data(config_path)
+    opencode_block = raw.get("opencode")
+    if not isinstance(opencode_block, dict):
+        opencode_block = {}
+    opencode_block["model_map"] = dict(model_map)
+    raw["opencode"] = opencode_block
+
+    if config_path.is_file():
+        create_backup(config_path, category="config")
+
+    try:
+        yaml_text = yaml.dump(raw, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+    except (OSError, yaml.YAMLError) as exc:
+        logger.error("Could not persist OpenCode model map to %s: %s", config_path, exc)
+        raise ConfigWriteError(f"Cannot persist OpenCode model map to {config_path}: {exc}") from exc
+
+    return load_config(config_path)
+
+
 def _merge_with_defaults(data: dict) -> dict:
     """Merge loaded data with default values for missing keys."""
     result = DEFAULT_CONFIG.copy()
@@ -288,6 +328,13 @@ def _merge_with_defaults(data: dict) -> dict:
     # effect at all (the override never reached the Pydantic model).
     if "doctor" in data:
         result["doctor"] = data["doctor"]
+
+    # `opencode` is fully optional (OpenCodeConfig has its own default_factory)
+    # and absent from DEFAULT_CONFIG, so — exactly like `doctor` above — it must
+    # be passed through verbatim or the user's `opencode.model_map` override is
+    # silently dropped before it reaches the Pydantic model.
+    if "opencode" in data:
+        result["opencode"] = data["opencode"]
 
     return result
 

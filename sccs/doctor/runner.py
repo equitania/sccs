@@ -139,6 +139,27 @@ def run_claude_marketplace_list() -> str:
     return proc.stdout or ""
 
 
+def run_opencode_models() -> str:
+    """Return raw stdout of `opencode models`. Empty on failure.
+
+    Used by the OpenCode integration to discover which `provider/model` ids the
+    local OpenCode install actually offers, so Claude model aliases can be mapped
+    to a model that really exists instead of a guessed id. Format is one model
+    per line:
+
+        anthropic/claude-sonnet-4-5
+        opencode/big-pickle
+
+    Empty output (no provider authenticated, OpenCode missing) is expected and
+    handled by the caller, which then falls back to the static default map.
+    """
+    try:
+        proc = _run(["opencode", "models"], timeout=15, check=False)
+    except DoctorError:
+        return ""
+    return proc.stdout or ""
+
+
 def parse_node_major(version: str | None) -> int | None:
     """Extract the major version integer from a 'X.Y.Z' string."""
     if not version:

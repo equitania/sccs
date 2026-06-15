@@ -171,6 +171,38 @@ class OutputConfig(BaseModel):
         return str(Path(v).expanduser())
 
 
+class OpenCodeConfig(BaseModel):
+    """OpenCode integration settings (model mapping for artefact conversion).
+
+    Mirrors the DoctorConfig override pattern: a None field keeps the bundled
+    default, an `extra_*` field is merged on top.
+    """
+
+    # None keeps the bundled DEFAULT_OPENCODE_MODEL_MAP; a dict fully replaces it.
+    model_map: dict[str, str] | None = Field(
+        default=None,
+        description="Override map of Claude model alias/id -> OpenCode 'provider/model'. None keeps defaults.",
+    )
+    # Additive: merged on top of the effective map (wins over base entries).
+    extra_model_map: dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional model aliases merged on top of the effective map.",
+    )
+    # Provider preference order for live `opencode models` family matching.
+    preferred_providers: list[str] = Field(
+        default_factory=lambda: ["anthropic"],
+        description="Provider order preferred when matching discovered OpenCode models.",
+    )
+
+    @property
+    def effective_model_map(self) -> dict[str, str]:
+        """Bundled default (or full override) merged with extra_model_map."""
+        from sccs.convert.claude_to_opencode import DEFAULT_OPENCODE_MODEL_MAP
+
+        base = dict(self.model_map) if self.model_map is not None else dict(DEFAULT_OPENCODE_MODEL_MAP)
+        return {**base, **self.extra_model_map}
+
+
 class SccsConfig(BaseModel):
     """Root configuration model for SCCS."""
 
@@ -182,6 +214,12 @@ class SccsConfig(BaseModel):
     doctor: DoctorConfig = Field(
         default_factory=DoctorConfig,
         description="System & plugin health-check configuration (sccs doctor).",
+    )
+    # OpenCode integration is fully optional and backwards-compatible: legacy
+    # config.yaml files without an `opencode:` key get the bundled defaults.
+    opencode: OpenCodeConfig = Field(
+        default_factory=OpenCodeConfig,
+        description="OpenCode integration settings (model mapping).",
     )
 
     global_exclude: list[str] = Field(

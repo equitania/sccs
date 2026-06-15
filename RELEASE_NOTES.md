@@ -1,5 +1,32 @@
 # Release Notes
 
+## Version 2.38.0 (15.06.2026)
+
+### Added
+- **Dynamic, configurable model mapping for OpenCode export.** The hardcoded `MODEL_MAP` (guessed `anthropic/...` ids) is now the last-resort fallback only. Model resolution is layered, per Claude alias (lowest → highest precedence):
+  1. **Static default** `DEFAULT_OPENCODE_MODEL_MAP` (the old map; used offline / when no provider is authenticated).
+  2. **Live discovery + family match** — `opencode models` (via the hardened doctor runner) is queried and the CC tier (`sonnet`/`opus`/`haiku`) is matched against the models the install *actually offers*; `preferred_providers` (default `["anthropic"]`, configurable) wins, ambiguity is warned. So we map to a model that really exists instead of guessing.
+  3. **Explicit config map** `opencode.model_map` / `extra_model_map` from `~/.config/sccs/config.yaml` — pins specific aliases.
+- **`sccs integrations opencode map-models`** — interactive setup: lists the Claude model aliases your agents/commands actually use plus the models your OpenCode install offers, lets you assign each (questionary, family-match pre-selected), and persists the result to `opencode.model_map` (raw-edit + backup; only that key is touched). `--dry-run` previews without writing.
+- **New `opencode:` config block** (`OpenCodeConfig`: `model_map`, `extra_model_map`, `preferred_providers`) on `SccsConfig`, fully optional and backwards-compatible (default_factory). Loader passes the block through verbatim in `_merge_with_defaults` (same fix shape as the v2.29.1 `doctor:` regression). New `save_opencode_model_map()` in `config/loader.py`.
+- **`map_model()` now takes an injected `model_map`** (default = static), and `convert_agent_frontmatter` / `convert_command_frontmatter` thread it through; `export-agents` / `export-commands` build the resolved map once per run via `resolve_model_map(config)`. New pure helper `match_models()` (family-match heuristic, isolated-testable) and `list_opencode_models()` / `resolve_model_map()` in `integrations/opencode.py`; `run_opencode_models()` in `doctor/runner.py`.
+
+### Tests
+- 30 new tests (`tests/test_opencode_models.py` + `match_models`/injection cases + a `map-models` CLI block). 991 tests total; coverage 83.7% (floor 82). End-to-end verified against live OpenCode 1.17.7: `map-models` lists models, `export-agents` resolves through the layered map and falls back to static when no Anthropic provider is authenticated.
+
+## Version 2.37.0 (15.06.2026)
+
+### Added
+- **OpenCode integration — share Claude Code artefacts with OpenCode (opencode.ai).** New `sccs integrations opencode` sub-group materialises Claude artefacts into the OpenCode formats. Direction is **one-way** (Claude is the source of truth). Three stages, by compatibility:
+  - **Skills + Rules — zero conversion.** OpenCode reads `~/.claude/skills/<name>/SKILL.md` and `CLAUDE.md` natively (verified on OpenCode 1.17.7; toggle via `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`). Nothing to export — `sccs integrations opencode status` just surfaces this.
+  - **Agents + Commands — frontmatter conversion.** `export-agents` / `export-commands` convert CC frontmatter to the OpenCode shape and write into `~/.config/opencode/agent/` and `command/` (singular dirs; the plural alias also works). Transforms: drop `name` (OpenCode derives it from the filename), map the model alias (`sonnet` → `anthropic/claude-sonnet-4-5`, with pass-through + warning on unknown ids), `mode: subagent`, and `allowed-tools` → an OpenCode `permission` object (`Bash(git:*)` → `bash: {"git *": allow}`). Commands drop CC-only `tags`/`allowed-tools` with a warning.
+  - **MCP — config merge.** `merge-mcp` reads `mcpServers` from `~/.claude/settings.json`, transforms each entry (`command`+`args` → single argv array, `env` → `environment`, explicit `type: local|remote`, `enabled: true`) and merges it into the `mcp` block of `opencode.json` (JSONC-comment-tolerant reader). Existing OpenCode entries are preserved unless `--overwrite`; a timestamped backup is written first.
+- **Three new (disabled-by-default, macos/linux) sync categories** — `opencode_agents`, `opencode_commands`, `opencode_skills` (`local_to_repo`) — so the materialised OpenCode artefacts can also flow into the sync repo. `opencode_skills` is only for maintaining a *separate* OpenCode skill set; most users rely on the native `~/.claude/skills` read.
+- New modules: `convert/frontmatter.py` (dependency-free YAML-frontmatter parse/render), `convert/claude_to_opencode.py` (pure transform logic + `MODEL_MAP`), `integrations/opencode.py` (`OpenCodeDetector`, gap detection, writers, MCP merge). All `__init__` exports updated. `integrations status` gained an OpenCode section.
+
+### Tests
+- 71 new tests across `tests/test_opencode_convert.py`, `tests/test_opencode_detector.py`, `tests/test_opencode_mcp.py` and a `TestOpenCodeCli` block in `tests/test_cli.py`. 961 tests total; coverage 83.7% (floor 82). End-to-end verified against a live OpenCode 1.17.7 install — a converted agent loads as `python-toolsmith (subagent)`.
+
 ## Version 2.36.1 (07.06.2026)
 
 ### Fixed

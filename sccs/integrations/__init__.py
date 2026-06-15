@@ -1,5 +1,5 @@
 # SCCS Integrations
-# Detection and migration for Antigravity IDE and Claude Desktop
+# Detection and migration for Antigravity IDE, Claude Desktop and OpenCode
 
 from sccs.integrations.antigravity import AntigravityMigrationResult, migrate_skills_to_prompts
 from sccs.integrations.claude_desktop import TrustRegistrationResult, register_trusted_folder
@@ -10,6 +10,18 @@ from sccs.integrations.detectors import (
     ClaudeDesktopDetector,
     ClaudeDesktopInfo,
 )
+from sccs.integrations.opencode import (
+    ConversionResult,
+    McpMergeResult,
+    OpenCodeArtifactGap,
+    OpenCodeDetector,
+    OpenCodeInfo,
+    convert_agents_to_opencode,
+    convert_commands_to_opencode,
+    list_opencode_models,
+    merge_mcp_to_opencode,
+    resolve_model_map,
+)
 
 __all__ = [
     "AntigravityDetector",
@@ -18,7 +30,17 @@ __all__ = [
     "AntigravityMigrationResult",
     "ClaudeDesktopDetector",
     "ClaudeDesktopInfo",
+    "ConversionResult",
+    "McpMergeResult",
+    "OpenCodeArtifactGap",
+    "OpenCodeDetector",
+    "OpenCodeInfo",
     "TrustRegistrationResult",
+    "convert_agents_to_opencode",
+    "convert_commands_to_opencode",
+    "list_opencode_models",
+    "merge_mcp_to_opencode",
     "migrate_skills_to_prompts",
     "register_trusted_folder",
+    "resolve_model_map",
 ]

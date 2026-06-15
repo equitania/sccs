@@ -1,4 +1,4 @@
-# sccs v2.36.1 | Claude Code Sync Tool (UV)
+# sccs v2.38.0 | Claude Code Sync Tool (UV)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Setup:      uv venv && venv+ && uv pip install -e ".[dev]"
 ▸ Sync:       sccs sync --dry-run
@@ -23,6 +23,15 @@
   (v2.32.1: npm-bin-global check gates install on <prefix>/bin too; system npm prefixes → user-local ~/.npm-global only, no chown)
   (v2.33.0: PluginSpec.allowlist_only — LSPs + frontend-design@claude-code-plugins are foreign-drift allowlist only, no MISSING/OUTDATED/marketplace block; check↔update now converges)
   (v2.33.2: reporter never recommends `sudo chown /usr/bin` — fix_command returns None for system/multi-user paths; reporter delegates to safe `_npm_global_fix_block`; label `npm bin -g` → `npm prefix bin`; restart-shell hint after fix)
+
+# OpenCode Integration (v2.37.0+)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ Status:     sccs integrations opencode status
+▸ Map models: sccs integrations opencode map-models   # v2.38.0: assign CC models -> OpenCode models
+▸ Agents:     sccs integrations opencode export-agents --dry-run
+▸ Commands:   sccs integrations opencode export-commands --dry-run
+▸ MCP:        sccs integrations opencode merge-mcp --dry-run
+  (skills/rules read natively by OpenCode from ~/.claude; agents/commands/MCP converted one-way)
 
 # PyPI Publishing
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
