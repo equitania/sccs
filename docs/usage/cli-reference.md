@@ -16,6 +16,7 @@ finden sich themenspezifisch in den anderen Usage-Docs:
 - Export/Import → [transfer.md](transfer.md)
 - Memory Bridge → [memory-bridge.md](memory-bridge.md)
 - Kategorien → [categories.md](categories.md)
+- OpenCode-Integration → [opencode.md](opencode.md)
 
 ```bash
 # Synchronisierung
@@ -60,6 +61,14 @@ sccs doctor check                # Read-only Status-Tabelle (Exit 1 bei Probleme
 sccs doctor install              # Installiert fehlende Komponenten (Confirm pro Action)
 sccs doctor install --yes        # Skip Confirms (CI use only)
 sccs doctor update               # Plugins + npx-Tools aktualisieren
+
+# Integrationen (Antigravity, Claude Desktop, OpenCode)
+sccs integrations status                       # Integrations-Report
+sccs integrations opencode status              # OpenCode: Installation + offene Konvertierungen
+sccs integrations opencode map-models          # CC-Modelle den OpenCode-Modellen zuweisen
+sccs integrations opencode export-agents -n    # Agents konvertieren (Vorschau)
+sccs integrations opencode export-commands -n  # Commands konvertieren (Vorschau)
+sccs integrations opencode merge-mcp -n        # MCP-Server in opencode.json mergen (Vorschau)
 ```
 
 ---
@@ -74,6 +83,7 @@ in the other usage docs:
 - Export/Import → [transfer.md](transfer.md)
 - Memory Bridge → [memory-bridge.md](memory-bridge.md)
 - Categories → [categories.md](categories.md)
+- OpenCode integration → [opencode.md](opencode.md)
 
 ```bash
 # Synchronization
@@ -118,4 +128,12 @@ sccs doctor check                # Read-only status table (exit 1 on problems)
 sccs doctor install              # Install missing components (confirm per action)
 sccs doctor install --yes        # Skip confirms (CI use only)
 sccs doctor update               # Update plugins + refresh npx tools
+
+# Integrations (Antigravity, Claude Desktop, OpenCode)
+sccs integrations status                       # Integration report
+sccs integrations opencode status              # OpenCode: install + outstanding conversions
+sccs integrations opencode map-models          # Assign CC models to OpenCode models
+sccs integrations opencode export-agents -n    # Convert agents (preview)
+sccs integrations opencode export-commands -n  # Convert commands (preview)
+sccs integrations opencode merge-mcp -n        # Merge MCP servers into opencode.json (preview)
 ```
