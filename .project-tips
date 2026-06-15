@@ -1,4 +1,4 @@
-# sccs v2.38.0 | Claude Code Sync Tool (UV)
+# sccs v2.39.0 | Claude Code Sync Tool (UV)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Setup:      uv venv && venv+ && uv pip install -e ".[dev]"
 ▸ Sync:       sccs sync --dry-run
@@ -32,6 +32,7 @@
 ▸ Commands:   sccs integrations opencode export-commands --dry-run
 ▸ MCP:        sccs integrations opencode merge-mcp --dry-run
   (skills/rules read natively by OpenCode from ~/.claude; agents/commands/MCP converted one-way)
+  (v2.39.0: doctor-managed gsd-*/playwright-cli excluded by default; own patterns via opencode.exclude; -a/-c bypasses exclude)
 
 # PyPI Publishing
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

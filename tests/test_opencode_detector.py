@@ -106,6 +106,38 @@ class TestOpenCodeDetector:
         assert gaps[0].name == "do"
 
 
+class TestExcludePatterns:
+    def _detector(self, tmp_path: Path):
+        config_dir, cc_agents, cc_commands, _ = _make_dirs(tmp_path)
+        config_dir.mkdir(parents=True)
+        cc_agents.mkdir(parents=True)
+        cc_commands.mkdir(parents=True)
+        (cc_agents / "gsd-foo.md").write_text(AGENT_MD, encoding="utf-8")
+        (cc_agents / "odoo-developer.md").write_text(AGENT_MD, encoding="utf-8")
+        (cc_commands / "gsd-bar.md").write_text(COMMAND_MD, encoding="utf-8")
+        (cc_commands / "finalize.md").write_text(COMMAND_MD, encoding="utf-8")
+        return OpenCodeDetector(config_dir=config_dir, cc_agents_dir=cc_agents, cc_commands_dir=cc_commands)
+
+    def test_excludes_glob_pattern(self, tmp_path: Path) -> None:
+        detector = self._detector(tmp_path)
+        gaps = detector.get_agent_gaps(exclude_patterns=["gsd-*"])
+        assert [g.name for g in gaps] == ["odoo-developer"]
+
+    def test_excludes_apply_to_commands(self, tmp_path: Path) -> None:
+        detector = self._detector(tmp_path)
+        gaps = detector.get_command_gaps(exclude_patterns=["gsd-*"])
+        assert [g.name for g in gaps] == ["finalize"]
+
+    def test_no_patterns_keeps_everything(self, tmp_path: Path) -> None:
+        detector = self._detector(tmp_path)
+        assert {g.name for g in detector.get_agent_gaps()} == {"gsd-foo", "odoo-developer"}
+
+    def test_custom_pattern_stacks(self, tmp_path: Path) -> None:
+        detector = self._detector(tmp_path)
+        gaps = detector.get_agent_gaps(exclude_patterns=["gsd-*", "odoo-*"])
+        assert gaps == []
+
+
 class TestMaterialize:
     def _detector(self, tmp_path: Path):
         config_dir, cc_agents, cc_commands, _ = _make_dirs(tmp_path)

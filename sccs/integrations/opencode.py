@@ -31,7 +31,7 @@ from sccs.convert.claude_to_opencode import (
 )
 from sccs.convert.frontmatter import parse_frontmatter, render_frontmatter
 from sccs.doctor.runner import run_opencode_models
-from sccs.utils.paths import atomic_write, create_backup, ensure_dir
+from sccs.utils.paths import atomic_write, create_backup, ensure_dir, matches_any_pattern
 
 # CC artefact files we never convert (private / disabled by convention).
 _SKIP_PATTERNS = ("_", ".")
@@ -154,31 +154,51 @@ class OpenCodeDetector:
 
     # ----- gap detection ------------------------------------------------- #
 
-    def get_agent_gaps(self, model_map: dict[str, str] | None = None) -> list[OpenCodeArtifactGap]:
+    def get_agent_gaps(
+        self,
+        model_map: dict[str, str] | None = None,
+        *,
+        exclude_patterns: list[str] | None = None,
+    ) -> list[OpenCodeArtifactGap]:
         """Find CC agents missing or outdated as OpenCode agents.
 
         Args:
             model_map: resolved alias->'provider/model' map for the conversion
                 (see resolve_model_map). None uses the static default.
+            exclude_patterns: glob patterns matched against the agent basename;
+                matching agents are skipped (e.g. doctor-managed ``gsd-*``).
 
         Returns [] when OpenCode is not installed — there is nothing to export to.
         """
         if not self.is_installed():
             return []
-        return self._gaps_for(self._cc_agents_dir, self.agent_dir, _render_agent, model_map)
+        return self._gaps_for(self._cc_agents_dir, self.agent_dir, _render_agent, model_map, exclude_patterns)
 
-    def get_command_gaps(self, model_map: dict[str, str] | None = None) -> list[OpenCodeArtifactGap]:
+    def get_command_gaps(
+        self,
+        model_map: dict[str, str] | None = None,
+        *,
+        exclude_patterns: list[str] | None = None,
+    ) -> list[OpenCodeArtifactGap]:
         """Find CC commands missing or outdated as OpenCode commands.
+
+        Args:
+            exclude_patterns: glob patterns matched against the command basename;
+                matching commands are skipped (e.g. doctor-managed ``gsd-*``).
 
         Returns [] when OpenCode is not installed.
         """
         if not self.is_installed():
             return []
-        return self._gaps_for(self._cc_commands_dir, self.command_dir, _render_command, model_map)
+        return self._gaps_for(self._cc_commands_dir, self.command_dir, _render_command, model_map, exclude_patterns)
 
     @staticmethod
     def _gaps_for(
-        cc_dir: Path, oc_dir: Path, renderer, model_map: dict[str, str] | None = None
+        cc_dir: Path,
+        oc_dir: Path,
+        renderer,
+        model_map: dict[str, str] | None = None,
+        exclude_patterns: list[str] | None = None,
     ) -> list[OpenCodeArtifactGap]:
         gaps: list[OpenCodeArtifactGap] = []
         if not cc_dir.is_dir():
@@ -190,6 +210,10 @@ class OpenCodeDetector:
                 continue
             if cc_path.is_symlink():
                 # Defence-in-depth: never follow links out of the artefact dir.
+                continue
+            if exclude_patterns and matches_any_pattern(name, exclude_patterns):
+                # Doctor-managed (gsd-*) or user-excluded artefact — not ours
+                # to export. Mirrors the sync engine's global_exclude logic.
                 continue
 
             try:

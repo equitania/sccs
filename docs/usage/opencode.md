@@ -76,6 +76,8 @@ Konvertierungsregeln (Claude → OpenCode):
 | `allowed-tools` | `Read Bash(git:*)` | `permission`-Objekt (`bash: {"git *": allow}`) |
 | Modus | — | `mode: subagent` |
 
+**Plugin-Artefakte werden nicht exportiert** *(ab v2.39.0)*: Doctor-gemanagte Agents/Commands (`gsd-*`, `playwright-cli` — dasselbe Managed-Registry, das auch der Sync ausschließt) fallen per Default aus `status`, `export-agents` und `export-commands` raus. So landen nur deine eigenen Artefakte in OpenCode, nicht die vom get-shit-done-Plugin installierten. Eigene Patterns ergänzt du über `opencode.exclude` (Glob, gegen den Basename). Ein explizites `-a <name>` / `-c <name>` umgeht den Exclude — so exportierst du gezielt auch einen gemanagten Agent (z.B. `-a gsd-debugger`).
+
 ### MCP-Server mergen
 
 ```bash
@@ -105,6 +107,10 @@ opencode:
   # Provider-Reihenfolge beim Familien-Match
   preferred_providers:
     - anthropic
+  # Zusätzliche Ausschluss-Patterns (Glob, gegen Basename) — additiv zu den
+  # doctor-gemanagten Defaults (gsd-*, playwright-cli)
+  exclude:
+    - "experimental-*"
 ```
 
 Optionale (standardmäßig deaktivierte, macOS/Linux) Sync-Kategorien, falls die materialisierten Artefakte auch ins Git-Repo fließen sollen: `opencode_agents`, `opencode_commands`, `opencode_skills`.
@@ -196,6 +202,8 @@ Conversion rules (Claude → OpenCode):
 | `allowed-tools` | `Read Bash(git:*)` | `permission` object (`bash: {"git *": allow}`) |
 | mode | — | `mode: subagent` |
 
+**Plugin artefacts are not exported** *(since v2.39.0)*: doctor-managed agents/commands (`gsd-*`, `playwright-cli` — the same managed registry the sync engine excludes) are dropped from `status`, `export-agents` and `export-commands` by default, so only your own artefacts reach OpenCode rather than the ones installed by the get-shit-done plugin. Add your own patterns via `opencode.exclude` (glob, matched against the basename). An explicit `-a <name>` / `-c <name>` bypasses the exclude, so you can still export a managed artefact on purpose (e.g. `-a gsd-debugger`).
+
 ### Merging MCP Servers
 
 ```bash
@@ -225,6 +233,10 @@ opencode:
   # Provider order for family matching
   preferred_providers:
     - anthropic
+  # Extra exclude patterns (glob, matched against basename) — additive to the
+  # doctor-managed defaults (gsd-*, playwright-cli)
+  exclude:
+    - "experimental-*"
 ```
 
 Optional (disabled-by-default, macOS/Linux) sync categories, if the materialised artefacts should also flow into the Git repo: `opencode_agents`, `opencode_commands`, `opencode_skills`.

@@ -1579,6 +1579,27 @@ def _resolve_opencode_model_map(*, discover: bool = True) -> dict:
     return resolve_model_map(config, discover=discover)
 
 
+def _resolve_opencode_excludes() -> list[str]:
+    """Glob patterns to skip on OpenCode export.
+
+    Combines the doctor-managed patterns (gsd-*, playwright-cli — same registry
+    the sync engine excludes) with the user's optional ``opencode.exclude``.
+    Falls back to the bundled doctor defaults when no config file exists, so
+    plugin-managed artefacts stay excluded out of the box.
+    """
+    from sccs.doctor.managed import get_doctor_managed_excludes
+    from sccs.doctor.schema import DoctorConfig
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        return get_doctor_managed_excludes(DoctorConfig())
+
+    patterns = get_doctor_managed_excludes(config.doctor)
+    user_extra = getattr(config.opencode, "exclude", None) or []
+    return patterns + list(user_extra)
+
+
 @opencode_group.command("status")
 @click.pass_context
 def opencode_status(ctx: click.Context) -> None:
@@ -1597,8 +1618,9 @@ def opencode_status(ctx: click.Context) -> None:
     if info.reads_claude_skills:
         console.print("  [green]✓[/green] reads ~/.claude/skills natively (no skill export needed)")
 
-    agent_gaps = detector.get_agent_gaps()
-    command_gaps = detector.get_command_gaps()
+    exclude = _resolve_opencode_excludes()
+    agent_gaps = detector.get_agent_gaps(exclude_patterns=exclude)
+    command_gaps = detector.get_command_gaps(exclude_patterns=exclude)
     mcp_status = detector.get_mcp_status()
 
     console.print(f"\n[bold]Agents to export ({len(agent_gaps)}):[/bold]")
@@ -1637,7 +1659,10 @@ def opencode_export_agents(
         console.print_error("OpenCode is not installed (~/.config/opencode/ not found)")
         sys.exit(1)
 
-    gaps = detector.get_agent_gaps(_resolve_opencode_model_map())
+    # Explicit -a selection overrides the default exclude (the user asked for
+    # a specific agent by name, even a doctor-managed one).
+    exclude = None if agents else _resolve_opencode_excludes()
+    gaps = detector.get_agent_gaps(_resolve_opencode_model_map(), exclude_patterns=exclude)
     if not gaps:
         console.print_success("All agents are already up to date in OpenCode")
         return
@@ -1674,7 +1699,9 @@ def opencode_export_commands(
         console.print_error("OpenCode is not installed (~/.config/opencode/ not found)")
         sys.exit(1)
 
-    gaps = detector.get_command_gaps(_resolve_opencode_model_map())
+    # Explicit -c selection overrides the default exclude.
+    exclude = None if commands else _resolve_opencode_excludes()
+    gaps = detector.get_command_gaps(_resolve_opencode_model_map(), exclude_patterns=exclude)
     if not gaps:
         console.print_success("All commands are already up to date in OpenCode")
         return

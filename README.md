@@ -4,7 +4,7 @@
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
-**Version:** 2.38.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
+**Version:** 2.39.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
 
 ---
 
@@ -26,6 +26,7 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 - 🧠 **Memory Bridge** — file-basierter persistenter Kontext zwischen Claude Code (Terminal) und Claude.ai (Web), inklusive `sccs memory` CRUD-CLI → [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md)
 - 🔀 **OpenCode-Integration** *(v2.37.0)* — `sccs integrations opencode` exportiert Claude-Artefakte one-way nach [OpenCode](https://opencode.ai): Skills/Rules werden nativ gelesen, Agents/Commands per Frontmatter-Konvertierung materialisiert, MCP-Server in `opencode.json` gemerged → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🎯 **Dynamische Modell-Zuordnung** *(v2.38.0)* — `opencode map-models` löst Claude-Modelle gegen die real verfügbaren OpenCode-Modelle auf (`opencode models`-Discovery + Familien-Match), konfigurierbar über `opencode.model_map`, statischer Fallback offline → [docs/usage/opencode.md](docs/usage/opencode.md)
+- 🚫 **OpenCode-Export ohne Plugin-Müll** *(v2.39.0)* — `opencode status`/`export-agents`/`export-commands` schließen doctor-gemanagte Artefakte (`gsd-*`, `playwright-cli` — dasselbe Registry wie der Sync) per Default aus; eigene Agents/Commands bleiben. Eigene Patterns via `opencode.exclude`, explizites `-a`/`-c` umgeht den Exclude → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🪟 **Plattformübergreifend** macOS, Linux, Windows mit nativer PowerShell-7-Unterstützung und Fish→PowerShell-Konvertierung → [docs/usage/platforms.md](docs/usage/platforms.md)
 - 🗂️ **Mehr als 30 vordefinierte Kategorien** mit Plattform-Filtern, anpassbaren Include/Exclude-Patterns und Sync-Modi → [docs/usage/categories.md](docs/usage/categories.md)
 
@@ -107,6 +108,7 @@ SCCS is a YAML-configured, bidirectional synchronization tool for Claude Code fi
 - 🧠 **Memory Bridge** — file-based persistent context between Claude Code (terminal) and Claude.ai (web), including a full `sccs memory` CRUD CLI → [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md)
 - 🔀 **OpenCode integration** *(v2.37.0)* — `sccs integrations opencode` exports Claude artefacts one-way to [OpenCode](https://opencode.ai): skills/rules are read natively, agents/commands are materialised via frontmatter conversion, MCP servers are merged into `opencode.json` → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🎯 **Dynamic model mapping** *(v2.38.0)* — `opencode map-models` resolves Claude models against the models your OpenCode install actually offers (`opencode models` discovery + family match), configurable via `opencode.model_map`, with a static fallback when offline → [docs/usage/opencode.md](docs/usage/opencode.md)
+- 🚫 **OpenCode export skips plugin clutter** *(v2.39.0)* — `opencode status`/`export-agents`/`export-commands` exclude doctor-managed artefacts (`gsd-*`, `playwright-cli` — the same registry the sync engine honours) by default; your own agents/commands stay. Add your own patterns via `opencode.exclude`; an explicit `-a`/`-c` selection bypasses the exclude → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🪟 **Cross-platform** macOS, Linux, Windows with native PowerShell 7 support and Fish→PowerShell conversion → [docs/usage/platforms.md](docs/usage/platforms.md)
 - 🗂️ **Over 30 predefined categories** with platform filters, customizable include/exclude patterns and sync modes → [docs/usage/categories.md](docs/usage/categories.md)
 

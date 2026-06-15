@@ -1888,6 +1888,55 @@ class TestOpenCodeCli:
         assert result.exit_code == 0
         assert "Would create" in result.output
 
+    def test_resolve_excludes_no_config_uses_doctor_defaults(self):
+        from sccs import cli as cli_mod
+
+        with patch("sccs.cli.load_config", side_effect=FileNotFoundError):
+            patterns = cli_mod._resolve_opencode_excludes()
+        # Bundled doctor defaults manage the gsd-* artefacts out of the box.
+        assert "gsd-*" in patterns
+
+    def test_resolve_excludes_appends_user_exclude(self):
+        from sccs import cli as cli_mod
+
+        fake_config = MagicMock()
+        fake_config.doctor = MagicMock()
+        fake_config.opencode.exclude = ["mine-*"]
+        with (
+            patch("sccs.cli.load_config", return_value=fake_config),
+            patch("sccs.doctor.managed.get_doctor_managed_excludes", return_value=["gsd-*"]),
+        ):
+            patterns = cli_mod._resolve_opencode_excludes()
+        assert patterns == ["gsd-*", "mine-*"]
+
+    def test_export_agents_applies_default_excludes(self):
+        runner = CliRunner()
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.cli._resolve_opencode_excludes", return_value=["gsd-*"]),
+            patch("sccs.cli._resolve_opencode_model_map", return_value={}),
+        ):
+            inst = mock_cls.return_value
+            inst.is_installed.return_value = True
+            inst.get_agent_gaps.return_value = []
+            runner.invoke(cli, ["integrations", "opencode", "export-agents"])
+        # Default run passes the resolved excludes to gap detection.
+        assert inst.get_agent_gaps.call_args.kwargs["exclude_patterns"] == ["gsd-*"]
+
+    def test_export_agents_explicit_selection_overrides_excludes(self):
+        runner = CliRunner()
+        with (
+            patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls,
+            patch("sccs.cli._resolve_opencode_excludes", return_value=["gsd-*"]),
+            patch("sccs.cli._resolve_opencode_model_map", return_value={}),
+        ):
+            inst = mock_cls.return_value
+            inst.is_installed.return_value = True
+            inst.get_agent_gaps.return_value = []
+            runner.invoke(cli, ["integrations", "opencode", "export-agents", "-a", "gsd-debugger"])
+        # Explicit -a bypasses the default exclude so the named agent exports.
+        assert inst.get_agent_gaps.call_args.kwargs["exclude_patterns"] is None
+
     def test_merge_mcp_success(self):
         runner = CliRunner()
         result_obj = MagicMock(

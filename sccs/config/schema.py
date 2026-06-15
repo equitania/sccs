@@ -193,6 +193,16 @@ class OpenCodeConfig(BaseModel):
         default_factory=lambda: ["anthropic"],
         description="Provider order preferred when matching discovered OpenCode models.",
     )
+    # Extra glob patterns (matched against the agent/command basename) skipped
+    # on export, on top of the doctor-managed patterns (e.g. gsd-*). Lets a
+    # user drop their own additional artefacts from the OpenCode export.
+    exclude: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extra glob patterns (matched against artefact basename) skipped on export, "
+            "added to doctor-managed patterns."
+        ),
+    )
 
     @property
     def effective_model_map(self) -> dict[str, str]:

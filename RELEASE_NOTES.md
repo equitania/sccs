@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.39.0 (15.06.2026)
+
+### Added
+- **OpenCode export now skips doctor-managed (`gsd-*`) agents/commands by default.** Real driver: `sccs integrations opencode status` listed all 40 `~/.claude/agents/*.md` — 33 of them the `gsd-*` agents installed by the *get-shit-done* plugin (`@opengsd/get-shit-done-redux`), which the user never wants to export. The export now reuses the **same managed-exclude registry the sync engine already honours** (`get_doctor_managed_excludes(config.doctor)` → `gsd-*`, `playwright-cli`), so plugin-managed artefacts are filtered out of status, `export-agents` and `export-commands` out of the box. Your own agents/commands are unaffected. (Skills were never exported — OpenCode reads `~/.claude/skills/` natively.)
+- **New optional `opencode.exclude`** config field (`OpenCodeConfig.exclude`): extra glob patterns (matched against the artefact basename) stacked on top of the doctor-managed defaults, for dropping your own additional artefacts from the export.
+- **Explicit selection overrides the exclude.** Passing `-a <agent>` / `-c <command>` bypasses the default exclude for that run, so a specifically-named managed artefact (e.g. `-a gsd-debugger`) still exports.
+
+### Changed
+- `OpenCodeDetector.get_agent_gaps` / `get_command_gaps` (and `_gaps_for`) gained an `exclude_patterns` parameter, matched via the existing `matches_any_pattern` helper at the same filter stage as the `_`/`.local.md`/symlink skips. New `_resolve_opencode_excludes()` CLI helper combines doctor-managed + user patterns (falls back to bundled `DoctorConfig()` defaults when no config file exists, so `gsd-*` stays excluded out of the box).
+
+### Tests
+- 8 new tests: detector-level exclude (glob filtering for agents + commands, no-pattern passthrough, stacked custom patterns) and CLI (`_resolve_opencode_excludes` default + user-stack, `-a` override bypasses the exclude). 999 tests total; coverage floor 82 held. `ruff` + `mypy` clean.
+
 ## Version 2.38.0 (15.06.2026)
 
 ### Added
