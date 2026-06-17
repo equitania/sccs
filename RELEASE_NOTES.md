@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.39.1 (17.06.2026)
+
+### Added
+- **AI Capability Card (`usage/AGENT.md`).** A dense, English, machine-skimmable reference for an LLM/agent that wants to *use* the `sccs` CLI — every command, flag, recipe and guardrail in one file. The command table is extracted **deterministically** by introspecting `sccs.cli:cli` (28 runnable commands; completeness gate green), while recipes, guardrails and the capability summary are synthesized from `docs/usage/*.md`. Lives under `usage/AGENT.md`, kept separate from the bilingual human docs in `docs/usage/`. Regenerate the table after any CLI change via `scripts/introspect_cli.py --import sccs.cli:cli --root-name sccs`.
+
+### Notes
+- Documentation-only release — no code change. 999 tests unchanged; `ruff format` clean, build OK.
+
 ## Version 2.39.0 (15.06.2026)
 
 ### Added
