@@ -452,7 +452,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # config.yaml. Set `plugins:` or `npx_tools:` explicitly to fully
     # override the built-in defaults.
     "doctor": {
-        "min_node_major": 20,
+        "min_node_major": 22,
         "extra_plugins": [],
         "extra_npx_tools": [],
     },

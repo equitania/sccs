@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 # sccs/git/operations.py — no leading '-' (option-injection guard) and only
 # characters that are valid in npm package names + the '@' separator we use
 # for "<name>@<marketplace>" plugin specs. A leading '@' is allowed so that
-# scoped npm packages (e.g. "@opengsd/get-shit-done-redux") are valid npx-tool
+# scoped npm packages (e.g. "@opengsd/gsd-core") are valid npx-tool
 # names; '@' is not an option-injection vector — only a leading '-' is, and
 # that stays blocked below.
 _SAFE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_@][A-Za-z0-9_./@\-]*$")
@@ -126,7 +126,7 @@ class NpxToolSpec(BaseModel):
 
     name: str = Field(description="Tool name as exposed on PATH after install")
     invocation: list[str] = Field(
-        description="Full argv list, e.g. ['npx', '@opengsd/get-shit-done-redux', '--global']",
+        description="Full argv list, e.g. ['npx', '@opengsd/gsd-core', '--global']",
     )
     detect_command: str | None = Field(
         default=None,
@@ -176,7 +176,7 @@ class NpxToolSpec(BaseModel):
         default=None,
         description=(
             "Optional tilde-expandable path whose stripped first line is the "
-            "installed version (e.g. '~/.claude/get-shit-done/VERSION'). Read "
+            "installed version (e.g. '~/.claude/gsd-core/VERSION'). Read "
             "only for display in the doctor-check Version column; missing or "
             "unreadable file → no version shown. Zero extra subprocess cost."
         ),
@@ -189,6 +189,39 @@ class NpxToolSpec(BaseModel):
             "output is shown in the Version column. Costs one subprocess per "
             "check; failures are swallowed (no version shown). Ignored when "
             "`version_file` is set."
+        ),
+    )
+    managed_file_manifest: str | None = Field(
+        default=None,
+        description=(
+            "Optional tilde-expandable path to the tool's own install manifest "
+            "(e.g. '~/.claude/gsd-file-manifest.json'). When set, doctor treats "
+            "it as the single source of truth for what the current package "
+            "owns and flags on-disk `gsd-*` artefacts under `managed_scan_dirs` "
+            "that are absent from it as orphans (see GsdOrphanDetector). The "
+            "manifest must be JSON with a top-level `files` mapping of relative "
+            "paths to hashes. Missing/unreadable → orphan detection is skipped, "
+            "never an error."
+        ),
+    )
+    managed_scan_dirs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Tilde-expandable directories under the config root to scan for "
+            "orphaned managed artefacts (e.g. ['~/.claude/skills', "
+            "'~/.claude/agents']). Only entries matching the tool's managed "
+            "glob (from DEFAULT_MANAGED_PATTERNS) are considered. No-op unless "
+            "`managed_file_manifest` is also set."
+        ),
+    )
+    managed_legacy_dirs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Tilde-expandable directories that belonged to a PRIOR package "
+            "layout and become stale once the current package is installed "
+            "(e.g. '~/.claude/get-shit-done' before the gsd-core move). Flagged "
+            "as orphans only after migration is confirmed (manifest already "
+            "reflects the new layout), so they are never removed prematurely."
         ),
     )
 
@@ -524,7 +557,7 @@ class DoctorConfig(BaseModel):
     """User-overridable doctor configuration."""
 
     min_node_major: int = Field(
-        default=20,
+        default=22,
         ge=10,
         le=99,
         description="Minimum acceptable Node.js major version.",
@@ -553,7 +586,7 @@ class DoctorConfig(BaseModel):
         description=(
             "Extra glob patterns for files installed by doctor tools that "
             "should be excluded from `sccs sync`. Bundled tools such as "
-            "@opengsd/get-shit-done-redux already contribute their own patterns "
+            "@opengsd/gsd-core already contribute their own patterns "
             "automatically (see sccs/doctor/managed.py:DEFAULT_MANAGED_PATTERNS)."
         ),
     )
@@ -613,7 +646,7 @@ class DoctorConfig(BaseModel):
             "entries in ~/.claude/settings.json. After every doctor install/"
             "update/optimize pass, SCCS sanitises settings.json by removing "
             "hook entries whose command contains any of these substrings. "
-            "Real driver: third-party doctor tools (npx @opengsd/get-shit-done-redux "
+            "Real driver: third-party doctor tools (npx @opengsd/gsd-core "
             "--force-statusline, …) overwrite settings.json on every run, "
             "re-injecting hooks the user had explicitly removed in a setup "
             "audit. This list re-applies the removal after each tool run. "
@@ -626,7 +659,7 @@ class DoctorConfig(BaseModel):
         description=(
             "Substring patterns identifying hook commands the sanitiser must "
             "NEVER strip, even when a `disallowed_hooks` pattern would match. "
-            "Protection wins over removal. Real driver: GSD (@opengsd/get-shit-done-redux) "
+            "Protection wins over removal. Real driver: GSD (@opengsd/gsd-core) "
             "re-injects its hooks (gsd-read-guard.js, …) into settings.json on "
             "every run and they must be preserved — removing them breaks the "
             "plugin. None keeps DEFAULT_PROTECTED_HOOKS (['gsd-']); pass [] "

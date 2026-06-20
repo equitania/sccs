@@ -16,7 +16,7 @@ from sccs.doctor.schema import (
     StatusLineCheckSpec,
 )
 
-MIN_NODE_MAJOR = 20
+MIN_NODE_MAJOR = 22
 
 DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
     PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
@@ -53,34 +53,54 @@ DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
 
 DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
     NpxToolSpec(
-        name="@opengsd/get-shit-done-redux",
+        name="@opengsd/gsd-core",
         # `-y` auto-accepts npx's "Need to install... Ok to proceed?" prompt.
         # Without it, fresh Linux hosts hang on stdin (the prompt is hidden by
         # capture_output=True in runner._run).
         #
-        # Package note: GSD officially moved off the now-deprecated
-        # `get-shit-done-cc` npm package to `@opengsd/get-shit-done-redux`
-        # (the upstream README says "GSD Has Moved … continues as GSD Redux in
-        # open-gsd/get-shit-done-redux"). The new installer accepts the same
-        # `--claude --global --force-statusline` flags (verified in its
-        # bin/install.js). The redux versioning reset (1.42.3 → 1.x) makes the
-        # number look lower, but it is the active, current line.
+        # Package note: GSD moved AGAIN. The previous `@opengsd/get-shit-done-redux`
+        # package is now npm-deprecated ("Renamed to @opengsd/gsd-core — reinstall:
+        # npx @opengsd/gsd-core@latest") and the active line is `@opengsd/gsd-core`
+        # (repo open-gsd/gsd-core, latest 1.5.0). The new installer accepts the same
+        # `--claude --global --force-statusline` flags (verified in its v1.5.0
+        # bin/install.js). NOTE: gsd-core requires Node >=22 (engines: node>=22,
+        # npm>=10) — this is why MIN_NODE_MAJOR was bumped to 22.
         invocation=[
             "npx",
             "-y",
-            "@opengsd/get-shit-done-redux",
+            "@opengsd/gsd-core",
             "--claude",
             "--global",
             "--force-statusline",
         ],
-        # `@opengsd/get-shit-done-redux` only patches ~/.claude/ config — it never drops a
+        # `@opengsd/gsd-core` only patches ~/.claude/ config — it never drops a
         # binary on PATH. Detection therefore falls back to the doctor state
         # file once we've recorded a successful run.
         detect_via_state=True,
         # GSD writes its installed version here; reading it is zero-cost (no
-        # subprocess) and lets `doctor check` show e.g. v1.1.0 in the Version
-        # column — handy to confirm the redux package (not the frozen old one).
-        version_file="~/.claude/get-shit-done/VERSION",
+        # subprocess) and lets `doctor check` show e.g. v1.5.0 in the Version
+        # column. The path changed with the redux→gsd-core move: the package no
+        # longer ships a `get-shit-done/` dir, only `gsd-core/`, and writes
+        # `<configDir>/gsd-core/VERSION` (= ~/.claude/gsd-core/VERSION for the
+        # --claude --global install).
+        version_file="~/.claude/gsd-core/VERSION",
+        # gsd-core's own legacy-cleanup.cjs only prunes stale hooks/ and
+        # commands/ — it leaves orphaned skills/ and agents/ from a prior
+        # package behind. SCCS reads gsd-core's install manifest (the single
+        # source of truth for what the current package owns) and offers to
+        # move any on-disk gsd-* artefact that is NOT in the manifest into a
+        # backup dir. See GsdOrphanDetector / _managed_orphan_cleanup_action.
+        managed_file_manifest="~/.claude/gsd-file-manifest.json",
+        managed_scan_dirs=[
+            "~/.claude/skills",
+            "~/.claude/agents",
+            "~/.claude/hooks",
+            "~/.claude/commands",
+        ],
+        # The pre-gsd-core package installed its runtime tree under
+        # ~/.claude/get-shit-done/; gsd-core uses ~/.claude/gsd-core/ instead,
+        # so the old directory becomes a stale leftover once migrated.
+        managed_legacy_dirs=["~/.claude/get-shit-done"],
     ),
     NpxToolSpec(
         name="playwright-cli",
@@ -138,7 +158,7 @@ DEFAULT_PERMISSION_CHECKS: list[PermissionCheckSpec] = [
     PermissionCheckSpec(
         path="~/.npm",
         label="npm cache directory",
-        purpose="npx and npm install write here when fetching packages (e.g. @opengsd/get-shit-done-redux)",
+        purpose="npx and npm install write here when fetching packages (e.g. @opengsd/gsd-core)",
     ),
     PermissionCheckSpec(
         path="~/.claude",
@@ -250,8 +270,11 @@ NODE_INSTALL: dict[str, NodeInstallSpec] = {
     ),
     "linux": NodeInstallSpec(
         runnable=False,
+        # Derived from MIN_NODE_MAJOR so a future bump keeps the printed
+        # NodeSource setup script (setup_<major>.x) in sync automatically.
         manual_block=(
-            "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -\nsudo apt-get install -y nodejs"
+            f"curl -fsSL https://deb.nodesource.com/setup_{MIN_NODE_MAJOR}.x | sudo -E bash -\n"
+            "sudo apt-get install -y nodejs"
         ),
         label="install Node.js via NodeSource (manual, requires sudo)",
     ),
@@ -294,10 +317,10 @@ DEFAULT_DISALLOWED_HOOKS: list[str] = []
 
 # Substring patterns identifying hook commands the sanitiser must NEVER
 # strip, even when a `disallowed_hooks` pattern would otherwise match them.
-# Protection wins over removal. Real driver: GSD (@opengsd/get-shit-done-redux)
+# Protection wins over removal. Real driver: GSD (@opengsd/gsd-core)
 # re-injects its hooks (gsd-read-guard.js, …) into settings.json on every run;
 # removing them breaks the plugin. Matching is plain substring, symmetric with
 # `disallowed_hooks`, and `gsd-` mirrors the `managed.py` convention
-# (`@opengsd/get-shit-done-redux: ["gsd-*"]`). Users may override via
+# (`@opengsd/gsd-core: ["gsd-*"]`). Users may override via
 # `doctor.protected_hooks:` in `~/.config/sccs/config.yaml`.
 DEFAULT_PROTECTED_HOOKS: list[str] = ["gsd-"]

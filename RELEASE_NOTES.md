@@ -1,5 +1,17 @@
 # Release Notes
 
+## Version 2.40.0 (20.06.2026)
+
+### Changed
+- **Doctor's bundled GSD tool moved from the now-deprecated `@opengsd/get-shit-done-redux` to `@opengsd/gsd-core`.** GSD relocated again: the redux npm package is deprecated (`"Renamed to @opengsd/gsd-core — reinstall: npx @opengsd/gsd-core@latest"`) and the active line is `@opengsd/gsd-core` (repo `open-gsd/gsd-core`, latest 1.5.0). `DEFAULT_NPX_TOOLS` now invokes `npx -y @opengsd/gsd-core --claude --global --force-statusline` (flag compatibility verified against the v1.5.0 `bin/install.js`). The `version_file` moved with it (`~/.claude/get-shit-done/VERSION` → `~/.claude/gsd-core/VERSION`; the package no longer ships a `get-shit-done/` dir, only `gsd-core/`). `DEFAULT_MANAGED_PATTERNS` key and `NpxToolSpec.name` updated in lockstep so the `gsd-*` sync-exclude, protected-hooks and statusline auto-fix keep matching. The doctor state marker (argv hash) self-invalidates on the package-name change, triggering a one-time reinstall onto gsd-core — no manual migration.
+- **`MIN_NODE_MAJOR` bumped 20 → 22.** gsd-core requires Node ≥22 (`engines: node>=22, npm>=10`). The schema default (`DoctorConfig.min_node_major`), the bundled config default and the Linux NodeSource install hint follow (the hint is now derived from `MIN_NODE_MAJOR`, so it prints `setup_22.x` and stays in sync with future bumps).
+
+### Added
+- **Orphan cleanup for stale doctor-managed GSD artefacts.** gsd-core's own legacy cleanup only prunes stale `hooks/` and `commands/` — orphaned `gsd-*` **skills** and **agents** from the superseded redux package pile up untouched. New `GsdOrphanDetector` uses the tool's install manifest (`~/.claude/gsd-file-manifest.json`) as the single source of truth: any on-disk `gsd-*` artefact under the configured scan dirs that the **fresh** manifest does not reference is an orphan (as is the old `~/.claude/get-shit-done/` directory once migration is complete). `sccs doctor check` reports orphans read-only below the table; `install`/`update`/`optimize` queue a cleanup action that **moves** (never hard-deletes) each orphan into `~/.config/sccs/gsd-orphans-backup-<timestamp>/` — per-action confirm (default No; `--yes` overrides), reversible, idempotent, and a no-op on a clean host. The action runs after the npx (re)install rewrites the manifest and re-detects against it, so it reflects the new package's exact file set. New `NpxToolSpec` fields `managed_file_manifest` / `managed_scan_dirs` / `managed_legacy_dirs` drive it; the plan builders take pre-computed `gsd_orphans` (no filesystem I/O in the builder, so plan-building stays test-isolated).
+
+### Notes
+- 1017 tests (18 new in `tests/test_doctor_orphans.py`); `ruff`/`mypy`/`bandit` clean, coverage 83.9% (floor 82).
+
 ## Version 2.39.1 (17.06.2026)
 
 ### Added

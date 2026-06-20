@@ -73,10 +73,10 @@ class TestSchemaValidation:
 
     def test_npx_tool_spec_accepts_scoped_npm_name(self):
         # Scoped npm packages (leading '@') must be valid npx-tool names so
-        # GSD's `@opengsd/get-shit-done-redux` can be a default tool. '@' is
+        # GSD's `@opengsd/gsd-core` can be a default tool. '@' is
         # not an option-injection vector — only a leading '-' is.
-        spec = NpxToolSpec(name="@opengsd/get-shit-done-redux", invocation=["npx", "@opengsd/get-shit-done-redux"])
-        assert spec.name == "@opengsd/get-shit-done-redux"
+        spec = NpxToolSpec(name="@opengsd/gsd-core", invocation=["npx", "@opengsd/gsd-core"])
+        assert spec.name == "@opengsd/gsd-core"
 
     def test_npx_tool_spec_still_rejects_leading_dash_name(self):
         # The option-injection guard must survive the leading-'@' allowance.
@@ -138,12 +138,12 @@ class TestRunnerSecurity:
         # Without `-y`, npx prompts on stdout for "Need to install... Ok to
         # proceed?" on Linux/fresh systems — and capture_output=True hides
         # that prompt from the user. Regression guard for the v2.22.x Debian hang.
-        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "@opengsd/get-shit-done-redux")
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == "@opengsd/gsd-core")
         assert spec.invocation[0] == "npx"
         assert spec.invocation[1] == "-y"
 
     def test_default_playwright_cli_uses_npm_install_global(self):
-        # Playwright-CLI ships a real binary on PATH (unlike @opengsd/get-shit-done-redux)
+        # Playwright-CLI ships a real binary on PATH (unlike @opengsd/gsd-core)
         # and is invoked many times per session, so `npm install -g …@latest`
         # is preferred over a one-shot `npx -y`. Regression guard against a
         # future refactor that switches to npx and silently breaks the cached
@@ -713,19 +713,21 @@ class TestSccsConfigBackwardsCompat:
         }
         cfg = SccsConfig.model_validate(legacy)
         # doctor field defaulted to bundled DoctorConfig
-        assert cfg.doctor.min_node_major == 20
+        assert cfg.doctor.min_node_major == 22
         assert len(cfg.doctor.effective_plugins()) == len(DEFAULT_CLAUDE_PLUGINS)
 
     def test_user_can_override_min_node_major(self):
         from sccs.config.schema import SccsConfig
 
+        # Use a value distinct from the default (22) so the test proves the
+        # override actually takes effect rather than matching the default.
         data = {
             "repository": {"path": "~/repo"},
             "sync_categories": {},
-            "doctor": {"min_node_major": 22},
+            "doctor": {"min_node_major": 24},
         }
         cfg = SccsConfig.model_validate(data)
-        assert cfg.doctor.min_node_major == 22
+        assert cfg.doctor.min_node_major == 24
 
 
 # --------------------------------------------------------------------------- #
@@ -774,8 +776,8 @@ class TestNpxToolDetectorWithState:
         monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
         state = DoctorStateManager(state_path=tmp_path / ".doctor_state.yaml")
         spec = NpxToolSpec(
-            name="@opengsd/get-shit-done-redux",
-            invocation=["npx", "@opengsd/get-shit-done-redux", "--global"],
+            name="@opengsd/gsd-core",
+            invocation=["npx", "@opengsd/gsd-core", "--global"],
             detect_via_state=True,
         )
 
@@ -827,15 +829,15 @@ class TestExecutePlanRecordsState:
         from sccs.doctor.installer import DoctorAction, InstallPlan
 
         state = DoctorStateManager(state_path=tmp_path / ".doctor_state.yaml")
-        invocation = ["npx", "@opengsd/get-shit-done-redux", "--global"]
+        invocation = ["npx", "@opengsd/gsd-core", "--global"]
         plan = InstallPlan(
             actions=[
                 DoctorAction(
-                    label="install npx tool @opengsd/get-shit-done-redux",
+                    label="install npx tool @opengsd/gsd-core",
                     cmd=invocation,
                     runnable=True,
-                    component="npx:@opengsd/get-shit-done-redux",
-                    npx_tool_name="@opengsd/get-shit-done-redux",
+                    component="npx:@opengsd/gsd-core",
+                    npx_tool_name="@opengsd/gsd-core",
                     npx_invocation=invocation,
                 )
             ]
@@ -849,22 +851,22 @@ class TestExecutePlanRecordsState:
                 state_manager=state,
             )
 
-        assert state.is_npx_tool_marked("@opengsd/get-shit-done-redux", invocation) is True
+        assert state.is_npx_tool_marked("@opengsd/gsd-core", invocation) is True
 
     def test_failed_action_does_not_record_state(self, tmp_path):
         """A failed npx-tool action must NOT write a state marker."""
         from sccs.doctor.installer import DoctorAction, InstallPlan
 
         state = DoctorStateManager(state_path=tmp_path / ".doctor_state.yaml")
-        invocation = ["npx", "@opengsd/get-shit-done-redux", "--global"]
+        invocation = ["npx", "@opengsd/gsd-core", "--global"]
         plan = InstallPlan(
             actions=[
                 DoctorAction(
-                    label="install npx tool @opengsd/get-shit-done-redux",
+                    label="install npx tool @opengsd/gsd-core",
                     cmd=invocation,
                     runnable=True,
-                    component="npx:@opengsd/get-shit-done-redux",
-                    npx_tool_name="@opengsd/get-shit-done-redux",
+                    component="npx:@opengsd/gsd-core",
+                    npx_tool_name="@opengsd/gsd-core",
                     npx_invocation=invocation,
                 )
             ]
@@ -880,7 +882,7 @@ class TestExecutePlanRecordsState:
                 state_manager=state,
             )
 
-        assert state.is_npx_tool_marked("@opengsd/get-shit-done-redux", invocation) is False
+        assert state.is_npx_tool_marked("@opengsd/gsd-core", invocation) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -890,13 +892,13 @@ class TestExecutePlanRecordsState:
 
 class TestDoctorManagedExcludes:
     """v2.22.0: files installed by `sccs doctor install` (e.g. gsd-* via
-    npx @opengsd/get-shit-done-redux) are reproducible from the doctor manifest, so
+    npx @opengsd/gsd-core) are reproducible from the doctor manifest, so
     `sccs sync` skips them to avoid cross-machine conflicts."""
 
     def test_default_npx_tools_contribute_gsd_pattern(self):
         from sccs.doctor.managed import get_doctor_managed_excludes
 
-        cfg = DoctorConfig()  # default tools incl. @opengsd/get-shit-done-redux
+        cfg = DoctorConfig()  # default tools incl. @opengsd/gsd-core
         assert "gsd-*" in get_doctor_managed_excludes(cfg)
 
     def test_user_managed_excludes_are_appended(self):
@@ -1529,12 +1531,12 @@ class TestBundledSkillDetector:
         assert statuses[0].skill_md_present is False
 
     def test_specs_without_bundled_skill_are_skipped(self):
-        # @opengsd/get-shit-done-redux has no bundled_skill → must not appear in the
+        # @opengsd/gsd-core has no bundled_skill → must not appear in the
         # status list at all. Otherwise the reporter would print empty rows.
         from sccs.doctor.detectors import BundledSkillDetector
         from sccs.doctor.schema import NpxToolSpec
 
-        plain = NpxToolSpec(name="@opengsd/get-shit-done-redux", invocation=["npx", "@opengsd/get-shit-done-redux"])
+        plain = NpxToolSpec(name="@opengsd/gsd-core", invocation=["npx", "@opengsd/gsd-core"])
         statuses = BundledSkillDetector().get_statuses([plain])
         assert statuses == []
 
@@ -1609,7 +1611,7 @@ class TestBrowserBundleDetector:
         from sccs.doctor.detectors import BrowserBundleDetector
         from sccs.doctor.schema import NpxToolSpec
 
-        plain = NpxToolSpec(name="@opengsd/get-shit-done-redux", invocation=["npx", "@opengsd/get-shit-done-redux"])
+        plain = NpxToolSpec(name="@opengsd/gsd-core", invocation=["npx", "@opengsd/gsd-core"])
         statuses = BrowserBundleDetector().get_statuses([plain])
         assert statuses == []
 
@@ -4381,7 +4383,7 @@ class TestVersionAndSourceReporting:
         from sccs.doctor.reporter import _OK, _npx_row
 
         status = NpxToolStatus(
-            spec=NpxToolSpec(name="@opengsd/get-shit-done-redux", invocation=["npx", "x"], detect_via_state=True),
+            spec=NpxToolSpec(name="@opengsd/gsd-core", invocation=["npx", "x"], detect_via_state=True),
             available=True,
             binary_path=None,
             detection_source="state",
@@ -4435,7 +4437,7 @@ class TestVersionAndSourceReporting:
     def test_default_npx_tools_declare_version_sources(self):
         from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
 
-        redux = next(s for s in DEFAULT_NPX_TOOLS if s.name == "@opengsd/get-shit-done-redux")
-        assert redux.version_file == "~/.claude/get-shit-done/VERSION"
+        redux = next(s for s in DEFAULT_NPX_TOOLS if s.name == "@opengsd/gsd-core")
+        assert redux.version_file == "~/.claude/gsd-core/VERSION"
         pw = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
         assert pw.version_args == ["--version"]

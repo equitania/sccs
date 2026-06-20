@@ -23,6 +23,8 @@ from sccs.doctor.detectors import (
     ClaudeCliStatus,
     ForeignMCPServerStatus,
     ForeignPluginStatus,
+    GsdOrphanDetector,
+    GsdOrphanStatus,
     MarketplaceStatus,
     MCPServerStatus,
     NodeStatus,
@@ -37,7 +39,7 @@ from sccs.doctor.runner import DoctorError, _run
 from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec
 from sccs.doctor.state import DoctorStateManager
 from sccs.utils.logging import get_logger
-from sccs.utils.paths import atomic_write
+from sccs.utils.paths import atomic_write, expand_path
 
 logger = get_logger("doctor.installer")
 
@@ -1133,6 +1135,98 @@ def _settings_hook_cleanup_actions(
     ]
 
 
+def _orphan_backup_root() -> Path:
+    """Base dir under which orphan backups are created. Mirrors the doctor
+    state location (~/.config/sccs); monkeypatch Path.home in tests."""
+    return Path.home() / ".config" / "sccs"
+
+
+def _managed_orphan_cleanup_actions(
+    npx_tools: list[NpxToolStatus],
+    gsd_orphans: list[GsdOrphanStatus] | None = None,
+) -> list[DoctorAction]:
+    """Queue a move-to-backup cleanup for orphaned doctor-managed artefacts.
+
+    Real driver: gsd-core's own legacy cleanup only prunes stale hooks/ and
+    commands/, so skills/ and agents/ from a superseded package (e.g.
+    @opengsd/get-shit-done-redux) pile up. After the npx (re)install rewrites
+    the tool's manifest, any on-disk gsd-* artefact the manifest does not
+    reference is stale. We MOVE (never hard-delete) each orphan into a
+    timestamped backup dir so the operation is reversible.
+
+    `gsd_orphans` carries the CURRENT detector results (pre-install), computed
+    once by the caller — the plan builder itself does no filesystem I/O, so it
+    stays test-isolated (pass None → nothing queued). An action is queued only
+    when the matching status shows a real reason at plan-build:
+      * current orphans already exist (vs the current manifest), or
+      * a legacy-layout dir is physically present (migration pending — the
+        old manifest still owns everything, so `has_orphans` is False yet the
+        cleanup is genuinely due).
+    On a clean, already-migrated host nothing is queued, so `doctor update`
+    does not nag. The closure RE-DETECTS against the fresh (post-install)
+    manifest via the tool's spec, so it reflects the new package's file set and
+    is a no-op when nothing is orphaned.
+
+    auto_confirm stays False: this is a delete-class operation, so the user is
+    asked every time (`--yes` is the blanket override), per the global
+    delete-safety rule. Runs after the npx action (which rewrites the
+    manifest) and is fenced off via depends_on_components if that install
+    failed.
+    """
+    by_name = {g.tool_name: g for g in (gsd_orphans or [])}
+    actions: list[DoctorAction] = []
+    for tool_status in npx_tools:
+        spec = tool_status.spec
+        if not spec.managed_file_manifest:
+            continue
+
+        current = by_name.get(spec.name)
+        if current is None:
+            continue
+        if not (current.has_orphans or current.legacy_present):
+            continue
+
+        block_lines = ["# Will move orphaned doctor-managed artefacts to a backup dir:"]
+        if current.has_orphans:
+            for p in current.orphan_paths:
+                block_lines.append(f"#   - {p}")
+        else:
+            block_lines.append("#   (set computed after the (re)install rewrites the manifest)")
+        block_lines.append(f"# Backup root: {_orphan_backup_root()}/gsd-orphans-backup-<timestamp>/")
+
+        def _cleanup(spec: NpxToolSpec = spec) -> None:
+            """Re-detect against the fresh manifest and move orphans to backup."""
+            fresh = GsdOrphanDetector().get_statuses([spec])
+            st = fresh[0] if fresh else None
+            if st is None or not st.has_orphans:
+                return  # nothing orphaned against the post-install manifest
+            assert spec.managed_file_manifest is not None
+            config_root = expand_path(spec.managed_file_manifest).parent
+            timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_root = _orphan_backup_root() / f"gsd-orphans-backup-{timestamp}"
+            for orphan in st.orphan_paths:
+                try:
+                    rel = orphan.relative_to(config_root)
+                except ValueError:
+                    rel = Path(orphan.name)
+                dest = backup_root / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(orphan), str(dest))
+
+        actions.append(
+            DoctorAction(
+                label=f"clean up orphaned {spec.name} artefacts (move to backup)",
+                cmd=[],
+                runnable=True,
+                python_callable=_cleanup,
+                manual_block="\n".join(block_lines),
+                component=f"orphan-cleanup:{spec.name}",
+                depends_on_components=(f"npx:{spec.name}",),
+            )
+        )
+    return actions
+
+
 def _mcp_server_install_warnings(
     statuses: list[MCPServerStatus],
 ) -> list[DoctorAction]:
@@ -1214,6 +1308,7 @@ def build_install_plan(
     status_lines: list[StatusLineStatus] | None = None,
     settings_hook_violations: list[SettingsHookViolation] | None = None,
     settings_path: Path | None = None,
+    gsd_orphans: list[GsdOrphanStatus] | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -1236,6 +1331,8 @@ def build_install_plan(
         actions.append(cli_action)
     actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
     actions.extend(_npx_install_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
+    # Orphan cleanup runs after the npx install rewrites the tool manifest.
+    actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
     if bundled_skills:
         actions.extend(_bundled_skill_repair_actions(bundled_skills, npx_tools))
     if browser_bundles:
@@ -1243,7 +1340,7 @@ def build_install_plan(
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     # Settings.json sanitisation runs LAST so that third-party tools
-    # (@opengsd/get-shit-done-redux, etc.) which overwrite settings.json during their
+    # (@opengsd/gsd-core, etc.) which overwrite settings.json during their
     # install step are followed by our cleanup pass.
     if settings_hook_violations and settings_path is not None:
         actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
@@ -1265,6 +1362,7 @@ def build_update_plan(
     status_lines: list[StatusLineStatus] | None = None,
     settings_hook_violations: list[SettingsHookViolation] | None = None,
     settings_path: Path | None = None,
+    gsd_orphans: list[GsdOrphanStatus] | None = None,
 ) -> InstallPlan:
     """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones.
 
@@ -1290,6 +1388,8 @@ def build_update_plan(
     actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
     actions.extend(_plugin_update_actions(plugins))
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
+    # Orphan cleanup runs after the npx refresh rewrites the tool manifest.
+    actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     if settings_hook_violations and settings_path is not None:
@@ -1313,6 +1413,7 @@ def build_optimize_plan(
     status_lines: list[StatusLineStatus] | None = None,
     settings_hook_violations: list[SettingsHookViolation] | None = None,
     settings_path: Path | None = None,
+    gsd_orphans: list[GsdOrphanStatus] | None = None,
     strict: bool = False,
 ) -> InstallPlan:
     """Plan a one-shot optimize pass.
@@ -1395,6 +1496,8 @@ def build_optimize_plan(
     actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
     actions.extend(_plugin_update_actions(plugins))
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
+    # Orphan cleanup runs after the npx refresh rewrites the tool manifest.
+    actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
 
     # Spec'd-but-missing MCP servers get a manual_block (no auto-add).
     actions.extend(_mcp_server_install_warnings(mcp_servers))

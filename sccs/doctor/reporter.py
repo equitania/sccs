@@ -10,6 +10,7 @@ from sccs.doctor.detectors import (
     BrowserBundleStatus,
     BundledSkillStatus,
     ClaudeCliStatus,
+    GsdOrphanStatus,
     MarketplaceStatus,
     NodeStatus,
     NpxToolStatus,
@@ -175,6 +176,7 @@ def render_doctor_report(
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
     status_lines: list[StatusLineStatus] | None = None,
+    gsd_orphans: list[GsdOrphanStatus] | None = None,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -236,6 +238,28 @@ def render_doctor_report(
                     console.print("  [dim]No safe single-line fix — see `sccs doctor install` for guidance.[/dim]")
                 console.print()
 
+    # Orphaned doctor-managed artefacts — surfaced below the table because the
+    # cleanup is opt-in (run `sccs doctor update`). Only shown when the current
+    # manifest already reveals orphans; pre-migration hosts show nothing here
+    # (the redux manifest still owns everything) and get cleaned during update.
+    if gsd_orphans:
+        flagged = [g for g in gsd_orphans if g.has_orphans]
+        if flagged:
+            console.print()
+            console.print(
+                "[yellow]Orphaned doctor-managed artefacts "
+                "(run `sccs doctor update` to move them to a backup):[/yellow]"
+            )
+            for g in flagged:
+                console.print(f"  [dim]{g.tool_name} — {g.total} orphan(s) not in the install manifest:[/dim]")
+                for orphan_path in g.orphan_paths[:20]:
+                    console.print(f"    {orphan_path}")
+                if g.total > 20:
+                    console.print(f"    [dim]… and {g.total - 20} more[/dim]")
+                if g.truncated:
+                    console.print("    [dim](list capped — more orphans exist on disk)[/dim]")
+            console.print()
+
 
 def has_problems(
     *,
@@ -249,6 +273,7 @@ def has_problems(
     bundled_skills: list[BundledSkillStatus] | None = None,
     browser_bundles: list[BrowserBundleStatus] | None = None,
     status_lines: list[StatusLineStatus] | None = None,
+    gsd_orphans: list[GsdOrphanStatus] | None = None,
 ) -> bool:
     """Return True if any component is missing/outdated or has a permission issue."""
     if not (node.installed and node.meets_minimum):
@@ -268,6 +293,8 @@ def has_problems(
     if bundled_skills and any(not s.skill_md_present for s in bundled_skills):
         return True
     if status_lines and any(not s.ok for s in status_lines):
+        return True
+    if gsd_orphans and any(g.has_orphans for g in gsd_orphans):
         return True
     return bool(browser_bundles and any(not b.all_present for b in browser_bundles))
 

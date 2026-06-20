@@ -1,6 +1,6 @@
 # SCCS Doctor State Tracker
 #
-# Some npx helper tools (notably @opengsd/get-shit-done-redux) do NOT install a binary
+# Some npx helper tools (notably @opengsd/gsd-core) do NOT install a binary
 # on PATH — they only write configuration into ~/.claude/. Without state
 # tracking the npx-tool detector would always report them as MISSING, so
 # `sccs doctor install` would offer to re-run them on every invocation.

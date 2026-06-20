@@ -110,8 +110,10 @@ class TestConfigLoader:
         DoctorConfig fell back to its bundled defaults and every user
         override (plugins, npx_tools, permission_checks, …) was ignored.
         """
+        # 24 is deliberately NOT the bundled default (22) so a loader that
+        # dropped the doctor block would fall back to 22 and fail this assert.
         sample_config["doctor"] = {
-            "min_node_major": 22,
+            "min_node_major": 24,
             "plugins": [
                 {"name": "skill-creator", "marketplace": "claude-plugins-official"},
             ],
@@ -121,7 +123,7 @@ class TestConfigLoader:
             yaml.dump(sample_config, f, default_flow_style=False)
 
         config = load_config(config_path)
-        assert config.doctor.min_node_major == 22
+        assert config.doctor.min_node_major == 24
         assert config.doctor.plugins is not None
         assert [p.name for p in config.doctor.plugins] == ["skill-creator"]
 

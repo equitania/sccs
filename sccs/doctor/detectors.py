@@ -34,6 +34,7 @@ from sccs.doctor.schema import (
     StatusLineCheckSpec,
 )
 from sccs.doctor.state import DoctorStateManager
+from sccs.utils.paths import expand_path, matches_any_pattern
 from sccs.utils.platform import get_current_platform
 
 # Cap the per-path recursive ownership scan to avoid pathological wait times
@@ -1354,6 +1355,197 @@ class NpxToolDetector:
         return out
 
 
+# Caps for the orphan scan. The managed dirs (~/.claude/skills etc.) hold tens
+# of entries in practice; these bounds only guard against a pathological tree.
+_ORPHAN_SCAN_CAP = 5000
+_ORPHAN_REPORT_CAP = 1000
+
+
+@dataclass
+class GsdOrphanStatus:
+    """Result of scanning for orphaned doctor-managed artefacts of one tool.
+
+    `scanned=False` means no usable manifest was found (the tool declares one
+    but it is missing/unreadable), so orphan detection was skipped — reported
+    as "unknown" rather than "0 orphans".
+    """
+
+    tool_name: str
+    manifest_found: bool
+    scanned: bool = True
+    # Absolute on-disk paths to remove (managed orphans + qualified legacy dirs).
+    orphan_paths: list[Path] = field(default_factory=list)
+    # Subset of orphan_paths that are stale legacy-layout directories — kept
+    # separate purely for reporting (different wording in the table block).
+    legacy_dirs: list[Path] = field(default_factory=list)
+    # True when ANY configured legacy-layout dir physically exists on disk,
+    # regardless of manifest ownership. This is the migration-pending signal:
+    # pre-migration the manifest still owns the legacy tree (so `legacy_dirs`
+    # is empty) but the dir is present, meaning a migration + cleanup is due.
+    legacy_present: bool = False
+    # True when the report cap clipped the list (so the reporter can say so).
+    truncated: bool = False
+
+    @property
+    def has_orphans(self) -> bool:
+        return bool(self.orphan_paths)
+
+    @property
+    def total(self) -> int:
+        return len(self.orphan_paths)
+
+
+class GsdOrphanDetector:
+    """Detect orphaned doctor-managed artefacts left behind by a prior package.
+
+    gsd-core's own legacy cleanup only prunes stale ``hooks/`` and
+    ``commands/``, so ``skills/`` and ``agents/`` from a superseded package
+    (e.g. ``@opengsd/get-shit-done-redux``) pile up untouched. This detector
+    uses the tool's install manifest (``managed_file_manifest``) as the single
+    source of truth: any on-disk entry under ``managed_scan_dirs`` whose
+    basename matches the tool's managed glob but which the manifest does not
+    reference is an orphan.
+
+    Legacy-layout directories (``managed_legacy_dirs``) are reported only once
+    migration is confirmed — i.e. the manifest no longer references that
+    directory — so they are never removed while the old package is still the
+    installed one.
+    """
+
+    def __init__(self, managed_patterns: dict[str, list[str]] | None = None) -> None:
+        if managed_patterns is None:
+            from sccs.doctor.managed import DEFAULT_MANAGED_PATTERNS
+
+            managed_patterns = DEFAULT_MANAGED_PATTERNS
+        self._patterns = managed_patterns
+
+    def get_statuses(self, specs: list[NpxToolSpec]) -> list[GsdOrphanStatus]:
+        return [self._check(s) for s in specs if s.managed_file_manifest]
+
+    def _check(self, spec: NpxToolSpec) -> GsdOrphanStatus:
+        assert spec.managed_file_manifest is not None  # guarded by get_statuses
+        manifest_path = expand_path(spec.managed_file_manifest)
+        # Migration-pending signal — independent of the manifest, so it is set
+        # even when the (still-old) manifest reports zero orphans.
+        legacy_present = any(expand_path(d).exists() for d in spec.managed_legacy_dirs)
+        kept = self._load_kept_paths(manifest_path)
+        if kept is None:
+            return GsdOrphanStatus(
+                tool_name=spec.name,
+                manifest_found=False,
+                scanned=False,
+                legacy_present=legacy_present,
+            )
+
+        config_root = manifest_path.parent
+        patterns = self._patterns.get(spec.name, [])
+        orphans: list[Path] = []
+
+        if patterns:
+            for scan_dir in spec.managed_scan_dirs:
+                orphans.extend(self._scan_dir(config_root, scan_dir, patterns, kept))
+
+        legacy_dirs = self._legacy_orphans(config_root, spec.managed_legacy_dirs, kept)
+        all_orphans = orphans + legacy_dirs
+
+        truncated = len(all_orphans) > _ORPHAN_REPORT_CAP
+        capped = all_orphans[:_ORPHAN_REPORT_CAP]
+        return GsdOrphanStatus(
+            tool_name=spec.name,
+            manifest_found=True,
+            scanned=True,
+            orphan_paths=capped,
+            legacy_dirs=[d for d in legacy_dirs if d in set(capped)],
+            legacy_present=legacy_present,
+            truncated=truncated,
+        )
+
+    @staticmethod
+    def _load_kept_paths(manifest_path: Path) -> set[str] | None:
+        """Return the set of relative paths the manifest references, or None.
+
+        None signals an unusable manifest (missing, unreadable, malformed) so
+        the caller reports "unknown" instead of wrongly flagging everything as
+        orphaned.
+        """
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        files = data.get("files") if isinstance(data, dict) else None
+        if not isinstance(files, dict):
+            return None
+        return {str(k) for k in files}
+
+    @staticmethod
+    def _rel_prefix(config_root: Path, scan_dir: Path) -> str | None:
+        """Manifest-key prefix for a scan dir (e.g. 'skills/'), or None if the
+        dir is not under the config root (cannot be mapped to manifest keys)."""
+        try:
+            rel = scan_dir.relative_to(config_root)
+        except ValueError:
+            return None
+        return rel.as_posix() + "/"
+
+    def _scan_dir(self, config_root: Path, scan_dir: str, patterns: list[str], kept: set[str]) -> list[Path]:
+        d = expand_path(scan_dir)
+        if not d.is_dir():
+            return []
+        prefix = self._rel_prefix(config_root, d)
+        if prefix is None:
+            return []
+        try:
+            entries = sorted(d.iterdir())
+        except OSError:
+            return []
+
+        out: list[Path] = []
+        for i, entry in enumerate(entries):
+            if i >= _ORPHAN_SCAN_CAP:
+                break
+            if not matches_any_pattern(entry.name, patterns):
+                continue
+            if not self._in_manifest(kept, prefix, entry):
+                out.append(entry)
+        return out
+
+    @staticmethod
+    def _in_manifest(kept: set[str], prefix: str, entry: Path) -> bool:
+        """True if the manifest references this on-disk entry.
+
+        Directories (skill dirs) match when any manifest key sits under
+        ``<prefix><name>/``; files (agents/hooks) match the exact key
+        ``<prefix><name>``.
+        """
+        rel = prefix + entry.name
+        if entry.is_dir():
+            needle = rel + "/"
+            return any(k.startswith(needle) for k in kept)
+        return rel in kept
+
+    @staticmethod
+    def _legacy_orphans(config_root: Path, legacy_dirs: list[str], kept: set[str]) -> list[Path]:
+        """Stale legacy-layout dirs the current manifest no longer owns.
+
+        A legacy dir counts as an orphan only once the manifest stops
+        referencing it (migration complete) — guarding against removing the old
+        tree while the prior package is still installed.
+        """
+        out: list[Path] = []
+        for legacy in legacy_dirs:
+            p = expand_path(legacy)
+            if not p.exists():
+                continue
+            try:
+                rel = p.relative_to(config_root).as_posix()
+            except ValueError:
+                continue
+            still_owned = any(k == rel or k.startswith(rel + "/") for k in kept)
+            if not still_owned:
+                out.append(p)
+        return out
+
+
 @dataclass
 class MCPServerStatus:
     """Result of inspecting a single spec'd MCP server."""
@@ -1381,7 +1573,7 @@ class SettingsHookDetector:
     """Find hook entries in settings.json whose command matches a disallowed
     pattern.
 
-    Real driver: third-party doctor tools (npx @opengsd/get-shit-done-redux
+    Real driver: third-party doctor tools (npx @opengsd/gsd-core
     --force-statusline, …) overwrite settings.json on every run, re-
     injecting hooks the user explicitly removed in a setup audit. The
     detector surfaces those violations so `_settings_hook_cleanup_actions`
