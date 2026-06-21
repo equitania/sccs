@@ -22,6 +22,15 @@ from sccs.integrations.opencode import (
     merge_mcp_to_opencode,
     resolve_model_map,
 )
+from sccs.integrations.pi import (
+    PiArtifactGap,
+    PiDetector,
+    PiExportResult,
+    PiInfo,
+    export_agents_to_pi,
+    export_commands_to_pi,
+    export_skills_to_pi,
+)
 
 __all__ = [
     "AntigravityDetector",
@@ -35,9 +44,16 @@ __all__ = [
     "OpenCodeArtifactGap",
     "OpenCodeDetector",
     "OpenCodeInfo",
+    "PiArtifactGap",
+    "PiDetector",
+    "PiExportResult",
+    "PiInfo",
     "TrustRegistrationResult",
     "convert_agents_to_opencode",
     "convert_commands_to_opencode",
+    "export_agents_to_pi",
+    "export_commands_to_pi",
+    "export_skills_to_pi",
     "list_opencode_models",
     "merge_mcp_to_opencode",
     "migrate_skills_to_prompts",

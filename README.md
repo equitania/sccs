@@ -28,6 +28,7 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 - 🎯 **Dynamische Modell-Zuordnung** *(v2.38.0)* — `opencode map-models` löst Claude-Modelle gegen die real verfügbaren OpenCode-Modelle auf (`opencode models`-Discovery + Familien-Match), konfigurierbar über `opencode.model_map`, statischer Fallback offline → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🚫 **OpenCode-Export ohne Plugin-Müll** *(v2.39.0)* — `opencode status`/`export-agents`/`export-commands` schließen doctor-gemanagte Artefakte (`gsd-*`, `playwright-cli` — dasselbe Registry wie der Sync) per Default aus; eigene Agents/Commands bleiben. Eigene Patterns via `opencode.exclude`, explizites `-a`/`-c` umgeht den Exclude → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🧹 **GSD-Umzug + Orphan-Cleanup** *(v2.40.0)* — Doctor folgt GSD von `@opengsd/get-shit-done-redux` (deprecated) auf `@opengsd/gsd-core` und räumt verwaiste `gsd-*`-Skills/Agents auf: `doctor check` meldet sie, `doctor update` **verschiebt** sie (kein Hard-Delete, confirm-gated) nach `~/.config/sccs/gsd-orphans-backup-<ts>/`. Node-Mindestversion 22 → [docs/usage/doctor.md](docs/usage/doctor.md)
+- 🥧 **Pi-Integration** *(v2.41.0)* — `sccs integrations pi` exportiert Claude-Artefakte one-way nach [Pi](https://pi.dev): Skills (Verzeichnis-Kopie) und Agents (als Einzel-Skills) → `~/.pi/agent/skills/`, Commands → `~/.pi/agent/prompts/`. Format-identisch zu Claude Code, daher verbatim kopiert (keine Konvertierung, kein Modell-Mapping); `gsd-*` per Default ausgeschlossen → [docs/usage/pi.md](docs/usage/pi.md)
 - 🪟 **Plattformübergreifend** macOS, Linux, Windows mit nativer PowerShell-7-Unterstützung und Fish→PowerShell-Konvertierung → [docs/usage/platforms.md](docs/usage/platforms.md)
 - 🗂️ **Mehr als 30 vordefinierte Kategorien** mit Plattform-Filtern, anpassbaren Include/Exclude-Patterns und Sync-Modi → [docs/usage/categories.md](docs/usage/categories.md)
 
@@ -80,6 +81,8 @@ sccs doctor check                # System & Plugin Health prüfen
 | [docs/usage/transfer.md](docs/usage/transfer.md) | Export/Import als ZIP-Archive (Customer Deployment) |
 | [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md) | Memory Bridge: persistenter Kontext zwischen Claude Code und Claude.ai |
 | [docs/usage/categories.md](docs/usage/categories.md) | Kategorien-Referenz, Standard-Kategorien, Plattform-Filter |
+| [docs/usage/opencode.md](docs/usage/opencode.md) | OpenCode-Integration: Agents/Commands exportieren, Modell-Mapping, MCP-Merge |
+| [docs/usage/pi.md](docs/usage/pi.md) | Pi-Integration: Skills/Agents/Commands nach Pi (pi.dev) exportieren |
 | [docs/usage/platforms.md](docs/usage/platforms.md) | Windows/PowerShell-Support, Fish→PowerShell-Konvertierung |
 | [docs/usage/cli-reference.md](docs/usage/cli-reference.md) | Vollständige CLI-Befehlsreferenz |
 | [docs/architecture.md](docs/architecture.md) | Modul-Layout, Test-Setup, Quality-Gate |
@@ -111,6 +114,7 @@ SCCS is a YAML-configured, bidirectional synchronization tool for Claude Code fi
 - 🎯 **Dynamic model mapping** *(v2.38.0)* — `opencode map-models` resolves Claude models against the models your OpenCode install actually offers (`opencode models` discovery + family match), configurable via `opencode.model_map`, with a static fallback when offline → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🚫 **OpenCode export skips plugin clutter** *(v2.39.0)* — `opencode status`/`export-agents`/`export-commands` exclude doctor-managed artefacts (`gsd-*`, `playwright-cli` — the same registry the sync engine honours) by default; your own agents/commands stay. Add your own patterns via `opencode.exclude`; an explicit `-a`/`-c` selection bypasses the exclude → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🧹 **GSD move + orphan cleanup** *(v2.40.0)* — Doctor follows GSD from `@opengsd/get-shit-done-redux` (deprecated) to `@opengsd/gsd-core` and cleans up orphaned `gsd-*` skills/agents: `doctor check` reports them, `doctor update` **moves** them (no hard-delete, confirm-gated) to `~/.config/sccs/gsd-orphans-backup-<ts>/`. Minimum Node version is now 22 → [docs/usage/doctor.md](docs/usage/doctor.md)
+- 🥧 **Pi integration** *(v2.41.0)* — `sccs integrations pi` exports Claude artefacts one-way to [Pi](https://pi.dev): skills (directory copy) and agents (as individual skills) → `~/.pi/agent/skills/`, commands → `~/.pi/agent/prompts/`. Format-identical to Claude Code, so copied verbatim (no conversion, no model mapping); `gsd-*` excluded by default → [docs/usage/pi.md](docs/usage/pi.md)
 - 🪟 **Cross-platform** macOS, Linux, Windows with native PowerShell 7 support and Fish→PowerShell conversion → [docs/usage/platforms.md](docs/usage/platforms.md)
 - 🗂️ **Over 30 predefined categories** with platform filters, customizable include/exclude patterns and sync modes → [docs/usage/categories.md](docs/usage/categories.md)
 
@@ -163,6 +167,8 @@ sccs doctor check                # System & plugin health check
 | [docs/usage/transfer.md](docs/usage/transfer.md) | Export/Import as ZIP archives (customer deployment) |
 | [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md) | Memory Bridge: persistent context between Claude Code and Claude.ai |
 | [docs/usage/categories.md](docs/usage/categories.md) | Category reference, default categories, platform filters |
+| [docs/usage/opencode.md](docs/usage/opencode.md) | OpenCode integration: export agents/commands, model mapping, MCP merge |
+| [docs/usage/pi.md](docs/usage/pi.md) | Pi integration: export skills/agents/commands to Pi (pi.dev) |
 | [docs/usage/platforms.md](docs/usage/platforms.md) | Windows/PowerShell support, Fish→PowerShell conversion |
 | [docs/usage/cli-reference.md](docs/usage/cli-reference.md) | Full CLI command reference |
 | [docs/architecture.md](docs/architecture.md) | Module layout, test setup, quality gate |

@@ -54,6 +54,11 @@
 | `sccs integrations opencode map-models` | Interactively assign Claude model aliases to available OpenCode models. | -n/--dry-run |
 | `sccs integrations opencode merge-mcp` | Merge Claude MCP servers into opencode.json (~/.config/opencode/). | -n/--dry-run, --overwrite, -s/--server TEXT |
 | `sccs integrations opencode status` | Show OpenCode installation and conversion gaps. | — |
+| `sccs integrations pi export-skills` | Copy Claude skills into Pi skills (~/.pi/agent/skills/). | -n/--dry-run, --overwrite/--no-overwrite, -s/--skill TEXT |
+| `sccs integrations pi export-agents` | Copy Claude agents into Pi as individual skills (~/.pi/agent/skills/). | -n/--dry-run, --overwrite/--no-overwrite, -a/--agent TEXT |
+| `sccs integrations pi export-commands` | Copy Claude commands into Pi prompt templates (~/.pi/agent/prompts/). | -n/--dry-run, --overwrite/--no-overwrite, -c/--command TEXT |
+| `sccs integrations pi export-all` | Export skills, agents and commands to Pi in one run. | -n/--dry-run, --overwrite/--no-overwrite |
+| `sccs integrations pi status` | Show Pi installation and export gaps. | — |
 | `sccs integrations status` | Show detailed integration status. | — |
 | `sccs integrations trust-repo` | Register SCCS repository as trusted in Claude Desktop. | -n/--dry-run |
 | `sccs log` | Show sync history. | --last INTEGER |
@@ -115,6 +120,15 @@ sccs integrations opencode export-commands
 sccs integrations opencode merge-mcp -s context7  # merge one MCP server into opencode.json
 ```
 One-way (Claude Code is source of truth). Skills/`CLAUDE.md` are read natively by OpenCode — no export needed.
+
+### Push artefacts to Pi (pi.dev)
+```bash
+sccs integrations pi status                       # skills/agents/commands still to export
+sccs integrations pi export-skills --dry-run
+sccs integrations pi export-all                   # skills + agents → ~/.pi/agent/skills/, commands → prompts/
+sccs integrations pi export-skills -s astro       # one skill only (bypasses gsd-* exclude)
+```
+One-way (Claude Code is source of truth). Pi has no subagent concept: skills + agents become Pi skills, commands become prompt templates. Format-identical, so copied verbatim (no conversion, no model mapping). `gsd-*` excluded by default.
 
 ### Convert Fish config to PowerShell; regenerate hub README
 ```bash

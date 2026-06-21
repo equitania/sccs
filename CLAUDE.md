@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.40.0
+**Version**: 2.41.0
 
 ### Key Features
 
@@ -98,10 +98,12 @@ sccs/
 │   ├── exporter.py       # Scan + ZIP creation
 │   ├── importer.py       # ZIP extraction (zip-slip + symlink rejection)
 │   └── ui.py             # questionary checkbox helpers
-├── integrations/         # Antigravity IDE + Claude Desktop
+├── integrations/         # Antigravity IDE + Claude Desktop + OpenCode + Pi
 │   ├── detectors.py      # AntigravityDetector, ClaudeDesktopDetector
 │   ├── antigravity.py    # Skill→Prompt migration logic
-│   └── claude_desktop.py # Trusted-folder registration
+│   ├── claude_desktop.py # Trusted-folder registration
+│   ├── opencode.py       # OpenCodeDetector, agent/command convert, MCP merge
+│   └── pi.py             # PiDetector, skill/agent/command export (pi.dev, verbatim copy)
 ├── convert/              # Fish → PowerShell profile conversion
 │   ├── fish_to_pwsh.py   # Converter entry
 │   ├── rules.py          # alias/set/fish_add_path translation rules

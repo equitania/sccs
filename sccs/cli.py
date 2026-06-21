@@ -1305,14 +1305,16 @@ def integrations_group() -> None:
     """Integration status and migration commands.
 
     \b
-    Detect and manage integrations with Antigravity IDE
-    and Claude Desktop.
+    Detect and manage integrations with Antigravity IDE, Claude Desktop,
+    OpenCode and Pi.
 
     \b
     Examples:
         sccs integrations status            Show integration status
         sccs integrations migrate-skills    Copy skills to Antigravity prompts
         sccs integrations trust-repo        Register SCCS repo as trusted
+        sccs integrations opencode status   OpenCode export status
+        sccs integrations pi status         Pi export status
     """
 
 
@@ -1344,7 +1346,10 @@ def integrations_status(ctx: click.Context) -> None:
     oc_detector = OpenCodeDetector()
     oc_info = oc_detector.get_info()
 
-    if ag_info is None and cd_info is None and oc_info is None:
+    pi_detector = _make_pi_detector()
+    pi_info = pi_detector.get_info()
+
+    if ag_info is None and cd_info is None and oc_info is None and pi_info is None:
         console.print("[dim]No integrations detected[/dim]")
         return
 
@@ -1369,6 +1374,19 @@ def integrations_status(ctx: click.Context) -> None:
             f"  agents to export: {len(agent_gaps)} · "
             f"commands to export: {len(command_gaps)} · "
             f"MCP servers missing: {len(mcp_status['missing'])}"
+        )
+
+    # Pi section
+    if pi_info is not None:
+        console.print(f"\n[bold]Pi[/bold] detected at {pi_info.base_dir}")
+        pi_exclude = _resolve_pi_excludes()
+        pi_skill_gaps = pi_detector.get_skill_gaps(exclude_patterns=pi_exclude)
+        pi_agent_gaps = pi_detector.get_agent_gaps(exclude_patterns=pi_exclude)
+        pi_command_gaps = pi_detector.get_command_gaps(exclude_patterns=pi_exclude)
+        console.print(
+            f"  skills to export: {len(pi_skill_gaps)} · "
+            f"agents to export: {len(pi_agent_gaps)} · "
+            f"commands to export: {len(pi_command_gaps)}"
         )
 
 
@@ -1873,6 +1891,183 @@ def opencode_map_models(ctx: click.Context, dry_run: bool) -> None:
 
     save_opencode_model_map(mapping)
     console.print_success(f"\nSaved {len(mapping)} model mappings to config (opencode.model_map)")
+
+
+# --- Pi integration sub-group ---
+
+
+@integrations_group.group("pi")
+def pi_group() -> None:
+    """Export Claude Code artefacts to Pi (pi.dev).
+
+    \b
+    Pi has no subagent concept. Claude skills and agents are exported as Pi
+    skills (~/.pi/agent/skills/), and Claude commands as Pi prompt templates
+    (~/.pi/agent/prompts/). The SKILL.md format is identical, so artefacts are
+    copied verbatim — no frontmatter conversion or model mapping.
+
+    \b
+    Examples:
+        sccs integrations pi status            Show Pi integration status
+        sccs integrations pi export-skills     Copy CC skills -> Pi skills
+        sccs integrations pi export-agents     Copy CC agents -> Pi skills
+        sccs integrations pi export-commands   Copy CC commands -> Pi prompts
+        sccs integrations pi export-all        Export skills, agents and commands
+    """
+
+
+def _resolve_pi_excludes() -> list[str]:
+    """Glob patterns to skip on Pi export.
+
+    Combines the doctor-managed patterns (gsd-*, playwright-cli — same registry
+    the sync engine excludes) with the user's optional ``pi.exclude``. Falls
+    back to the bundled doctor defaults when no config file exists, so
+    plugin-managed artefacts stay excluded out of the box.
+    """
+    from sccs.doctor.managed import get_doctor_managed_excludes
+    from sccs.doctor.schema import DoctorConfig
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        return get_doctor_managed_excludes(DoctorConfig())
+
+    patterns = get_doctor_managed_excludes(config.doctor)
+    user_extra = getattr(config.pi, "exclude", None) or []
+    return patterns + list(user_extra)
+
+
+def _resolve_pi_base_dir():
+    """Resolve the Pi agent base dir from config (None keeps the default)."""
+    from sccs.utils.paths import expand_path
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        return None
+    base = getattr(config.pi, "base_dir", None)
+    return expand_path(base) if base else None
+
+
+def _make_pi_detector():
+    """Build a PiDetector honouring the configured base_dir override."""
+    from sccs.integrations.pi import PiDetector
+
+    return PiDetector(base_dir=_resolve_pi_base_dir())
+
+
+@pi_group.command("status")
+@click.pass_context
+def pi_status(ctx: click.Context) -> None:
+    """Show Pi installation and export gaps."""
+    console = ctx.obj["console"]
+    detector = _make_pi_detector()
+    info = detector.get_info()
+
+    if info is None:
+        console.print("[dim]Pi is not installed (~/.pi/ not found)[/dim]")
+        return
+
+    console.print(f"[bold]Pi[/bold] detected at {info.base_dir}")
+
+    exclude = _resolve_pi_excludes()
+    skill_gaps = detector.get_skill_gaps(exclude_patterns=exclude)
+    agent_gaps = detector.get_agent_gaps(exclude_patterns=exclude)
+    command_gaps = detector.get_command_gaps(exclude_patterns=exclude)
+
+    for title, gaps in (
+        ("Skills to export", skill_gaps),
+        ("Agents to export (as skills)", agent_gaps),
+        ("Commands to export (as prompts)", command_gaps),
+    ):
+        console.print(f"\n[bold]{title} ({len(gaps)}):[/bold]")
+        for gap in gaps:
+            label = "[yellow]outdated[/yellow]" if gap.needs_update else "[red]missing[/red]"
+            console.print(f"  {gap.name} — {label}")
+
+
+def _run_pi_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
+    """Shared body for the three Pi export commands.
+
+    kind is one of 'skills', 'agents', 'commands'. Returns nothing; prints the
+    result and exits non-zero on errors via _print_conversion_result.
+    """
+    from sccs.integrations.pi import (
+        export_agents_to_pi,
+        export_commands_to_pi,
+        export_skills_to_pi,
+    )
+
+    console = ctx.obj["console"]
+    detector = _make_pi_detector()
+    if not detector.is_installed():
+        console.print_error("Pi is not installed (~/.pi/ not found)")
+        sys.exit(1)
+
+    # Explicit name selection overrides the default exclude (the user asked for
+    # a specific artefact by name, even a doctor-managed one).
+    exclude = None if selected_names else _resolve_pi_excludes()
+    selected = list(selected_names) if selected_names else None
+
+    gap_fns = {
+        "skills": (detector.get_skill_gaps, export_skills_to_pi, "skills"),
+        "agents": (detector.get_agent_gaps, export_agents_to_pi, "agents"),
+        "commands": (detector.get_command_gaps, export_commands_to_pi, "commands"),
+    }
+    get_gaps, export_fn, unit = gap_fns[kind]
+
+    gaps = get_gaps(exclude_patterns=exclude)
+    if not gaps:
+        console.print_success(f"All {unit} are already up to date in Pi")
+        return
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    result = export_fn(gaps, dry_run=dry_run, overwrite_existing=overwrite, selected=selected)
+    _print_conversion_result(console, result, dry_run=dry_run, verbose=ctx.obj["verbose"], unit=unit)
+
+
+@pi_group.command("export-skills")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing skills (default: yes)")
+@click.option("-s", "--skill", "skills", multiple=True, help="Limit to specific skill (repeatable)")
+@click.pass_context
+def pi_export_skills(ctx: click.Context, dry_run: bool, overwrite: bool, skills: tuple[str, ...]) -> None:
+    """Copy Claude skills into Pi skills (~/.pi/agent/skills/)."""
+    _run_pi_export(ctx, "skills", dry_run, overwrite, skills)
+
+
+@pi_group.command("export-agents")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing agents (default: yes)")
+@click.option("-a", "--agent", "agents", multiple=True, help="Limit to specific agent (repeatable)")
+@click.pass_context
+def pi_export_agents(ctx: click.Context, dry_run: bool, overwrite: bool, agents: tuple[str, ...]) -> None:
+    """Copy Claude agents into Pi as individual skills (~/.pi/agent/skills/)."""
+    _run_pi_export(ctx, "agents", dry_run, overwrite, agents)
+
+
+@pi_group.command("export-commands")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing commands (default: yes)")
+@click.option("-c", "--command", "commands", multiple=True, help="Limit to specific command (repeatable)")
+@click.pass_context
+def pi_export_commands(ctx: click.Context, dry_run: bool, overwrite: bool, commands: tuple[str, ...]) -> None:
+    """Copy Claude commands into Pi prompt templates (~/.pi/agent/prompts/)."""
+    _run_pi_export(ctx, "commands", dry_run, overwrite, commands)
+
+
+@pi_group.command("export-all")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing artefacts (default: yes)")
+@click.pass_context
+def pi_export_all(ctx: click.Context, dry_run: bool, overwrite: bool) -> None:
+    """Export skills, agents and commands to Pi in one run."""
+    console = ctx.obj["console"]
+    for kind in ("skills", "agents", "commands"):
+        console.print(f"[bold]Exporting {kind}…[/bold]")
+        _run_pi_export(ctx, kind, dry_run, overwrite, ())
 
 
 # --- Doctor command group ---

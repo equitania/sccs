@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.41.0 (21.06.2026)
+
+### Added
+- **Pi integration (`sccs integrations pi`).** Export Claude Code artefacts one-way to [Pi](https://pi.dev) (`@earendil-works/pi-coding-agent`). Pi loads `SKILL.md` folders with the *same* frontmatter format Claude Code uses, so the export is a **verbatim copy** — no frontmatter conversion and no model mapping (unlike OpenCode). Mapping: Claude **skills** `~/.claude/skills/<name>/` → `~/.pi/agent/skills/<name>/` (whole directory, incl. `references/`/`scripts/`); Claude **agents** `~/.claude/agents/<name>.md` → `~/.pi/agent/skills/<name>.md` (Pi has no subagent concept, so agents land as individual root-`.md` skills); Claude **commands** `~/.claude/commands/<name>.md` → `~/.pi/agent/prompts/<name>.md` (prompt templates). New `PiDetector` + `export_skills_to_pi` / `export_agents_to_pi` / `export_commands_to_pi` in `sccs/integrations/pi.py`, reusing `safe_copy` (file **and** directory, symlink-rejecting) and `quick_compare` for outdated-detection. CLI sub-group `pi status` / `export-skills` / `export-agents` / `export-commands` / `export-all`, all with `--dry-run` / `--overwrite` / name-selection. Doctor-managed artefacts (`gsd-*`, `playwright-cli` — the same managed registry the sync engine honours) are excluded by default; extend via `pi.exclude`, override per-run with an explicit `-s`/`-a`/`-c` selection. `integrations status` now reports the Pi install and its export gaps. New `PiConfig` block (`base_dir`, `exclude`) is fully optional/backwards-compatible → [docs/usage/pi.md](docs/usage/pi.md).
+
+### Notes
+- 23 new tests (`tests/test_pi_detector.py`, `tests/test_pi_export.py`); `ruff`/`mypy` clean. Existing `test_integrations_status_no_integrations` extended to mock the new `PiDetector`.
+
 ## Version 2.40.0 (20.06.2026)
 
 ### Changed

@@ -213,6 +213,31 @@ class OpenCodeConfig(BaseModel):
         return {**base, **self.extra_model_map}
 
 
+class PiConfig(BaseModel):
+    """Pi integration settings (pi.dev — @earendil-works/pi-coding-agent).
+
+    The export is a one-way copy: skills and agents become Pi skills, commands
+    become Pi prompt templates. No model mapping is needed because Pi ignores
+    unknown frontmatter and prompt templates carry no per-item model.
+    """
+
+    # None keeps the default Pi agent resource root (~/.pi/agent); a path
+    # overrides it (mainly for tests and non-standard installs).
+    base_dir: str | None = Field(
+        default=None,
+        description="Pi agent resource root. None keeps the default ~/.pi/agent.",
+    )
+    # Extra glob patterns (matched against the artefact basename) skipped on
+    # export, on top of the doctor-managed patterns (e.g. gsd-*).
+    exclude: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extra glob patterns (matched against artefact basename) skipped on export, "
+            "added to doctor-managed patterns."
+        ),
+    )
+
+
 class SccsConfig(BaseModel):
     """Root configuration model for SCCS."""
 
@@ -230,6 +255,12 @@ class SccsConfig(BaseModel):
     opencode: OpenCodeConfig = Field(
         default_factory=OpenCodeConfig,
         description="OpenCode integration settings (model mapping).",
+    )
+    # Pi integration is fully optional and backwards-compatible: legacy
+    # config.yaml files without a `pi:` key get the bundled defaults.
+    pi: PiConfig = Field(
+        default_factory=PiConfig,
+        description="Pi integration settings (pi.dev artefact export).",
     )
 
     global_exclude: list[str] = Field(
