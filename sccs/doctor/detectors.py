@@ -19,9 +19,11 @@ from sccs.doctor.runner import (
     _run,
     parse_node_major,
     run_claude_marketplace_list,
+    run_claude_marketplace_update,
     run_claude_mcp_list,
     run_claude_plugin_list,
     run_node_version,
+    run_npm_view_version,
     which,
 )
 from sccs.doctor.schema import (
@@ -42,6 +44,103 @@ from sccs.utils.platform import get_current_platform
 # damage there is, the first hundreds of entries usually expose it.
 _MAX_PATHS_SCANNED = 500
 _MAX_OFFENDERS_REPORTED = 5
+
+
+def _parse_version(value: str | None) -> tuple[int, ...] | None:
+    """Parse a leading dotted-numeric version (e.g. '1.6.0', 'v1.0.166-beta')
+    into a tuple of ints. Returns None when no numeric core can be extracted.
+
+    Dependency-free and deliberately lenient: a leading 'v' is stripped and any
+    non-numeric suffix (pre-release/build metadata) is ignored — only the
+    `\\d+(.\\d+)*` core is compared. Good enough for the npm/marketplace
+    versions doctor tracks; not a full PEP 440 / SemVer implementation.
+    """
+    if not value:
+        return None
+    m = re.match(r"\s*v?(\d+(?:\.\d+)*)", value)
+    if not m:
+        return None
+    return tuple(int(part) for part in m.group(1).split("."))
+
+
+def _version_gt(latest: str | None, installed: str | None) -> bool:
+    """Return True iff `latest` is strictly newer than `installed`.
+
+    Conservative: any unparsable or missing value yields False so we never
+    raise a false "update available". Tuples are zero-padded to equal length
+    before comparison (1.6 == 1.6.0).
+    """
+    a = _parse_version(latest)
+    b = _parse_version(installed)
+    if a is None or b is None:
+        return False
+    width = max(len(a), len(b))
+    a += (0,) * (width - len(a))
+    b += (0,) * (width - len(b))
+    return a > b
+
+
+_KNOWN_MARKETPLACES_PATH = "~/.claude/plugins/known_marketplaces.json"
+_MARKETPLACES_ROOT = "~/.claude/plugins/marketplaces"
+
+
+def _load_known_marketplace_locations() -> dict[str, str]:
+    """Map marketplace name → on-disk installLocation from
+    `~/.claude/plugins/known_marketplaces.json`. Empty dict on any failure."""
+    path = Path(_KNOWN_MARKETPLACES_PATH).expanduser()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for name, entry in data.items():
+        if isinstance(entry, dict):
+            loc = entry.get("installLocation")
+            if isinstance(loc, str) and loc:
+                out[name] = loc
+    return out
+
+
+def _read_marketplace_manifest_versions(install_location: str) -> dict[str, str]:
+    """Parse `<install_location>/.claude-plugin/marketplace.json` into a
+    {plugin_name: version} map. Empty dict on any read/parse failure."""
+    manifest = Path(install_location).expanduser() / ".claude-plugin" / "marketplace.json"
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, list):
+        return {}
+    out: dict[str, str] = {}
+    for plugin in plugins:
+        if not isinstance(plugin, dict):
+            continue
+        name = plugin.get("name")
+        version = plugin.get("version")
+        if isinstance(name, str) and isinstance(version, str) and version:
+            out[name] = version
+    return out
+
+
+def _collect_marketplace_versions(marketplaces: list[str]) -> dict[str, dict[str, str]]:
+    """Refresh each marketplace live and return
+    {marketplace: {plugin_name: latest_version}}.
+
+    Calls `claude plugin marketplace update <name>` (best-effort, mutates only
+    the local marketplace metadata cache — never installs plugins) before
+    reading its manifest, so the versions reflect the latest published state.
+    Any failure for one marketplace degrades to an empty inner map.
+    """
+    locations = _load_known_marketplace_locations()
+    result: dict[str, dict[str, str]] = {}
+    for name in marketplaces:
+        run_claude_marketplace_update(name)
+        loc = locations.get(name) or str(Path(_MARKETPLACES_ROOT).expanduser() / name)
+        result[name] = _read_marketplace_manifest_versions(loc)
+    return result
 
 
 @dataclass
@@ -90,6 +189,10 @@ class PluginStatus:
     # None if the parser couldn't extract it. Display-only (the reporter shows
     # it in the Version column); not used for any update decision.
     version: str | None = None
+    # The latest version advertised by the plugin's marketplace manifest, set
+    # only when `doctor check --update-check` ran and the manifest was readable.
+    # None means "not checked" or "could not determine".
+    latest_version: str | None = None
 
 
 @dataclass
@@ -120,6 +223,14 @@ class NpxToolStatus:
     # when the spec declares no source (version_file/version_args) or the lookup
     # failed. Never used for any install/update decision.
     version: str | None = None
+    # The latest npm-registry version (`npm view <npm_package> version`), set
+    # only when `doctor check --update-check` ran and the spec has an
+    # `npm_package`. None means "not checked" or "could not determine".
+    latest_version: str | None = None
+    # True when latest_version is strictly newer than the installed version,
+    # False when up to date, None when undecidable (not checked / offline /
+    # missing version). Drives the OUTDATED row + the update hint, never Exit 1.
+    update_available: bool | None = None
 
 
 @dataclass
@@ -434,22 +545,51 @@ class ClaudePluginDetector:
 
         return ("missing", None, None, None)
 
-    def get_statuses(self, specs: list[PluginSpec]) -> list[PluginStatus]:
+    def get_statuses(
+        self,
+        specs: list[PluginSpec],
+        *,
+        check_updates: bool = False,
+        marketplace_versions: dict[str, dict[str, str]] | None = None,
+    ) -> list[PluginStatus]:
+        """Classify each plugin against `claude plugin list`.
+
+        When `check_updates` is True, also compares the installed version
+        against the marketplace manifest's advertised version and sets
+        `update_available`/`latest_version`. `claude plugin` has no `outdated`
+        subcommand, so "latest" comes from the (live-refreshed) marketplace
+        manifest. `marketplace_versions` may be injected (tests); otherwise it
+        is collected live via `_collect_marketplace_versions`. `allowlist_only`
+        specs are never update-checked (consistent with the install/marketplace
+        passes that skip them).
+        """
         output = self._output()
+        version_map = marketplace_versions
+        if check_updates and version_map is None:
+            markets = sorted({s.marketplace for s in specs if s.marketplace and not s.allowlist_only})
+            version_map = _collect_marketplace_versions(markets) if markets else {}
+
         statuses: list[PluginStatus] = []
         for spec in specs:
             source, found, scope, version = self._detect_plugin(spec.name, spec.marketplace, output)
+            latest: str | None = None
+            update_available: bool | None = None
+            if check_updates and version_map is not None and source != "missing" and not spec.allowlist_only:
+                market = found or spec.marketplace
+                if market:
+                    latest = (version_map.get(market) or {}).get(spec.name)
+                if latest and version:
+                    update_available = _version_gt(latest, version)
             statuses.append(
                 PluginStatus(
                     spec=spec,
                     installed=source != "missing",
-                    # `claude plugin` has no `outdated` subcommand we can rely
-                    # on today, so we cannot tell whether an update is available.
-                    update_available=None,
+                    update_available=update_available,
                     detection_source=source,
                     found_marketplace=found,
                     scope=scope,
                     version=version,
+                    latest_version=latest,
                 )
             )
         return statuses
@@ -1313,19 +1453,44 @@ class NpxToolDetector:
             return m.group(0) if m else None
         return None
 
-    def get_statuses(self, specs: list[NpxToolSpec]) -> list[NpxToolStatus]:
+    @staticmethod
+    def _resolve_update(spec: NpxToolSpec, version: str | None) -> tuple[str | None, bool | None]:
+        """Return (latest_version, update_available) for an npm-backed tool.
+
+        Only queries the registry when the spec declares an `npm_package` and
+        the installed `version` is known. Any failure/offline → (None, None) so
+        the reporter shows nothing and never raises a false update. Returns
+        (latest, None) when latest is known but the installed version is not.
+        """
+        if not spec.npm_package or not version:
+            return (None, None)
+        latest = run_npm_view_version(spec.npm_package)
+        if not latest:
+            return (None, None)
+        return (latest, _version_gt(latest, version))
+
+    def get_statuses(
+        self,
+        specs: list[NpxToolSpec],
+        *,
+        check_updates: bool = False,
+    ) -> list[NpxToolStatus]:
         out: list[NpxToolStatus] = []
         for spec in specs:
             probe = spec.detect_command or spec.name
             path = which(probe)
             if path is not None:
+                version = self._resolve_version(spec)
+                latest, update_available = self._resolve_update(spec, version) if check_updates else (None, None)
                 out.append(
                     NpxToolStatus(
                         spec=spec,
                         available=True,
                         binary_path=path,
                         detection_source="path",
-                        version=self._resolve_version(spec),
+                        version=version,
+                        latest_version=latest,
+                        update_available=update_available,
                     )
                 )
                 continue
@@ -1333,13 +1498,17 @@ class NpxToolDetector:
             # PATH lookup failed — try the state cache for tools that opt in.
             if spec.detect_via_state and self._state is not None:
                 if self._state.is_npx_tool_marked(spec.name, list(spec.invocation)):
+                    version = self._resolve_version(spec)
+                    latest, update_available = self._resolve_update(spec, version) if check_updates else (None, None)
                     out.append(
                         NpxToolStatus(
                             spec=spec,
                             available=True,
                             binary_path=None,
                             detection_source="state",
-                            version=self._resolve_version(spec),
+                            version=version,
+                            latest_version=latest,
+                            update_available=update_available,
                         )
                     )
                     continue

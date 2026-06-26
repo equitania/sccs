@@ -2092,13 +2092,20 @@ def _is_statusline_sync_enabled() -> bool:
     return bool(cat and cat.enabled)
 
 
-def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign: bool = False):
+def _collect_doctor_statuses(
+    doctor_cfg, state_manager=None, *, include_foreign: bool = False, check_updates: bool = False
+):
     """Build all detector results once. Returns a dict for reuse.
 
     `include_foreign=True` additionally runs the foreign-plugin and
     foreign-MCP-server detectors needed by `sccs doctor optimize`. Kept
     off by default so `doctor check` / `install` / `update` don't pay
     the cost of an extra `claude mcp list` subprocess.
+
+    `check_updates=True` makes the plugin and npx-tool detectors query the
+    registry / marketplace manifests for newer versions (`doctor check` only).
+    Off by default so install/update/optimize — which refresh blindly anyway —
+    don't pay the network cost.
     """
     from sccs.doctor.detectors import (
         BrowserBundleDetector,
@@ -2138,11 +2145,11 @@ def _collect_doctor_statuses(doctor_cfg, state_manager=None, *, include_foreign:
     result = {
         "node": NodeDetector().get_status(doctor_cfg.min_node_major),
         "claude_cli": claude_cli_status,
-        "plugins": plugin_detector.get_statuses(plugin_specs),
+        "plugins": plugin_detector.get_statuses(plugin_specs, check_updates=check_updates),
         "marketplaces": ClaudeMarketplaceDetector().get_statuses(
             plugin_specs, claude_cli_installed=claude_cli_status.installed
         ),
-        "npx_tools": NpxToolDetector(state_manager=state).get_statuses(npx_specs),
+        "npx_tools": NpxToolDetector(state_manager=state).get_statuses(npx_specs, check_updates=check_updates),
         "permissions": PermissionDetector().get_statuses(permission_specs),
         "path_prefixes": PathPrefixDetector().get_statuses(path_prefix_specs),
         "bundled_skills": BundledSkillDetector().get_statuses(npx_specs),
@@ -2195,14 +2202,23 @@ def doctor_group() -> None:
 
 
 @doctor_group.command("check")
+@click.option(
+    "--update-check/--no-update-check",
+    default=True,
+    help=(
+        "Query the npm registry / marketplace manifests for newer plugin and "
+        "npx-tool versions (default: on). Use --no-update-check for a fast, "
+        "fully offline status report."
+    ),
+)
 @click.pass_context
-def doctor_check(ctx: click.Context) -> None:
+def doctor_check(ctx: click.Context, update_check: bool) -> None:
     """Print a status table of Node.js, claude CLI, plugins and npx tools."""
-    from sccs.doctor.reporter import has_problems, render_doctor_report
+    from sccs.doctor.reporter import has_problems, has_updates, render_doctor_report
 
     console = ctx.obj["console"]
     doctor_cfg = _load_doctor_config()
-    statuses = _collect_doctor_statuses(doctor_cfg)
+    statuses = _collect_doctor_statuses(doctor_cfg, check_updates=update_check)
 
     render_doctor_report(
         console,
@@ -2219,6 +2235,12 @@ def doctor_check(ctx: click.Context) -> None:
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
     )
+
+    if has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"]):
+        # Informational only — an available update is not a failure, so this
+        # does NOT flip the exit code (see has_problems, which ignores updates).
+        console.print()
+        console.print("[yellow]Updates available[/yellow] — run `sccs doctor update`.")
 
     if has_problems(
         node=statuses["node"],

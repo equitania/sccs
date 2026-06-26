@@ -58,6 +58,7 @@ sccs categories disable fish     # Kategorie deaktivieren
 
 # Doctor (System & Plugin Health)
 sccs doctor check                # Read-only Status-Tabelle (Exit 1 bei Problemen)
+sccs doctor check --no-update-check  # Ohne Live-Versionsprüfung (offline/schnell)
 sccs doctor install              # Installiert fehlende Komponenten (Confirm pro Action)
 sccs doctor install --yes        # Skip Confirms (CI use only)
 sccs doctor update               # Plugins + npx-Tools aktualisieren
@@ -125,6 +126,7 @@ sccs categories disable fish     # Disable category
 
 # Doctor (system & plugin health)
 sccs doctor check                # Read-only status table (exit 1 on problems)
+sccs doctor check --no-update-check  # Skip the live version check (offline/fast)
 sccs doctor install              # Install missing components (confirm per action)
 sccs doctor install --yes        # Skip confirms (CI use only)
 sccs doctor update               # Update plugins + refresh npx tools

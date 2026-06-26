@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.41.0
+**Version**: 2.42.0
 
 ### Key Features
 
@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Flexible Categories**: Claude skills, commands, hooks, scripts, fish config, etc.
 - **Bidirectional Sync**: Full two-way synchronization with conflict detection
 - **Git Integration**: Auto-commit and push after sync operations
+- **Doctor Update-Check** (v2.42.0): `sccs doctor check` flags OUTDATED plugins/npx tools when a newer version exists upstream (`npm view` for npm-backed tools, marketplace manifest for plugins); informational only, `--no-update-check` for offline mode
 
 ## Commands
 

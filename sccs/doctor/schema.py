@@ -191,6 +191,18 @@ class NpxToolSpec(BaseModel):
             "`version_file` is set."
         ),
     )
+    npm_package: str | None = Field(
+        default=None,
+        description=(
+            "Optional npm registry package name (e.g. '@opengsd/gsd-core'). When "
+            "set AND the installed version is known, `sccs doctor check "
+            "--update-check` queries `npm view <package> version` and flags the "
+            "tool OUTDATED if a newer version exists. Leave unset for tools whose "
+            "source of truth is NOT npm (e.g. brew-managed `playwright-cli`) so "
+            "they are never checked. Read-only registry query; failures/offline "
+            "degrade silently (no false alarm)."
+        ),
+    )
     managed_file_manifest: str | None = Field(
         default=None,
         description=(

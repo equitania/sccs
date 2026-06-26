@@ -42,7 +42,7 @@
 | `sccs convert fish-to-pwsh` | Generate a PowerShell profile from Fish shell configuration. | --src PATH, --dst PATH, --force, -n/--dry-run |
 | `sccs diff` | Show diff for items. | [ITEM_NAME], -c/--category TEXT |
 | `sccs docs generate` | Generate hub README for the sync repository. | -n/--dry-run, --commit, --push |
-| `sccs doctor check` | Print a status table of Node.js, claude CLI, plugins and npx tools. | — |
+| `sccs doctor check` | Print a status table of Node.js, claude CLI, plugins and npx tools; live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged). | --update-check/--no-update-check |
 | `sccs doctor install` | Install missing system components after a confirm prompt per action. | --yes |
 | `sccs doctor optimize` | Bring the local Claude environment in line with the spec. | --strict, --yes |
 | `sccs doctor update` | Update Claude plugins and refresh npx helper tools. | --yes |
@@ -104,6 +104,7 @@ sccs import full-setup.zip --overwrite         # apply, with automatic backup of
 ### Heal a Claude Code environment
 ```bash
 sccs doctor check              # read-only status table; exits 1 if anything is wrong (use in CI gates)
+sccs doctor check --no-update-check  # skip the live version check → fully offline/fast
 sccs doctor install            # install missing pieces, confirm per action
 sccs doctor install --yes      # unattended (CI): skip all confirms
 sccs doctor update             # update plugins + refresh npx tools (safe maintenance, no prompts)
@@ -169,8 +170,9 @@ sccs config show               # current config; also: validate | edit | init [-
 
 ## Machine-readable outputs
 - **None.** All output is human-oriented Rich console text — there are no `--json`/`--format` flags.
-  For programmatic use, rely on **exit codes**: `sccs doctor check` exits non-zero when problems exist;
-  config/sync errors also exit non-zero. State persists as YAML under `~/.config/sccs/`
+  For programmatic use, rely on **exit codes**: `sccs doctor check` exits non-zero when problems exist
+  (an *available update* is informational only and does NOT affect the exit code — pass `--no-update-check`
+  in CI to skip the network call entirely); config/sync errors also exit non-zero. State persists as YAML under `~/.config/sccs/`
   (`.sync_state.yaml`, doctor state) — read those files directly if you need structured state.
 
 ## Deeper docs

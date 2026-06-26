@@ -139,6 +139,50 @@ def run_claude_marketplace_list() -> str:
     return proc.stdout or ""
 
 
+def run_npm_view_version(package: str) -> str | None:
+    """Return the latest npm-registry version of `package`, or None on failure.
+
+    Read-only registry query (`npm view <package> version`) used by the doctor
+    update-check to decide whether an npm-backed npx tool (e.g.
+    `@opengsd/gsd-core`) is OUTDATED. Any failure — offline, npm missing,
+    unknown package, timeout — degrades to None so the caller shows no version
+    and never raises a false "update available". `npm` passes
+    `_SAFE_HEAD_PATTERN`; `package` is argv[1] (never the validated head).
+    """
+    if not package:
+        return None
+    try:
+        proc = _run(["npm", "view", package, "version"], timeout=15, check=False)
+    except DoctorError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return (proc.stdout or "").strip() or None
+
+
+def run_claude_marketplace_update(name: str) -> bool:
+    """Refresh a single Claude marketplace from its source. Best-effort.
+
+    Runs `claude plugin marketplace update <name>` so the local marketplace
+    manifest reflects the latest published plugin versions before the doctor
+    update-check reads it. Returns True on success, False otherwise. Pulls
+    marketplace metadata only (git pull) — it does NOT install or change any
+    plugin. Any failure is swallowed; the caller then compares against whatever
+    on-disk manifest exists.
+    """
+    if not name:
+        return False
+    try:
+        proc = _run(
+            ["claude", "plugin", "marketplace", "update", name],
+            timeout=30,
+            check=False,
+        )
+    except DoctorError:
+        return False
+    return proc.returncode == 0
+
+
 def run_opencode_models() -> str:
     """Return raw stdout of `opencode models`. Empty on failure.
 

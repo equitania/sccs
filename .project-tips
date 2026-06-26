@@ -1,4 +1,4 @@
-# sccs v2.41.0 | Claude Code Sync Tool (UV)
+# sccs v2.42.0 | Claude Code Sync Tool (UV)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Setup:      uv venv --python 3.12 && venv+ && uv pip install -e ".[dev]"
 ▸ Sync:       sccs sync --dry-run
@@ -12,7 +12,8 @@
 
 # Doctor (System & Plugin Health)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-▸ Check:      sccs doctor check
+▸ Check:      sccs doctor check                # v2.42.0: live update-check (OUTDATED rows + hint)
+▸ Check off:  sccs doctor check --no-update-check  # offline/fast, no npm view / marketplace refresh
 ▸ Install:    sccs doctor install
 ▸ Update:     sccs doctor update
 ▸ Optimize:   sccs doctor optimize           # v2.30.0: install+update+drift warning
@@ -24,6 +25,7 @@
   (v2.33.0: PluginSpec.allowlist_only — LSPs + frontend-design@claude-code-plugins are foreign-drift allowlist only, no MISSING/OUTDATED/marketplace block; check↔update now converges)
   (v2.33.2: reporter never recommends `sudo chown /usr/bin` — fix_command returns None for system/multi-user paths; reporter delegates to safe `_npm_global_fix_block`; label `npm bin -g` → `npm prefix bin`; restart-shell hint after fix)
   (v2.40.0: GSD tool redux→@opengsd/gsd-core; MIN_NODE 20→22; orphan-cleanup MOVES stale gsd-*/get-shit-done to ~/.config/sccs/gsd-orphans-backup-<ts>/ on install/update, confirm-gated)
+  (v2.42.0: check live-detects newer versions — npx via `npm view <npm_package>`, plugins via marketplace manifest → OUTDATED + "Updates available" hint; informational only, exit unchanged; --no-update-check for offline)
 
 # OpenCode Integration (v2.37.0+)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -84,6 +84,10 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
         # `<configDir>/gsd-core/VERSION` (= ~/.claude/gsd-core/VERSION for the
         # --claude --global install).
         version_file="~/.claude/gsd-core/VERSION",
+        # npm is the source of truth for gsd-core, so `doctor check
+        # --update-check` can compare the installed VERSION against
+        # `npm view @opengsd/gsd-core version` and flag an available update.
+        npm_package="@opengsd/gsd-core",
         # gsd-core's own legacy-cleanup.cjs only prunes stale hooks/ and
         # commands/ — it leaves orphaned skills/ and agents/ from a prior
         # package behind. SCCS reads gsd-core's install manifest (the single

@@ -4441,3 +4441,304 @@ class TestVersionAndSourceReporting:
         assert redux.version_file == "~/.claude/gsd-core/VERSION"
         pw = next(s for s in DEFAULT_NPX_TOOLS if s.name == "playwright-cli")
         assert pw.version_args == ["--version"]
+
+
+class TestVersionComparison:
+    """v2.42.0: dependency-free semver parsing/compare for update detection."""
+
+    def test_parse_version_basic(self):
+        from sccs.doctor.detectors import _parse_version
+
+        assert _parse_version("1.6.0") == (1, 6, 0)
+        assert _parse_version("v1.0.166") == (1, 0, 166)
+        assert _parse_version("1.0.166-beta") == (1, 0, 166)
+        assert _parse_version("  1.5 ") == (1, 5)
+
+    def test_parse_version_unparsable_is_none(self):
+        from sccs.doctor.detectors import _parse_version
+
+        assert _parse_version(None) is None
+        assert _parse_version("") is None
+        assert _parse_version("latest") is None
+
+    def test_version_gt_true_when_newer(self):
+        from sccs.doctor.detectors import _version_gt
+
+        assert _version_gt("1.6.0", "1.5.0") is True
+        assert _version_gt("1.0.166", "1.0.162") is True
+        assert _version_gt("2.0", "1.9.9") is True
+
+    def test_version_gt_false_when_equal_or_older(self):
+        from sccs.doctor.detectors import _version_gt
+
+        assert _version_gt("1.0.166", "1.0.166") is False
+        assert _version_gt("1.6", "1.6.0") is False  # zero-padded equality
+        assert _version_gt("1.5.0", "1.6.0") is False
+
+    def test_version_gt_conservative_on_unparsable(self):
+        from sccs.doctor.detectors import _version_gt
+
+        assert _version_gt(None, "1.0.0") is False
+        assert _version_gt("1.0.0", None) is False
+        assert _version_gt("nope", "1.0.0") is False
+
+
+class TestRunNpmViewVersion:
+    """v2.42.0: read-only `npm view <pkg> version` registry query."""
+
+    def test_returns_stripped_version(self):
+        from sccs.doctor.runner import run_npm_view_version
+
+        fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="1.6.0\n", stderr="")
+        with patch("sccs.doctor.runner.subprocess.run", return_value=fake):
+            assert run_npm_view_version("@opengsd/gsd-core") == "1.6.0"
+
+    def test_nonzero_returncode_is_none(self):
+        from sccs.doctor.runner import run_npm_view_version
+
+        fake = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="E404")
+        with patch("sccs.doctor.runner.subprocess.run", return_value=fake):
+            assert run_npm_view_version("@opengsd/gsd-core") is None
+
+    def test_subprocess_error_is_none(self):
+        from sccs.doctor.runner import run_npm_view_version
+
+        with patch("sccs.doctor.runner.subprocess.run", side_effect=FileNotFoundError):
+            assert run_npm_view_version("@opengsd/gsd-core") is None
+
+    def test_empty_package_is_none(self):
+        from sccs.doctor.runner import run_npm_view_version
+
+        assert run_npm_view_version("") is None
+
+
+class TestNpxUpdateDetection:
+    """v2.42.0: NpxToolDetector flags OUTDATED when npm has a newer version."""
+
+    def _spec(self):
+        return NpxToolSpec(
+            name="@opengsd/gsd-core",
+            invocation=["npx", "-y", "@opengsd/gsd-core"],
+            detect_command="gsd-core",
+            npm_package="@opengsd/gsd-core",
+            version_args=["--version"],
+        )
+
+    def test_update_available_true(self):
+        spec = self._spec()
+        with (
+            patch("sccs.doctor.detectors.which", return_value="/usr/bin/gsd-core"),
+            patch.object(NpxToolDetector, "_resolve_version", staticmethod(lambda s: "1.5.0")),
+            patch("sccs.doctor.detectors.run_npm_view_version", return_value="1.6.0"),
+        ):
+            st = NpxToolDetector().get_statuses([spec], check_updates=True)[0]
+        assert st.version == "1.5.0"
+        assert st.latest_version == "1.6.0"
+        assert st.update_available is True
+
+    def test_update_available_false_when_current(self):
+        spec = self._spec()
+        with (
+            patch("sccs.doctor.detectors.which", return_value="/usr/bin/gsd-core"),
+            patch.object(NpxToolDetector, "_resolve_version", staticmethod(lambda s: "1.6.0")),
+            patch("sccs.doctor.detectors.run_npm_view_version", return_value="1.6.0"),
+        ):
+            st = NpxToolDetector().get_statuses([spec], check_updates=True)[0]
+        assert st.update_available is False
+
+    def test_no_check_when_flag_off(self):
+        spec = self._spec()
+        with (
+            patch("sccs.doctor.detectors.which", return_value="/usr/bin/gsd-core"),
+            patch.object(NpxToolDetector, "_resolve_version", staticmethod(lambda s: "1.5.0")),
+            patch("sccs.doctor.detectors.run_npm_view_version", return_value="1.6.0") as npm,
+        ):
+            st = NpxToolDetector().get_statuses([spec], check_updates=False)[0]
+        assert st.update_available is None
+        assert st.latest_version is None
+        npm.assert_not_called()
+
+    def test_no_npm_package_means_no_query(self):
+        spec = NpxToolSpec(name="playwright-cli", invocation=["npm", "i"], version_args=["--version"])
+        with (
+            patch("sccs.doctor.detectors.which", return_value="/usr/bin/playwright-cli"),
+            patch.object(NpxToolDetector, "_resolve_version", staticmethod(lambda s: "0.1.14")),
+            patch("sccs.doctor.detectors.run_npm_view_version", return_value="9.9.9") as npm,
+        ):
+            st = NpxToolDetector().get_statuses([spec], check_updates=True)[0]
+        assert st.update_available is None
+        npm.assert_not_called()
+
+    def test_offline_degrades_to_none(self):
+        spec = self._spec()
+        with (
+            patch("sccs.doctor.detectors.which", return_value="/usr/bin/gsd-core"),
+            patch.object(NpxToolDetector, "_resolve_version", staticmethod(lambda s: "1.5.0")),
+            patch("sccs.doctor.detectors.run_npm_view_version", return_value=None),
+        ):
+            st = NpxToolDetector().get_statuses([spec], check_updates=True)[0]
+        assert st.update_available is None
+        assert st.latest_version is None
+
+
+class TestPluginUpdateDetection:
+    """v2.42.0: ClaudePluginDetector flags OUTDATED via marketplace manifest."""
+
+    _RAW = "❯ context-mode@context-mode\n  Version: 1.0.162\n  Scope: user\n  Status: enabled\n"
+
+    def test_update_available_true(self):
+        det = ClaudePluginDetector(raw_output=self._RAW)
+        spec = PluginSpec(name="context-mode", marketplace="context-mode")
+        versions = {"context-mode": {"context-mode": "1.0.166"}}
+        st = det.get_statuses([spec], check_updates=True, marketplace_versions=versions)[0]
+        assert st.installed is True
+        assert st.version == "1.0.162"
+        assert st.latest_version == "1.0.166"
+        assert st.update_available is True
+
+    def test_update_available_false_when_current(self):
+        det = ClaudePluginDetector(raw_output=self._RAW.replace("1.0.162", "1.0.166"))
+        spec = PluginSpec(name="context-mode", marketplace="context-mode")
+        versions = {"context-mode": {"context-mode": "1.0.166"}}
+        st = det.get_statuses([spec], check_updates=True, marketplace_versions=versions)[0]
+        assert st.update_available is False
+
+    def test_allowlist_only_never_checked(self):
+        det = ClaudePluginDetector(raw_output=self._RAW)
+        spec = PluginSpec(name="context-mode", marketplace="context-mode", allowlist_only=True)
+        versions = {"context-mode": {"context-mode": "1.0.166"}}
+        st = det.get_statuses([spec], check_updates=True, marketplace_versions=versions)[0]
+        assert st.update_available is None
+        assert st.latest_version is None
+
+    def test_no_check_keeps_update_none(self):
+        det = ClaudePluginDetector(raw_output=self._RAW)
+        spec = PluginSpec(name="context-mode", marketplace="context-mode")
+        st = det.get_statuses([spec])[0]
+        assert st.update_available is None
+
+    def test_missing_manifest_entry_degrades(self):
+        det = ClaudePluginDetector(raw_output=self._RAW)
+        spec = PluginSpec(name="context-mode", marketplace="context-mode")
+        st = det.get_statuses([spec], check_updates=True, marketplace_versions={})[0]
+        assert st.update_available is None
+        assert st.latest_version is None
+
+
+class TestMarketplaceManifestReaders:
+    """v2.42.0: on-disk marketplace manifest + known-marketplaces parsing."""
+
+    def test_read_manifest_versions(self, tmp_path):
+        from sccs.doctor.detectors import _read_marketplace_manifest_versions
+
+        manifest_dir = tmp_path / ".claude-plugin"
+        manifest_dir.mkdir()
+        (manifest_dir / "marketplace.json").write_text(
+            json.dumps({"plugins": [{"name": "context-mode", "version": "1.0.166"}]}),
+            encoding="utf-8",
+        )
+        out = _read_marketplace_manifest_versions(str(tmp_path))
+        assert out == {"context-mode": "1.0.166"}
+
+    def test_read_manifest_missing_is_empty(self, tmp_path):
+        from sccs.doctor.detectors import _read_marketplace_manifest_versions
+
+        assert _read_marketplace_manifest_versions(str(tmp_path / "nope")) == {}
+
+    def test_load_known_marketplace_locations(self, tmp_path, monkeypatch):
+        from sccs.doctor import detectors
+
+        known = tmp_path / "known_marketplaces.json"
+        known.write_text(
+            json.dumps({"context-mode": {"installLocation": "/tmp/cm"}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(detectors, "_KNOWN_MARKETPLACES_PATH", str(known))
+        assert detectors._load_known_marketplace_locations() == {"context-mode": "/tmp/cm"}
+
+
+class TestUpdateReporting:
+    """v2.42.0: reporter rows + has_updates / has_problems separation."""
+
+    def test_npx_row_outdated(self):
+        from sccs.doctor.detectors import NpxToolStatus
+        from sccs.doctor.reporter import _OUTDATED, _npx_row
+
+        status = NpxToolStatus(
+            spec=NpxToolSpec(name="@opengsd/gsd-core", invocation=["npx", "x"], detect_via_state=True),
+            available=True,
+            binary_path=None,
+            detection_source="state",
+            version="1.5.0",
+            latest_version="1.6.0",
+            update_available=True,
+        )
+        _, state, version, detail = _npx_row(status)
+        assert state == _OUTDATED
+        assert version == "v1.5.0"
+        assert "1.6.0" in detail
+
+    def test_plugin_row_outdated(self):
+        from sccs.doctor.detectors import PluginStatus
+        from sccs.doctor.reporter import _OUTDATED, _plugin_row
+
+        status = PluginStatus(
+            spec=PluginSpec(name="context-mode", marketplace="context-mode"),
+            installed=True,
+            update_available=True,
+            detection_source="exact",
+            found_marketplace="context-mode",
+            scope="user",
+            version="1.0.162",
+            latest_version="1.0.166",
+        )
+        _, state, version, detail = _plugin_row(status)
+        assert state == _OUTDATED
+        assert "1.0.166" in detail
+
+    def test_has_updates_true(self):
+        from sccs.doctor.detectors import NpxToolStatus
+        from sccs.doctor.reporter import has_updates
+
+        st = NpxToolStatus(
+            spec=NpxToolSpec(name="@opengsd/gsd-core", invocation=["npx", "x"], detect_via_state=True),
+            available=True,
+            binary_path=None,
+            detection_source="state",
+            update_available=True,
+        )
+        assert has_updates(plugins=[], npx_tools=[st]) is True
+
+    def test_available_update_is_not_a_problem(self):
+        """An available update must NOT flip the exit code (has_problems)."""
+        from sccs.doctor.detectors import ClaudeCliStatus, NodeStatus, NpxToolStatus, PluginStatus
+        from sccs.doctor.reporter import has_problems, has_updates
+        from sccs.doctor.schema import NodeInstallSpec
+
+        node_status = NodeStatus(
+            installed=True,
+            version="22.0.0",
+            major=22,
+            meets_minimum=True,
+            install_hint=NodeInstallSpec(runnable=False, label="x"),
+            platform="macos",
+        )
+        cli = ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude")
+        npx = NpxToolStatus(
+            spec=NpxToolSpec(name="@opengsd/gsd-core", invocation=["npx", "x"], detect_via_state=True),
+            available=True,
+            binary_path=None,
+            detection_source="state",
+            update_available=True,
+        )
+        plugin = PluginStatus(
+            spec=PluginSpec(name="context-mode", marketplace="context-mode"),
+            installed=True,
+            update_available=True,
+            detection_source="exact",
+            found_marketplace="context-mode",
+            version="1.0.162",
+            latest_version="1.0.166",
+        )
+        assert has_problems(node=node_status, claude_cli=cli, plugins=[plugin], npx_tools=[npx]) is False
+        assert has_updates(plugins=[plugin], npx_tools=[npx]) is True

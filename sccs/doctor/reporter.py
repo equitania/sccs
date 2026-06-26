@@ -60,6 +60,9 @@ def _plugin_row(status: PluginStatus) -> tuple[str, str, str, str]:
     src = f" · {status.spec.marketplace_source}" if status.spec.marketplace_source else ""
     if not status.installed:
         return (f"plugin: {label}", _MISSING, "", "not in `claude plugin list`")
+    if status.update_available:
+        latest = f" → v{status.latest_version}" if status.latest_version else ""
+        return (f"plugin: {label}", _OUTDATED, version, f"update available{latest}{src}")
     if status.detection_source == "alternative" and status.found_marketplace:
         # Installed under a different marketplace than configured. This is NOT
         # "outdated": `claude plugin` has no update-available signal, and the
@@ -139,6 +142,9 @@ def _npx_row(status: NpxToolStatus) -> tuple[str, str, str, str]:
         if status.spec.detect_via_state:
             return (label, _MISSING, "", "no successful run on record")
         return (label, _MISSING, "", "binary not on PATH")
+    if status.update_available:
+        latest = f"update available: v{status.latest_version}" if status.latest_version else "update available"
+        return (label, _OUTDATED, version, latest)
     if status.detection_source == "state":
         return (label, _OK, version, "installed (last run cached)")
     return (label, _OK, version, status.binary_path or "found")
@@ -297,6 +303,21 @@ def has_problems(
     if gsd_orphans and any(g.has_orphans for g in gsd_orphans):
         return True
     return bool(browser_bundles and any(not b.all_present for b in browser_bundles))
+
+
+def has_updates(
+    *,
+    plugins: list[PluginStatus],
+    npx_tools: list[NpxToolStatus],
+) -> bool:
+    """Return True if any plugin or npx tool has a newer version available.
+
+    Deliberately separate from `has_problems`: an available update is a hint,
+    not a failure, so `doctor check` shows it without flipping the exit code.
+    """
+    if any(p.update_available for p in plugins):
+        return True
+    return any(t.update_available for t in npx_tools)
 
 
 def render_inline_summary(

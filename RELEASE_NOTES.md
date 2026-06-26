@@ -1,5 +1,16 @@
 # Release Notes
 
+## Version 2.42.0 (26.06.2026)
+
+### Added
+- **`sccs doctor check` now flags available updates.** Previously `doctor check` showed only the *installed* version of an npx tool or plugin and marked everything `OK` — even when a newer version existed upstream (the driver: gsd-core 1.5.0→1.6.0 and context-mode 1.0.162→1.0.166 were only noticed via GSD's own UI). `doctor check` now checks **live** whether the doctor-managed npx tools **and** Claude plugins have a newer version and renders them as `OUTDATED` plus an "Updates available — run `sccs doctor update`" hint line. **Exit code is unchanged** — an available update is informational, not a failure, so it never flips `doctor check` to exit 1 (`has_problems` deliberately ignores updates → CI-friendly). Latest-version sources: npx tools via `npm view <npm_package> version` (read-only registry query); plugins via the live-refreshed marketplace manifest (`claude plugin marketplace update <name>` → `<installLocation>/.claude-plugin/marketplace.json`). New `NpxToolSpec.npm_package` field marks which tools npm is the source of truth for (only `@opengsd/gsd-core`; the brew-managed `playwright-cli` is intentionally left unchecked). New `latest_version` / `update_available` fields on `NpxToolStatus` and `PluginStatus`; a dependency-free semver comparator (`_parse_version` / `_version_gt`) that returns `False` conservatively on any unparsable/`None` value so a network failure never raises a false "update available". `allowlist_only` plugins (the LSPs) are never update-checked, consistent with the install/marketplace passes. New CLI flag `sccs doctor check --update-check/--no-update-check` (default on; `--no-update-check` keeps the report fully offline and fast).
+
+### Changed
+- New runner helpers `run_npm_view_version` / `run_claude_marketplace_update` (both best-effort, swallow failures); both `ClaudePluginDetector.get_statuses` and `NpxToolDetector.get_statuses` gained a `check_updates=` keyword (default `False`, so `install`/`update`/`optimize` — which refresh blindly anyway — pay no network cost). The reporter's `_OUTDATED` row style (defined since v2.33.0 but never used) is now emitted for outdated npx tools and plugins, alongside a new `has_updates()` helper.
+
+### Notes
+- 26 new tests (`TestVersionComparison`, `TestRunNpmViewVersion`, `TestNpxUpdateDetection`, `TestPluginUpdateDetection`, `TestMarketplaceManifestReaders`, `TestUpdateReporting`); 1066 total. `ruff` / `mypy` clean. Verified live on macOS: an artificially down-rev'd `~/.claude/gsd-core/VERSION` produced the `OUTDATED` row + hint at exit 0; `--no-update-check` stayed offline.
+
 ## Version 2.41.0 (21.06.2026)
 
 ### Added

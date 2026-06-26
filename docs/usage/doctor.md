@@ -19,10 +19,15 @@ Filesystem-Berechtigungen für die fragilen Pfade.
 
 ```bash
 sccs doctor check                # Read-only Status-Tabelle (Exit 1 bei Problemen)
+sccs doctor check --no-update-check  # Wie oben, aber ohne Live-Versionsprüfung (offline/schnell)
 sccs doctor install              # Installiert fehlende Komponenten (Confirm pro Action)
 sccs doctor install --yes        # Confirms überspringen (nur für CI gedacht)
 sccs doctor update               # Plugins + npx-Tools aktualisieren
 ```
+
+### Update-Check (ab v2.42.0)
+
+`sccs doctor check` prüft standardmäßig **live**, ob für die doctor-verwalteten npx-Tools und Plugins eine neuere Version verfügbar ist, und markiert sie als `OUTDATED` (Detail z.B. `update available: v1.6.0`) plus eine Hinweiszeile „Updates available — run `sccs doctor update`". Quellen: npx-Tools via `npm view <npm_package> version` (read-only Registry-Query, nur für Tools mit gesetztem `npm_package` wie `@opengsd/gsd-core`), Plugins via live-refreshtem Marketplace-Manifest (`claude plugin marketplace update <name>`). **Ein verfügbares Update ist nur ein Hinweis** und ändert den Exit-Code NICHT (Exit 1 bleibt fehlenden/kaputten Komponenten vorbehalten → CI-freundlich). Jeder Netzwerkfehler degradiert still (keine Falschmeldung). `--no-update-check` schaltet die Prüfung ab → vollständig offline und schnell.
 
 ### Was wird geprüft?
 
@@ -30,8 +35,8 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 |---|---|---|
 | **Node.js** | installiert + Mindestversion (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), Manual-Block für Linux (NodeSource, sudo) |
 | **`claude` CLI** | Binary auf PATH | `npm install -g @anthropic-ai/claude-code` |
-| **Claude-Plugins** | je nach Marketplace via `claude plugin list` | `claude plugin install/update <name>@<marketplace>` mit korrektem `--scope <user/project/local/managed>` |
-| **npx-Tools** (z.B. `@opengsd/gsd-core`, `playwright-cli`) | Binary auf PATH **oder** State-File-Marker (für Tools die kein Binary droppen) | `npm install -g <pkg>@latest` bzw. `npx -y <pkg> …` |
+| **Claude-Plugins** | je nach Marketplace via `claude plugin list`; **Update verfügbar** via Marketplace-Manifest (v2.42.0) | `claude plugin install/update <name>@<marketplace>` mit korrektem `--scope <user/project/local/managed>` |
+| **npx-Tools** (z.B. `@opengsd/gsd-core`, `playwright-cli`) | Binary auf PATH **oder** State-File-Marker (für Tools die kein Binary droppen); **Update verfügbar** via `npm view` (v2.42.0, nur bei gesetztem `npm_package`) | `npm install -g <pkg>@latest` bzw. `npx -y <pkg> …` |
 | **Bundled Skills** (z.B. `playwright-cli`-Skill) | `SKILL.md` im konfigurierten Target-Verzeichnis existiert | Kopiert das Skill-Verzeichnis aus dem npm-Paket nach `~/.claude/skills/<name>/` |
 | **Browser-Bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` Verzeichnisse vorhanden | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem-Permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` (lib) **und** `<npm prefix>/bin` (v2.32.1) schreibbar | Manual-Block — SCCS ruft niemals `sudo` auf; System-prefix → nur user-local Prefix |
@@ -214,10 +219,15 @@ on the fragile paths.
 
 ```bash
 sccs doctor check                # Read-only status table (exit 1 on problems)
+sccs doctor check --no-update-check  # Same, but skip the live version check (offline/fast)
 sccs doctor install              # Install missing components (confirm per action)
 sccs doctor install --yes        # Skip confirms (CI use only)
 sccs doctor update               # Update plugins + refresh npx tools
 ```
+
+### Update check (since v2.42.0)
+
+`sccs doctor check` checks **live** by default whether a newer version of the doctor-managed npx tools and plugins is available, marking them `OUTDATED` (detail e.g. `update available: v1.6.0`) plus an "Updates available — run `sccs doctor update`" hint line. Sources: npx tools via `npm view <npm_package> version` (read-only registry query, only for tools with an `npm_package` set such as `@opengsd/gsd-core`), plugins via the live-refreshed marketplace manifest (`claude plugin marketplace update <name>`). **An available update is informational only** and does NOT change the exit code (exit 1 stays reserved for missing/broken components → CI-friendly). Any network failure degrades silently (no false alarm). `--no-update-check` disables the check → fully offline and fast.
 
 ### What is checked?
 
@@ -225,8 +235,8 @@ sccs doctor update               # Update plugins + refresh npx tools
 |---|---|---|
 | **Node.js** | installed + minimum major version (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), manual block for Linux (NodeSource, sudo) |
 | **`claude` CLI** | binary on PATH | `npm install -g @anthropic-ai/claude-code` |
-| **Claude plugins** | per marketplace via `claude plugin list` | `claude plugin install/update <name>@<marketplace>` with the correct `--scope <user/project/local/managed>` |
-| **npx tools** (e.g. `@opengsd/gsd-core`, `playwright-cli`) | binary on PATH **or** state-file marker (for tools that don't drop a binary) | `npm install -g <pkg>@latest` resp. `npx -y <pkg> …` |
+| **Claude plugins** | per marketplace via `claude plugin list`; **update available** via marketplace manifest (v2.42.0) | `claude plugin install/update <name>@<marketplace>` with the correct `--scope <user/project/local/managed>` |
+| **npx tools** (e.g. `@opengsd/gsd-core`, `playwright-cli`) | binary on PATH **or** state-file marker (for tools that don't drop a binary); **update available** via `npm view` (v2.42.0, only when `npm_package` is set) | `npm install -g <pkg>@latest` resp. `npx -y <pkg> …` |
 | **Bundled skills** (e.g. the `playwright-cli` skill) | `SKILL.md` exists in the configured target directory | Copies the skill directory out of the npm package into `~/.claude/skills/<name>/` |
 | **Browser bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` directories present | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` (lib) **and** `<npm prefix>/bin` (v2.32.1) writable | manual block — SCCS never invokes `sudo`; system prefix → user-local prefix only |
