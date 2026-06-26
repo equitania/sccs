@@ -2113,6 +2113,7 @@ def _collect_doctor_statuses(
         ClaudeCliDetector,
         ClaudeMarketplaceDetector,
         ClaudePluginDetector,
+        CliToolDetector,
         GsdOrphanDetector,
         MCPServerDetector,
         NodeDetector,
@@ -2135,6 +2136,7 @@ def _collect_doctor_statuses(
     permission_specs = doctor_cfg.effective_permission_checks()
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
     status_line_specs = doctor_cfg.effective_status_line_checks()
+    cli_tool_specs = doctor_cfg.effective_cli_tools()
     disallowed_hooks = doctor_cfg.effective_disallowed_hooks()
     protected_hooks = doctor_cfg.effective_protected_hooks()
     state = state_manager or DoctorStateManager()
@@ -2160,6 +2162,7 @@ def _collect_doctor_statuses(
         "settings_hook_violations": settings_hook_detector.get_violations(disallowed_hooks, protected=protected_hooks),
         "settings_path": settings_hook_detector.settings_path,
         "gsd_orphans": GsdOrphanDetector().get_statuses(npx_specs),
+        "cli_tools": CliToolDetector().get_statuses(cli_tool_specs),
     }
 
     if include_foreign:
@@ -2234,6 +2237,7 @@ def doctor_check(ctx: click.Context, update_check: bool) -> None:
         browser_bundles=statuses.get("browser_bundles"),
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
+        cli_tools=statuses.get("cli_tools"),
     )
 
     if has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"]):
@@ -2289,6 +2293,7 @@ def doctor_install(ctx: click.Context, yes: bool) -> None:
         settings_hook_violations=statuses.get("settings_hook_violations"),
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
+        cli_tools=statuses.get("cli_tools"),
     )
 
     if plan.is_empty():
@@ -2334,6 +2339,7 @@ def doctor_update(ctx: click.Context, yes: bool) -> None:
         settings_hook_violations=statuses.get("settings_hook_violations"),
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
+        cli_tools=statuses.get("cli_tools"),
     )
 
     if plan.is_empty():
@@ -2398,6 +2404,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
         settings_hook_violations=statuses.get("settings_hook_violations"),
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
+        cli_tools=statuses.get("cli_tools"),
         strict=strict,
     )
 

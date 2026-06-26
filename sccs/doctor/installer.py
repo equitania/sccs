@@ -21,6 +21,7 @@ from sccs.doctor.detectors import (
     BrowserBundleStatus,
     BundledSkillStatus,
     ClaudeCliStatus,
+    CliToolStatus,
     ForeignMCPServerStatus,
     ForeignPluginStatus,
     GsdOrphanDetector,
@@ -40,6 +41,7 @@ from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec
 from sccs.doctor.state import DoctorStateManager
 from sccs.utils.logging import get_logger
 from sccs.utils.paths import atomic_write, expand_path
+from sccs.utils.platform import get_current_platform
 
 logger = get_logger("doctor.installer")
 
@@ -598,6 +600,86 @@ def _node_action(status: NodeStatus) -> DoctorAction | None:
         runnable=spec.runnable and spec.cmd is not None,
         component="node",
     )
+
+
+def _winget_links_path_block(name: str) -> str:
+    """PowerShell snippet to put a winget-installed tool's binary on the
+    persistent User PATH — for the WinGet-Links-not-on-PATH trap.
+
+    Print-only: SCCS never mutates the user's environment. Mirrors the
+    approach the captain validated for the zoxide fix.
+    """
+    return "\n".join(
+        [
+            f"# {name} is installed (winget) but its binary folder is not on your PATH.",
+            "# Add it PERMANENTLY (PowerShell — find the package dir, then persist it):",
+            '$exe = Get-ChildItem "$env:LOCALAPPDATA\\Microsoft\\WinGet\\Packages" -Recurse `',
+            f"        -Include {name}.exe,coreutils.exe,zoxide.exe -ErrorAction SilentlyContinue | "
+            "Select-Object -First 1",
+            "$dir = $exe.DirectoryName",
+            "$userPath = [Environment]::GetEnvironmentVariable('Path','User')",
+            "if ($dir -and (($userPath -split ';') -notcontains $dir)) {",
+            "    [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $dir), 'User')",
+            "}",
+            "# Then START A NEW PowerShell and re-run: sccs doctor check",
+        ]
+    )
+
+
+def _cli_tool_install_actions(
+    statuses: list[CliToolStatus] | None,
+    *,
+    platform_name: str | None = None,
+) -> list[DoctorAction]:
+    """Install / PATH-fix actions for the opt-in CLI tools (zoxide, coreutils).
+
+    - `missing` → run the platform install recipe (winget/brew) behind a
+      confirm prompt, or print the manual block (e.g. linux zoxide installer).
+    - `installed_not_on_path` → print-only PowerShell PATH guidance (the
+      WinGet-Links trap); SCCS never edits the environment itself.
+    On-path tools produce no action.
+    """
+    if not statuses:
+        return []
+    platform = platform_name or get_current_platform()
+    actions: list[DoctorAction] = []
+    for st in statuses:
+        spec = st.spec
+        if st.state == "installed_not_on_path":
+            actions.append(
+                DoctorAction(
+                    label=f"add {spec.name} to PATH (installed via winget, not on PATH)",
+                    cmd=None,
+                    manual_block=_winget_links_path_block(spec.name),
+                    runnable=False,
+                    component=f"cli-tool:{spec.name}",
+                )
+            )
+            continue
+        if st.state != "missing":
+            continue
+        recipe = spec.install.get(platform)
+        if recipe is None:
+            actions.append(
+                DoctorAction(
+                    label=f"install {spec.name} (no recipe for {platform})",
+                    cmd=None,
+                    manual_block=f"# No install recipe for {spec.name} on {platform}.",
+                    runnable=False,
+                    component=f"cli-tool:{spec.name}",
+                )
+            )
+            continue
+        actions.append(
+            DoctorAction(
+                label=recipe.label,
+                cmd=recipe.cmd if recipe.runnable else None,
+                manual_block=recipe.manual_block,
+                runnable=recipe.runnable and recipe.cmd is not None,
+                component=f"cli-tool:{spec.name}",
+            )
+        )
+    return actions
 
 
 def _claude_cli_action(status: ClaudeCliStatus) -> DoctorAction | None:
@@ -1309,6 +1391,7 @@ def build_install_plan(
     settings_hook_violations: list[SettingsHookViolation] | None = None,
     settings_path: Path | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
+    cli_tools: list[CliToolStatus] | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -1339,6 +1422,7 @@ def build_install_plan(
         actions.extend(_browser_bundle_repair_actions(browser_bundles, npx_tools, use_deps=use_deps))
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
+    actions.extend(_cli_tool_install_actions(cli_tools))
     # Settings.json sanitisation runs LAST so that third-party tools
     # (@opengsd/gsd-core, etc.) which overwrite settings.json during their
     # install step are followed by our cleanup pass.
@@ -1363,6 +1447,7 @@ def build_update_plan(
     settings_hook_violations: list[SettingsHookViolation] | None = None,
     settings_path: Path | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
+    cli_tools: list[CliToolStatus] | None = None,
 ) -> InstallPlan:
     """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones.
 
@@ -1392,6 +1477,7 @@ def build_update_plan(
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
+    actions.extend(_cli_tool_install_actions(cli_tools))
     if settings_hook_violations and settings_path is not None:
         actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
     return InstallPlan(actions=actions)
@@ -1414,6 +1500,7 @@ def build_optimize_plan(
     settings_hook_violations: list[SettingsHookViolation] | None = None,
     settings_path: Path | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
+    cli_tools: list[CliToolStatus] | None = None,
     strict: bool = False,
 ) -> InstallPlan:
     """Plan a one-shot optimize pass.
@@ -1501,6 +1588,8 @@ def build_optimize_plan(
 
     # Spec'd-but-missing MCP servers get a manual_block (no auto-add).
     actions.extend(_mcp_server_install_warnings(mcp_servers))
+
+    actions.extend(_cli_tool_install_actions(cli_tools))
 
     if status_lines:
         actions.extend(_status_line_actions(status_lines))

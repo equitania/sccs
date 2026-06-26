@@ -134,6 +134,18 @@ class TestRunnerSecurity:
         kwargs = run_mock.call_args.kwargs
         assert kwargs["stdin"] is subprocess.DEVNULL
 
+    def test_run_decodes_output_as_utf8(self):
+        # On Windows `text=True` alone decodes with cp1252 and crashes the
+        # subprocess reader thread on the UTF-8 bytes `claude plugin list` /
+        # `npm` emit. Force UTF-8 + tolerant errors so decoding never crashes
+        # and the doctor doesn't report plugins falsely MISSING.
+        fake = subprocess.CompletedProcess(args=["echo"], returncode=0, stdout="ok", stderr="")
+        with patch("sccs.doctor.runner.subprocess.run", return_value=fake) as run_mock:
+            _run(["echo", "x"])
+        kwargs = run_mock.call_args.kwargs
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
+
     def test_default_npx_get_shit_done_uses_dash_y(self):
         # Without `-y`, npx prompts on stdout for "Need to install... Ok to
         # proceed?" on Linux/fresh systems — and capture_output=True hides
@@ -4742,3 +4754,240 @@ class TestUpdateReporting:
         )
         assert has_problems(node=node_status, claude_cli=cli, plugins=[plugin], npx_tools=[npx]) is False
         assert has_updates(plugins=[plugin], npx_tools=[npx]) is True
+
+
+class TestNodeInstallHintReporting:
+    """v2.42.1: `doctor check` surfaces the Node.js install/upgrade command
+    below the table (not only in `doctor install`)."""
+
+    def _capture(self, node):
+        from io import StringIO
+
+        from rich.console import Console as RichConsole
+
+        from sccs.doctor.detectors import ClaudeCliStatus
+        from sccs.doctor.reporter import render_doctor_report
+
+        buf = StringIO()
+        console = RichConsole(file=buf, width=200, force_terminal=False, color_system=None)
+        render_doctor_report(
+            console,
+            node=node,
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            min_node_major=22,
+            plugins=[],
+            npx_tools=[],
+            permissions=[],
+            path_prefixes=[],
+            marketplaces=[],
+            bundled_skills=[],
+            browser_bundles=[],
+            status_lines=[],
+        )
+        return buf.getvalue()
+
+    def _node(self, **kw):
+        from sccs.doctor.detectors import NodeStatus
+
+        defaults = dict(
+            installed=True,
+            version="18.19.0",
+            major=18,
+            meets_minimum=False,
+            install_hint=NODE_INSTALL["linux"],
+            platform="linux",
+        )
+        defaults.update(kw)
+        return NodeStatus(**defaults)
+
+    def test_linux_outdated_shows_nodesource_two_lines(self):
+        out = self._capture(self._node())
+        assert "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -" in out
+        assert "sudo apt-get install -y nodejs" in out
+        # The two commands must NOT be collapsed onto one line.
+        assert "bash -sudo apt-get" not in out
+        assert "upgrade:" in out
+
+    def test_linux_missing_shows_install_headline(self):
+        out = self._capture(self._node(installed=False, version=None, major=None))
+        assert "missing — install:" in out
+        assert "sudo apt-get install -y nodejs" in out
+
+    def test_macos_outdated_shows_brew(self):
+        out = self._capture(self._node(install_hint=NODE_INSTALL["macos"], platform="macos"))
+        assert "brew install node" in out
+
+    def test_node_ok_shows_no_install_block(self):
+        out = self._capture(self._node(version="22.5.0", major=22, meets_minimum=True))
+        assert "install:" not in out
+        assert "upgrade:" not in out
+        assert "nodesource" not in out.lower()
+
+
+class TestCliToolDetection:
+    """v2.43.0: opt-in zoxide / Microsoft Coreutils detection."""
+
+    def test_on_path(self, monkeypatch):
+        from sccs.doctor.defaults import BUILTIN_CLI_TOOLS
+        from sccs.doctor.detectors import CliToolDetector
+
+        monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: "/usr/local/bin/zoxide")
+        monkeypatch.setattr(CliToolDetector, "_resolve_version", staticmethod(lambda spec, probe: "0.9.4"))
+        st = CliToolDetector(platform_name="macos").get_statuses([BUILTIN_CLI_TOOLS["zoxide"]])[0]
+        assert st.state == "on_path"
+        assert st.version == "0.9.4"
+
+    def test_installed_not_on_path_windows(self, monkeypatch):
+        from sccs.doctor.defaults import BUILTIN_CLI_TOOLS
+        from sccs.doctor.detectors import CliToolDetector
+
+        monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
+        monkeypatch.setattr("sccs.doctor.detectors.run_winget_list", lambda _id: True)
+        st = CliToolDetector(platform_name="windows").get_statuses([BUILTIN_CLI_TOOLS["coreutils"]])[0]
+        assert st.state == "installed_not_on_path"
+        assert st.winget_installed is True
+
+    def test_missing(self, monkeypatch):
+        from sccs.doctor.defaults import BUILTIN_CLI_TOOLS
+        from sccs.doctor.detectors import CliToolDetector
+
+        monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
+        monkeypatch.setattr("sccs.doctor.detectors.run_winget_list", lambda _id: False)
+        st = CliToolDetector(platform_name="windows").get_statuses([BUILTIN_CLI_TOOLS["zoxide"]])[0]
+        assert st.state == "missing"
+
+    def test_platform_gating_skips_coreutils_on_macos(self, monkeypatch):
+        from sccs.doctor.defaults import BUILTIN_CLI_TOOLS
+        from sccs.doctor.detectors import CliToolDetector
+
+        monkeypatch.setattr("sccs.doctor.detectors.which", lambda _: None)
+        specs = [BUILTIN_CLI_TOOLS["zoxide"], BUILTIN_CLI_TOOLS["coreutils"]]
+        rows = CliToolDetector(platform_name="macos").get_statuses(specs)
+        # coreutils is Windows-only → no row; zoxide stays.
+        assert [r.spec.name for r in rows] == ["zoxide"]
+
+    def test_effective_cli_tools_resolves_names(self):
+        cfg = DoctorConfig(cli_tools=["zoxide", "coreutils", "does-not-exist"])
+        names = [s.name for s in cfg.effective_cli_tools()]
+        assert names == ["zoxide", "coreutils"]  # unknown name ignored
+
+    def test_effective_cli_tools_empty_by_default(self):
+        assert DoctorConfig().effective_cli_tools() == []
+
+
+class TestRunWingetList:
+    """v2.43.0: winget list install check."""
+
+    def test_returns_true_when_id_in_output(self):
+        from sccs.doctor.runner import run_winget_list
+
+        out = "Name        Id                    Version\nzoxide      ajeetdsouza.zoxide    0.9.4\n"
+        fake = subprocess.CompletedProcess(args=[], returncode=0, stdout=out, stderr="")
+        with patch("sccs.doctor.runner.subprocess.run", return_value=fake):
+            assert run_winget_list("ajeetdsouza.zoxide") is True
+
+    def test_returns_false_when_absent(self):
+        from sccs.doctor.runner import run_winget_list
+
+        fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="No installed package found\n", stderr="")
+        with patch("sccs.doctor.runner.subprocess.run", return_value=fake):
+            assert run_winget_list("ajeetdsouza.zoxide") is False
+
+    def test_subprocess_error_is_false(self):
+        from sccs.doctor.runner import run_winget_list
+
+        with patch("sccs.doctor.runner.subprocess.run", side_effect=FileNotFoundError):
+            assert run_winget_list("ajeetdsouza.zoxide") is False
+
+
+class TestCliToolInstallActions:
+    """v2.43.0: install / PATH-fix actions for the opt-in CLI tools."""
+
+    def _status(self, name, state):
+        from sccs.doctor.defaults import BUILTIN_CLI_TOOLS
+        from sccs.doctor.detectors import CliToolStatus
+
+        return CliToolStatus(spec=BUILTIN_CLI_TOOLS[name], state=state)
+
+    def test_missing_windows_uses_winget(self):
+        from sccs.doctor.installer import _cli_tool_install_actions
+
+        actions = _cli_tool_install_actions([self._status("zoxide", "missing")], platform_name="windows")
+        assert len(actions) == 1
+        assert actions[0].runnable is True
+        assert actions[0].cmd[:4] == ["winget", "install", "--id", "ajeetdsouza.zoxide"]
+
+    def test_missing_macos_uses_brew(self):
+        from sccs.doctor.installer import _cli_tool_install_actions
+
+        actions = _cli_tool_install_actions([self._status("zoxide", "missing")], platform_name="macos")
+        assert actions[0].cmd == ["brew", "install", "zoxide"]
+
+    def test_missing_linux_zoxide_is_manual_block(self):
+        from sccs.doctor.installer import _cli_tool_install_actions
+
+        actions = _cli_tool_install_actions([self._status("zoxide", "missing")], platform_name="linux")
+        assert actions[0].runnable is False
+        assert "install.sh" in actions[0].manual_block
+
+    def test_installed_not_on_path_is_powershell_manual_block(self):
+        from sccs.doctor.installer import _cli_tool_install_actions
+
+        actions = _cli_tool_install_actions(
+            [self._status("coreutils", "installed_not_on_path")], platform_name="windows"
+        )
+        assert actions[0].runnable is False
+        assert "SetEnvironmentVariable" in actions[0].manual_block
+
+    def test_on_path_produces_no_action(self):
+        from sccs.doctor.installer import _cli_tool_install_actions
+
+        assert _cli_tool_install_actions([self._status("zoxide", "on_path")], platform_name="macos") == []
+
+
+class TestCliToolReporting:
+    """v2.43.0: rows are informational — never red MISSING, never a problem."""
+
+    def _status(self, name, state, **kw):
+        from sccs.doctor.defaults import BUILTIN_CLI_TOOLS
+        from sccs.doctor.detectors import CliToolStatus
+
+        return CliToolStatus(spec=BUILTIN_CLI_TOOLS[name], state=state, **kw)
+
+    def test_row_on_path_ok(self):
+        from sccs.doctor.reporter import _OK, _cli_tool_row
+
+        _, style, _v, _d = _cli_tool_row(self._status("zoxide", "on_path", binary_path="/x/zoxide"))
+        assert style == _OK
+
+    def test_row_missing_is_info_not_red(self):
+        from sccs.doctor.reporter import _INFO, _MISSING, _cli_tool_row
+
+        _, style, _v, detail = _cli_tool_row(self._status("zoxide", "missing"))
+        assert style == _INFO
+        assert style != _MISSING
+        assert "optional" in detail
+
+    def test_row_not_on_path_is_stale(self):
+        from sccs.doctor.reporter import _STALE, _cli_tool_row
+
+        _, style, _v, _d = _cli_tool_row(self._status("coreutils", "installed_not_on_path"))
+        assert style == _STALE
+
+    def test_missing_cli_tool_is_not_a_problem(self):
+        """A missing optional CLI tool must NOT flip the exit code."""
+        from sccs.doctor.detectors import ClaudeCliStatus, NodeStatus
+        from sccs.doctor.reporter import has_problems
+        from sccs.doctor.schema import NodeInstallSpec
+
+        node = NodeStatus(
+            installed=True,
+            version="22.0.0",
+            major=22,
+            meets_minimum=True,
+            install_hint=NodeInstallSpec(runnable=False, label="x"),
+            platform="macos",
+        )
+        cli = ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude")
+        # has_problems takes no cli_tools arg → missing tools can't affect it by design.
+        assert has_problems(node=node, claude_cli=cli, plugins=[], npx_tools=[]) is False

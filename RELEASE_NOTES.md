@@ -1,5 +1,17 @@
 # Release Notes
 
+## Version 2.43.0 (26.06.2026)
+
+### Added
+- **`sccs doctor` detects + helps install optional shell CLI tools (zoxide, Microsoft Coreutils).** New opt-in category modelled on the npx-tool checks. Enable it by listing built-in preset names in `~/.config/sccs/config.yaml`: `doctor: { cli_tools: [zoxide, coreutils] }` (empty by default → no extra rows, so macOS/Linux users never see surprise output). **zoxide** (smart `cd`) is checked on all platforms (winget on Windows, `brew install zoxide` on macOS, the official install script on Linux); **Microsoft Coreutils** (`Microsoft.Coreutils`, the Rust uutils port of `cat`/`grep`/`wc`/`cut`/`xargs`/…) is Windows-only — it gives PowerShell the same native UNIX commands as Linux/macOS/WSL. Detection: `shutil.which(detect_command)` decides "on PATH"; on Windows a `winget list --id <id>` fallback is the **authoritative** install check (independent of PATH — it distinguishes "installed but not on PATH", the WinGet-Links trap, from "missing"). Three states render as `OK` (on PATH), yellow "installed, not on PATH" (+ a copy-paste PowerShell PATH snippet below the table), or blue "not installed (optional)". **Informational only** — a missing tool is never red MISSING and never flips the exit code (`has_problems` is unchanged → CI-friendly). `sccs doctor install` offers `winget install` / `brew install` behind a confirm prompt; SCCS never edits the user's PATH/profile itself (consistent with the existing npm PATH-prefix block). New `CliToolSpec` + `DoctorConfig.cli_tools`/`extra_cli_tools`/`effective_cli_tools()`, `BUILTIN_CLI_TOOLS`, `CliToolStatus`/`CliToolDetector`, `run_winget_list`, `_cli_tool_install_actions`/`_winget_links_path_block`, `_cli_tool_row`. `winget` already passed the runner allowlist (no security change); `NodeInstallSpec` is reused as the per-platform install recipe. Note: zoxide additionally needs `zoxide init <shell>` in the shell profile for the `z` command — intentionally out of scope (the doctor only ensures the binary, it never mutates profiles).
+- **`sccs doctor check` now shows the Node.js install/upgrade command inline.** Previously a missing/outdated Node only produced a table row ("need >= 22.x"); the actual NodeSource/brew/winget command appeared only under `doctor install`. The report now renders the platform-specific install block below the table (Linux NodeSource two-liner rendered line-by-line, macOS `brew install node`, Windows `winget install OpenJS.NodeJS`), so the copy-pasteable fix is right there.
+
+### Fixed
+- **Windows crash: subprocess wrappers now force UTF-8 decoding.** On Windows (cp1252 locale, Python 3.14) `sccs doctor check` crashed in the subprocess reader thread (`UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d`): `subprocess.run(text=True)` without an explicit `encoding=` decodes with the OS code page, and `claude plugin list` / `npm` emit UTF-8 bytes (box-drawing glyphs, emoji). The fallout was not cosmetic — the truncated stdout made the doctor report installed plugins as falsely MISSING. Both capturing wrappers (`doctor/runner.py:_run`, `git/operations.py:_run_git`) now pass `encoding="utf-8", errors="replace"` → deterministic across platforms and tolerant of odd bytes.
+
+### Notes
+- 24 new tests across the three increments (cli-tools 18, node-hint 4, UTF-8 regression 2); 1090 total. `ruff` / `mypy` clean. zoxide install verified on macOS (`tool: zoxide  OK`); Coreutils row correctly skipped off-Windows.
+
 ## Version 2.42.0 (26.06.2026)
 
 ### Added

@@ -74,6 +74,12 @@ def _run_git(
             check=False,
             capture_output=capture_output,
             text=True,
+            # Force UTF-8 decoding of git output. On Windows `text=True` alone
+            # falls back to the cp1252 code page, which crashes the subprocess
+            # reader thread on non-cp1252 bytes (commit messages with emoji /
+            # umlauts, branch/remote names). `errors="replace"` keeps it robust.
+            encoding="utf-8",
+            errors="replace",
         )
         if check and result.returncode != 0:
             raise GitError(

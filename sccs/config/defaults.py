@@ -455,6 +455,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_node_major": 22,
         "extra_plugins": [],
         "extra_npx_tools": [],
+        # Opt-in optional shell CLI tools (informational; never fails check).
+        # Enable by listing built-in preset names, e.g.:
+        #   cli_tools: [zoxide, coreutils]
+        # zoxide is checked on all platforms (winget/brew/script); coreutils
+        # (Microsoft.Coreutils) only on Windows. Empty = no extra rows.
+        "cli_tools": [],
     },
 }
 

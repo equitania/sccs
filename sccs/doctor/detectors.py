@@ -24,9 +24,11 @@ from sccs.doctor.runner import (
     run_claude_plugin_list,
     run_node_version,
     run_npm_view_version,
+    run_winget_list,
     which,
 )
 from sccs.doctor.schema import (
+    CliToolSpec,
     MCPServerSpec,
     NodeInstallSpec,
     NpxToolSpec,
@@ -1521,6 +1523,74 @@ class NpxToolDetector:
                     detection_source="missing",
                 )
             )
+        return out
+
+
+@dataclass
+class CliToolStatus:
+    """Result of inspecting one optional shell CLI tool (zoxide, coreutils)."""
+
+    spec: CliToolSpec
+    # state values:
+    #   "on_path"                — binary resolves via shutil.which (usable now)
+    #   "installed_not_on_path"  — winget reports it installed but it's not on
+    #                              PATH (the WinGet-Links trap → PATH guidance)
+    #   "missing"                — not installed (offer install)
+    state: str
+    binary_path: str | None = None
+    version: str | None = None
+    winget_installed: bool = False
+
+
+class CliToolDetector:
+    """Detect optional shell CLI tools (zoxide, Microsoft Coreutils).
+
+    Platform-gated per spec: a tool whose `platforms` does not include the
+    current platform yields no status (no table row). On the matching platform,
+    `shutil.which` decides whether the binary is usable now; on Windows a
+    `winget list` fallback distinguishes "installed but not on PATH" from
+    "missing" so the reporter can offer PATH guidance vs. an install.
+    """
+
+    def __init__(self, platform_name: str | None = None) -> None:
+        self._platform = platform_name or get_current_platform()
+
+    @staticmethod
+    def _resolve_version(spec: CliToolSpec, probe: str) -> str | None:
+        if not spec.version_args:
+            return None
+        cmd = [probe, *spec.version_args]
+        try:
+            proc = _run(cmd, check=False, capture=True, timeout=10)
+        except DoctorError:
+            return None
+        blob = f"{proc.stdout or ''} {proc.stderr or ''}"
+        m = re.search(r"\d+\.\d+\.\d+\S*", blob)
+        return m.group(0) if m else None
+
+    def get_statuses(self, specs: list[CliToolSpec]) -> list[CliToolStatus]:
+        out: list[CliToolStatus] = []
+        for spec in specs:
+            if self._platform not in spec.platforms:
+                continue  # not applicable here → no row
+            probe = spec.detect_command
+            path = which(probe)
+            if path is not None:
+                out.append(
+                    CliToolStatus(
+                        spec=spec,
+                        state="on_path",
+                        binary_path=path,
+                        version=self._resolve_version(spec, probe),
+                        winget_installed=True,
+                    )
+                )
+                continue
+            # Not on PATH. On Windows, winget knows whether it's installed at all.
+            if self._platform == "windows" and spec.winget_id and run_winget_list(spec.winget_id):
+                out.append(CliToolStatus(spec=spec, state="installed_not_on_path", winget_installed=True))
+                continue
+            out.append(CliToolStatus(spec=spec, state="missing"))
         return out
 
 

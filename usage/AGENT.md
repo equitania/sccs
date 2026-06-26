@@ -42,7 +42,7 @@
 | `sccs convert fish-to-pwsh` | Generate a PowerShell profile from Fish shell configuration. | --src PATH, --dst PATH, --force, -n/--dry-run |
 | `sccs diff` | Show diff for items. | [ITEM_NAME], -c/--category TEXT |
 | `sccs docs generate` | Generate hub README for the sync repository. | -n/--dry-run, --commit, --push |
-| `sccs doctor check` | Print a status table of Node.js, claude CLI, plugins and npx tools; live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged). | --update-check/--no-update-check |
+| `sccs doctor check` | Status table of Node.js, claude CLI, plugins, npx tools (+ opt-in CLI tools zoxide/coreutils); live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged); shows Node + CLI-tool install commands inline. | --update-check/--no-update-check |
 | `sccs doctor install` | Install missing system components after a confirm prompt per action. | --yes |
 | `sccs doctor optimize` | Bring the local Claude environment in line with the spec. | --strict, --yes |
 | `sccs doctor update` | Update Claude plugins and refresh npx helper tools. | --yes |
@@ -109,6 +109,8 @@ sccs doctor install            # install missing pieces, confirm per action
 sccs doctor install --yes      # unattended (CI): skip all confirms
 sccs doctor update             # update plugins + refresh npx tools (safe maintenance, no prompts)
 sccs doctor optimize --strict  # install + remove foreign plugins/MCP servers (destructive: still confirms)
+# Opt-in optional CLI tools (informational, never exit 1): set in config.yaml →
+#   doctor: { cli_tools: [zoxide, coreutils] }   # zoxide all-OS, coreutils Windows-only (winget)
 ```
 
 ### Push artefacts to OpenCode

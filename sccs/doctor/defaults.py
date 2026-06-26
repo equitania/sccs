@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from sccs.doctor.schema import (
     BundledSkillSpec,
+    CliToolSpec,
     MCPServerSpec,
     NodeInstallSpec,
     NpxToolSpec,
@@ -288,6 +289,78 @@ NODE_INSTALL: dict[str, NodeInstallSpec] = {
 def get_node_install_spec(platform_name: str) -> NodeInstallSpec:
     """Return the install spec for a platform, falling back to the linux block."""
     return NODE_INSTALL.get(platform_name, NODE_INSTALL["linux"])
+
+
+# Built-in optional CLI tools the doctor can detect + help install. Opt-in
+# only: a user enables one by listing its key in `doctor.cli_tools:` (e.g.
+# `cli_tools: [zoxide, coreutils]`). Nothing here is checked by default, so
+# macOS/Linux users never see surprise rows. These are shell-ergonomics
+# helpers — a missing one is informational, never a `doctor check` failure.
+BUILTIN_CLI_TOOLS: dict[str, CliToolSpec] = {
+    # zoxide — smarter `cd`. Cross-platform; winget on Windows, brew on macOS,
+    # the official install script on Linux (distro packages are often stale).
+    # NOTE: zoxide additionally needs `zoxide init <shell>` in the user's shell
+    # profile to expose the `z` command — that profile edit is out of scope for
+    # the doctor (it never mutates rc/profile files); it only ensures the binary.
+    "zoxide": CliToolSpec(
+        name="zoxide",
+        detect_command="zoxide",
+        platforms=["windows", "macos", "linux"],
+        winget_id="ajeetdsouza.zoxide",
+        version_args=["--version"],
+        install={
+            "windows": NodeInstallSpec(
+                runnable=True,
+                cmd=[
+                    "winget",
+                    "install",
+                    "--id",
+                    "ajeetdsouza.zoxide",
+                    "-e",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                ],
+                label="install zoxide via winget",
+            ),
+            "macos": NodeInstallSpec(
+                runnable=True,
+                cmd=["brew", "install", "zoxide"],
+                label="install zoxide via Homebrew",
+            ),
+            "linux": NodeInstallSpec(
+                runnable=False,
+                manual_block="curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh",
+                label="install zoxide via the official install script",
+            ),
+        },
+    ),
+    # Microsoft Coreutils — Rust port (uutils) of the UNIX text tools
+    # (cat/grep/wc/cut/xargs/…). Windows-only here: it gives PowerShell the same
+    # native commands as Linux/macOS/WSL. The multi-call binary is `coreutils`;
+    # `winget list` is the authoritative install check regardless of the exact
+    # shim names on PATH.
+    "coreutils": CliToolSpec(
+        name="coreutils",
+        detect_command="coreutils",
+        platforms=["windows"],
+        winget_id="Microsoft.Coreutils",
+        install={
+            "windows": NodeInstallSpec(
+                runnable=True,
+                cmd=[
+                    "winget",
+                    "install",
+                    "--id",
+                    "Microsoft.Coreutils",
+                    "-e",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                ],
+                label="install Microsoft Coreutils via winget",
+            ),
+        },
+    ),
+}
 
 
 # Explicitly-managed MCP servers. Empty by default — `sccs doctor optimize`

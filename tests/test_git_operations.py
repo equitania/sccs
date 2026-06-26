@@ -79,11 +79,29 @@ class TestRunGit:
             _run_git("status")
 
     @patch("sccs.git.operations.subprocess.run")
+    def test_decodes_output_as_utf8(self, mock_run):
+        # On Windows `text=True` alone decodes git output with cp1252 and
+        # crashes on non-cp1252 bytes (emoji/umlauts in commit messages).
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["git", "status"], returncode=0, stdout="ok", stderr=""
+        )
+        _run_git("status")
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
+
+    @patch("sccs.git.operations.subprocess.run")
     def test_cwd_passed(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(args=["git", "status"], returncode=0, stdout="", stderr="")
         _run_git("status", cwd=Path("/tmp"))
         mock_run.assert_called_once_with(
-            ["git", "status"], cwd=Path("/tmp"), check=False, capture_output=True, text=True
+            ["git", "status"],
+            cwd=Path("/tmp"),
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
 

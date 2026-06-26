@@ -10,6 +10,7 @@ from sccs.doctor.detectors import (
     BrowserBundleStatus,
     BundledSkillStatus,
     ClaudeCliStatus,
+    CliToolStatus,
     GsdOrphanStatus,
     MarketplaceStatus,
     NodeStatus,
@@ -150,6 +151,18 @@ def _npx_row(status: NpxToolStatus) -> tuple[str, str, str, str]:
     return (label, _OK, version, status.binary_path or "found")
 
 
+def _cli_tool_row(status: CliToolStatus) -> tuple[str, str, str, str]:
+    """Optional CLI tools (zoxide, coreutils). Informational only — never red
+    MISSING and never counted as a problem, so it can't flip the exit code."""
+    label = f"tool: {status.spec.name}"
+    version = f"v{status.version}" if status.version else ""
+    if status.state == "on_path":
+        return (label, _OK, version, status.binary_path or "on PATH")
+    if status.state == "installed_not_on_path":
+        return (label, _STALE, "", "installed via winget, not on PATH — see guidance below")
+    return (label, _INFO, "", "not installed (optional) — run `sccs doctor install`")
+
+
 def _bundled_skill_row(status: BundledSkillStatus) -> tuple[str, str, str, str]:
     label = f"skill: {status.spec.name}"
     if status.skill_md_present:
@@ -183,6 +196,7 @@ def render_doctor_report(
     browser_bundles: list[BrowserBundleStatus] | None = None,
     status_lines: list[StatusLineStatus] | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
+    cli_tools: list[CliToolStatus] | None = None,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -215,9 +229,36 @@ def render_doctor_report(
     if status_lines:
         for sl_st in status_lines:
             table.add_row(*_status_line_row(sl_st))
+    if cli_tools:
+        for cli_st in cli_tools:
+            table.add_row(*_cli_tool_row(cli_st))
 
     console.print(table)
     console.print(f"[dim]Platform: {node.platform}[/dim]")
+
+    # Node.js install/upgrade block — surfaced below the table so `doctor check`
+    # gives the exact, copy-pasteable command (e.g. the NodeSource two-liner on
+    # Linux) instead of only flagging the version in the table. Mirrors the
+    # permission/orphan remediation blocks; the same hint is otherwise only
+    # printed by `doctor install`/`update`.
+    if not (node.installed and node.meets_minimum) and node.install_hint is not None:
+        hint = node.install_hint
+        if not node.installed:
+            headline = "Node.js missing — install:"
+        else:
+            headline = f"Node.js v{node.version} is older than the required v{min_node_major}.x — upgrade:"
+        console.print()
+        console.print(f"[yellow]{headline}[/yellow]")
+        console.print(f"  [dim]{hint.label}[/dim]")
+        if hint.runnable and hint.cmd:
+            console.print(f"  [bold]{' '.join(hint.cmd)}[/bold]")
+        elif hint.manual_block:
+            # Render each line separately so a multi-step recipe (NodeSource:
+            # curl … | sudo -E bash -  /  sudo apt-get install -y nodejs) never
+            # collapses onto one line.
+            for line in hint.manual_block.splitlines():
+                console.print(f"  [bold]{line}[/bold]")
+        console.print()
 
     # Detailed remediation block for permission issues — shown below the table
     # so the user gets the exact `sudo chown` command (or the safe Option-A
@@ -264,6 +305,25 @@ def render_doctor_report(
                     console.print(f"    [dim]… and {g.total - 20} more[/dim]")
                 if g.truncated:
                     console.print("    [dim](list capped — more orphans exist on disk)[/dim]")
+            console.print()
+
+    # CLI tools installed (winget) but not on PATH — show the PowerShell PATH
+    # snippet below the table so the user can copy it. SCCS never edits the
+    # environment itself (consistent with the npm PATH-prefix block).
+    if cli_tools:
+        from sccs.doctor.installer import _winget_links_path_block
+
+        off_path = [c for c in cli_tools if c.state == "installed_not_on_path"]
+        if off_path:
+            console.print()
+            console.print(
+                "[yellow]CLI tools installed but not on PATH "
+                "(SCCS never edits your environment — copy & run yourself):[/yellow]"
+            )
+            for c in off_path:
+                console.print(f"  [dim]{c.spec.name}:[/dim]")
+                for line in _winget_links_path_block(c.spec.name).splitlines():
+                    console.print(f"  {line}")
             console.print()
 
 

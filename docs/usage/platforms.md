@@ -27,6 +27,17 @@ sccs sync --category powershell_profile
 
 Fish-Kategorien (`fish_config`, `fish_functions`) sind durch `platforms: ["macos", "linux"]` automatisch ausgeschlossen — kein Fehler, kein Sync-Versuch.
 
+### Windows-CLI-Tools im Doctor (zoxide, Coreutils) — ab v2.43.0
+
+`sccs doctor` kann optional prüfen, ob **zoxide** und **Microsoft Coreutils** installiert sind, und bei der Installation via `winget` helfen. Aktivierung in `~/.config/sccs/config.yaml`:
+
+```yaml
+doctor:
+  cli_tools: [zoxide, coreutils]
+```
+
+Coreutils (`Microsoft.Coreutils`) bringt PowerShell die nativen Unix-Textwerkzeuge (`cat`/`grep`/`wc`/`cut`/`xargs`); `winget list` erkennt auch eine Installation, die noch nicht auf dem PATH liegt (WinGet-Links-Falle), und `doctor check` zeigt dann einen kopierbaren PowerShell-PATH-Block. Details im [doctor-Guide](doctor.md). Hinweis: zoxide braucht zusätzlich `zoxide init powershell` im Profil für den `z`-Befehl.
+
 ### Fish → PowerShell Konvertierung
 
 Auf macOS/Linux generiert ein einmaliger CLI-Aufruf ein modulares PowerShell-Profil aus deiner Fish-Konfiguration:
@@ -82,6 +93,17 @@ sccs sync --category powershell_profile
 ```
 
 Fish categories (`fish_config`, `fish_functions`) carry `platforms: ["macos", "linux"]` and are skipped automatically on Windows — no error, no sync attempt.
+
+### Windows CLI tools in the doctor (zoxide, Coreutils) — since v2.43.0
+
+`sccs doctor` can optionally check whether **zoxide** and **Microsoft Coreutils** are installed and help install them via `winget`. Enable it in `~/.config/sccs/config.yaml`:
+
+```yaml
+doctor:
+  cli_tools: [zoxide, coreutils]
+```
+
+Coreutils (`Microsoft.Coreutils`) gives PowerShell the native UNIX text tools (`cat`/`grep`/`wc`/`cut`/`xargs`); `winget list` also detects an install that hasn't made it onto PATH yet (the WinGet-Links trap), and `doctor check` then prints a copy-paste PowerShell PATH block. See the [doctor guide](doctor.md). Note: zoxide additionally needs `zoxide init powershell` in the profile for the `z` command.
 
 ### Fish → PowerShell Conversion
 

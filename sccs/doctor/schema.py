@@ -565,6 +565,58 @@ class NodeInstallSpec(BaseModel):
         return v
 
 
+class CliToolSpec(BaseModel):
+    """An optional shell CLI tool the doctor can detect and help install.
+
+    Opt-in category (enabled via ``doctor.cli_tools``), distinct from the
+    Claude-Code-critical npx tools: these are shell-ergonomics helpers like
+    ``zoxide`` (smart cd) or Microsoft Coreutils (UNIX text tools on Windows).
+    A missing tool is informational only — it never fails ``doctor check``.
+    """
+
+    name: str = Field(description="Tool name (also the preset key, e.g. 'zoxide').")
+    detect_command: str = Field(
+        description="Binary looked up via shutil.which() to decide if the tool is on PATH.",
+    )
+    platforms: list[str] = Field(
+        default_factory=lambda: ["windows", "macos", "linux"],
+        description="Platforms this tool is checked on (get_current_platform() values).",
+    )
+    winget_id: str | None = Field(
+        default=None,
+        description=(
+            "winget package id (e.g. 'ajeetdsouza.zoxide'). On Windows, "
+            "`winget list --id <id>` is the authoritative install check "
+            "(independent of PATH — catches the WinGet-Links-not-on-PATH trap)."
+        ),
+    )
+    install: dict[str, NodeInstallSpec] = Field(
+        default_factory=dict,
+        description=(
+            "Per-platform install recipe (key = platform). Reuses NodeInstallSpec "
+            "(runnable/cmd/manual_block/label) — no shell, no sudo."
+        ),
+    )
+    version_args: list[str] | None = Field(
+        default=None,
+        description="Optional args to print the version (e.g. ['--version']) for the Version column.",
+    )
+
+    @field_validator("detect_command")
+    @classmethod
+    def _validate_detect_command(cls, v: str) -> str:
+        return _validate_safe_name(v, "detect_command")
+
+    @field_validator("platforms")
+    @classmethod
+    def _validate_platforms(cls, v: list[str]) -> list[str]:
+        allowed = {"windows", "macos", "linux"}
+        bad = [p for p in v if p not in allowed]
+        if bad:
+            raise ValueError(f"platforms must be a subset of {sorted(allowed)}: {bad!r}")
+        return v
+
+
 class DoctorConfig(BaseModel):
     """User-overridable doctor configuration."""
 
@@ -678,6 +730,19 @@ class DoctorConfig(BaseModel):
             "explicitly to disable protection entirely."
         ),
     )
+    cli_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Opt-in list of built-in CLI-tool preset names to check (e.g. "
+            "['zoxide', 'coreutils']). Empty by default → no extra rows. Each "
+            "name resolves to a BUILTIN_CLI_TOOLS entry; unknown names are "
+            "ignored. These are shell-ergonomics helpers (informational only)."
+        ),
+    )
+    extra_cli_tools: list[CliToolSpec] = Field(
+        default_factory=list,
+        description="Additional fully-specified CLI tools appended to the resolved cli_tools.",
+    )
 
     def effective_plugins(self) -> list[PluginSpec]:
         """Return plugins to check: override or default, plus extras."""
@@ -755,3 +820,15 @@ class DoctorConfig(BaseModel):
             list(self.status_line_checks) if self.status_line_checks is not None else list(DEFAULT_STATUS_LINE_CHECKS)
         )
         return base + list(self.extra_status_line_checks)
+
+    def effective_cli_tools(self) -> list[CliToolSpec]:
+        """Resolve opt-in cli_tools preset names + extras into specs.
+
+        Names are matched against BUILTIN_CLI_TOOLS; unknown names are skipped
+        silently (so a typo never crashes the doctor). Returns [] when nothing
+        is enabled, keeping the default report unchanged.
+        """
+        from sccs.doctor.defaults import BUILTIN_CLI_TOOLS
+
+        resolved = [BUILTIN_CLI_TOOLS[name] for name in self.cli_tools if name in BUILTIN_CLI_TOOLS]
+        return resolved + list(self.extra_cli_tools)

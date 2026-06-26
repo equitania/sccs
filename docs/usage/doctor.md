@@ -29,11 +29,23 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 
 `sccs doctor check` prüft standardmäßig **live**, ob für die doctor-verwalteten npx-Tools und Plugins eine neuere Version verfügbar ist, und markiert sie als `OUTDATED` (Detail z.B. `update available: v1.6.0`) plus eine Hinweiszeile „Updates available — run `sccs doctor update`". Quellen: npx-Tools via `npm view <npm_package> version` (read-only Registry-Query, nur für Tools mit gesetztem `npm_package` wie `@opengsd/gsd-core`), Plugins via live-refreshtem Marketplace-Manifest (`claude plugin marketplace update <name>`). **Ein verfügbares Update ist nur ein Hinweis** und ändert den Exit-Code NICHT (Exit 1 bleibt fehlenden/kaputten Komponenten vorbehalten → CI-freundlich). Jeder Netzwerkfehler degradiert still (keine Falschmeldung). `--no-update-check` schaltet die Prüfung ab → vollständig offline und schnell.
 
+### Optionale CLI-Tools (zoxide, Coreutils) — ab v2.43.0
+
+Opt-in: aktiviere sie in `~/.config/sccs/config.yaml` über Preset-Namen:
+
+```yaml
+doctor:
+  cli_tools: [zoxide, coreutils]
+```
+
+`zoxide` (smarter `cd`) wird auf **allen** Plattformen geprüft (winget/`brew install zoxide`/Install-Script), **Microsoft Coreutils** (`Microsoft.Coreutils`, Rust-uutils-Port von `cat`/`grep`/`wc`/`cut`/`xargs`) **nur Windows** — gibt PowerShell dieselben Unix-Befehle wie Linux/macOS/WSL. Erkennung: `which` für „auf PATH", auf Windows zusätzlich `winget list --id <id>` als autoritative Install-Prüfung (fängt die WinGet-Links-nicht-auf-PATH-Falle). Zustände: `OK` / gelb „installed, not on PATH" (+ PowerShell-PATH-Copy-Paste-Block unter der Tabelle) / blau „not installed (optional)". **Nur Hinweis — fehlend = kein Exit 1.** `doctor install` bietet `winget install`/`brew install` (confirm-gated); SCCS mutiert nie selbst PATH/Profil. Hinweis: zoxide braucht zusätzlich `zoxide init <shell>` im Profil für den `z`-Befehl (bewusst nicht durch den Doctor — er stellt nur die Binary sicher); Coreutils braucht keine Profil-Init. Shell-Conflicts (PS-Aliase `cat`/`sort`/`tee` gewinnen gegen die `.exe` → mit `cat.exe`/`sort.exe` aufrufen): siehe <https://github.com/microsoft/coreutils#shell-conflicts>.
+
 ### Was wird geprüft?
 
 | Komponente | Check (`check`) | Reparatur (`install` / `update`) |
 |---|---|---|
 | **Node.js** | installiert + Mindestversion (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), Manual-Block für Linux (NodeSource, sudo) |
+| **CLI-Tools** (opt-in: `zoxide`, `coreutils`) | `which` + (Windows) `winget list`; `on_path` / `installed_not_on_path` / `missing` — **informativ, nie Exit 1** | `winget install`/`brew install` (confirm) bzw. PowerShell-PATH-Block; SCCS mutiert nie Profil/Umgebung |
 | **`claude` CLI** | Binary auf PATH | `npm install -g @anthropic-ai/claude-code` |
 | **Claude-Plugins** | je nach Marketplace via `claude plugin list`; **Update verfügbar** via Marketplace-Manifest (v2.42.0) | `claude plugin install/update <name>@<marketplace>` mit korrektem `--scope <user/project/local/managed>` |
 | **npx-Tools** (z.B. `@opengsd/gsd-core`, `playwright-cli`) | Binary auf PATH **oder** State-File-Marker (für Tools die kein Binary droppen); **Update verfügbar** via `npm view` (v2.42.0, nur bei gesetztem `npm_package`) | `npm install -g <pkg>@latest` bzw. `npx -y <pkg> …` |
@@ -229,11 +241,23 @@ sccs doctor update               # Update plugins + refresh npx tools
 
 `sccs doctor check` checks **live** by default whether a newer version of the doctor-managed npx tools and plugins is available, marking them `OUTDATED` (detail e.g. `update available: v1.6.0`) plus an "Updates available — run `sccs doctor update`" hint line. Sources: npx tools via `npm view <npm_package> version` (read-only registry query, only for tools with an `npm_package` set such as `@opengsd/gsd-core`), plugins via the live-refreshed marketplace manifest (`claude plugin marketplace update <name>`). **An available update is informational only** and does NOT change the exit code (exit 1 stays reserved for missing/broken components → CI-friendly). Any network failure degrades silently (no false alarm). `--no-update-check` disables the check → fully offline and fast.
 
+### Optional CLI tools (zoxide, Coreutils) — since v2.43.0
+
+Opt-in: enable them in `~/.config/sccs/config.yaml` via preset names:
+
+```yaml
+doctor:
+  cli_tools: [zoxide, coreutils]
+```
+
+`zoxide` (smart `cd`) is checked on **all** platforms (winget / `brew install zoxide` / install script); **Microsoft Coreutils** (`Microsoft.Coreutils`, the Rust uutils port of `cat`/`grep`/`wc`/`cut`/`xargs`) is **Windows-only** — it gives PowerShell the same UNIX commands as Linux/macOS/WSL. Detection: `which` for "on PATH"; on Windows a `winget list --id <id>` fallback is the authoritative install check (catches the WinGet-Links-not-on-PATH trap). States: `OK` / yellow "installed, not on PATH" (+ a copy-paste PowerShell PATH block below the table) / blue "not installed (optional)". **Informational only — missing = no exit 1.** `doctor install` offers `winget install` / `brew install` (confirm-gated); SCCS never edits PATH/profile itself. Note: zoxide also needs `zoxide init <shell>` in the profile for the `z` command (intentionally not done by the doctor — it only ensures the binary); Coreutils needs no profile init. Shell conflicts (PowerShell aliases `cat`/`sort`/`tee` win over the `.exe` → call `cat.exe`/`sort.exe`): see <https://github.com/microsoft/coreutils#shell-conflicts>.
+
 ### What is checked?
 
 | Component | Check (`check`) | Repair (`install` / `update`) |
 |---|---|---|
 | **Node.js** | installed + minimum major version (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), manual block for Linux (NodeSource, sudo) |
+| **CLI tools** (opt-in: `zoxide`, `coreutils`) | `which` + (Windows) `winget list`; `on_path` / `installed_not_on_path` / `missing` — **informational, never exit 1** | `winget install` / `brew install` (confirm) or a PowerShell PATH block; SCCS never mutates profile/environment |
 | **`claude` CLI** | binary on PATH | `npm install -g @anthropic-ai/claude-code` |
 | **Claude plugins** | per marketplace via `claude plugin list`; **update available** via marketplace manifest (v2.42.0) | `claude plugin install/update <name>@<marketplace>` with the correct `--scope <user/project/local/managed>` |
 | **npx tools** (e.g. `@opengsd/gsd-core`, `playwright-cli`) | binary on PATH **or** state-file marker (for tools that don't drop a binary); **update available** via `npm view` (v2.42.0, only when `npm_package` is set) | `npm install -g <pkg>@latest` resp. `npx -y <pkg> …` |

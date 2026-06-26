@@ -58,6 +58,14 @@ def _run(
             check=False,
             capture_output=capture,
             text=True,
+            # Decode child output as UTF-8 regardless of the OS locale. On
+            # Windows `text=True` alone defaults to the cp1252 code page, which
+            # crashes the subprocess reader thread on the UTF-8 bytes that
+            # `claude plugin list` / `npm` emit (box-drawing glyphs, emoji) —
+            # truncating stdout and making the doctor report plugins falsely
+            # MISSING. `errors="replace"` keeps parsing robust against odd bytes.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             # Doctor child processes are non-interactive by contract — any
             # subprocess that asks for stdin should fail fast, not hang the
@@ -158,6 +166,30 @@ def run_npm_view_version(package: str) -> str | None:
     if proc.returncode != 0:
         return None
     return (proc.stdout or "").strip() or None
+
+
+def run_winget_list(winget_id: str) -> bool:
+    """Return True if `winget list --id <winget_id> -e` reports the package.
+
+    Used on Windows as the authoritative install check for optional CLI tools
+    (zoxide, Microsoft Coreutils): it reflects whether the package is installed
+    regardless of whether its binary directory made it onto PATH (the
+    WinGet-Links-not-on-PATH trap). Best-effort — winget missing / non-Windows /
+    timeout all degrade to False. `winget` passes `_SAFE_HEAD_PATTERN`;
+    `winget_id` is argv[3] (never the validated head).
+    """
+    if not winget_id:
+        return False
+    try:
+        proc = _run(["winget", "list", "--id", winget_id, "-e"], timeout=30, check=False)
+    except DoctorError:
+        return False
+    if proc.returncode != 0:
+        return False
+    # winget prints a "No installed package found …" line (exit 0 on some
+    # versions) when nothing matches; treat the id appearing in stdout as the
+    # signal. winget echoes the exact id in the result table.
+    return winget_id.lower() in (proc.stdout or "").lower()
 
 
 def run_claude_marketplace_update(name: str) -> bool:
