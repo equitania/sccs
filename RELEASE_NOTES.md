@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.43.2 (26.06.2026)
+
+### Fixed
+- **Windows: `path: npm-prefix-bin` no longer reports a false MISSING, and its PATH-fix block is PowerShell.** Two bugs on the same doctor row. (1) `_resolve_npm_prefix_bin()` always appended `/bin`, but on Windows npm puts global executables **directly in the prefix** (`C:\Users\…\AppData\Roaming\npm\playwright-cli.CMD` — no `bin\` subdir), so the check pointed at a non-existent directory and stayed MISSING even when the real dir was on PATH. It now returns the prefix itself on Windows (`<prefix>/bin` stays on Unix); a `is_windows` parameter makes it testable. (2) `_path_prefix_actions` only emitted `fish_add_path` / `~/.bashrc` / `~/.zshrc` snippets — useless in PowerShell. On Windows it now emits a PowerShell block (persistent User PATH via `[Environment]::SetEnvironmentVariable('Path', …, 'User')`, idempotent, plus the temporary `$env:Path` form). Non-Windows output is unchanged. Print-only — SCCS never edits the environment itself.
+
+## Version 2.43.1 (26.06.2026)
+
+### Fixed
+- **Windows: `npm`/`npx` (`.cmd` wrappers) are now launchable via subprocess.** On Windows `npm`/`npx` are batch wrappers (`npm.cmd`/`npx.cmd`), not real `.exe` files; `subprocess.run(shell=False)` → CreateProcess cannot launch a `.cmd`/`.bat` directly and raised `FileNotFoundError`. This broke `sccs doctor install` (`Command not found: npx` / `npm` for gsd-core and playwright-cli) **and** every npm-querying detector (`npm config get prefix`, `npm root -g`), which falsely reported "npm not on PATH". New `_resolve_exec_command()` in `runner.py` resolves the wrapper via `shutil.which` and, on Windows for a `.cmd`/`.bat` target, launches it shell-free through `cmd.exe /c <resolved-path> <args>` (the HARD RULE "never `shell=True`" stays intact; a metacharacter guard `& | < > ^ % " ( ) !` + CR/LF refuses any injection-bearing argument). Real `.exe` targets and every non-Windows platform are returned untouched (no-op), and error messages still name the original command (`Command not found: npm`).
+
+### Notes
+- 12 new tests across the two fixes (`.cmd` resolution 7, npm-prefix-bin/PowerShell 5); 1102 total. `ruff` / `mypy` clean. Verified on macOS: `_resolve_exec_command` rewrites only Windows `.cmd` targets; `_resolve_npm_prefix_bin(is_windows=True)` drops the `bin` suffix; the Windows PATH block contains `SetEnvironmentVariable`/`$env:Path` and no shell snippets.
+
 ## Version 2.43.0 (26.06.2026)
 
 ### Added

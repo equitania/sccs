@@ -11,9 +11,17 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess  # nosec B404 - subprocess is intentional, see HARD RULES above
+
+# Characters that cmd.exe treats specially. When we have to launch a Windows
+# batch wrapper (npm.cmd/npx.cmd) via `cmd.exe /c`, any argument containing
+# one of these is refused outright — defense-in-depth so a wrapper invocation
+# can never become a shell-injection vector (our package/flag args never carry
+# them, so this guard is invisible in practice).
+_CMD_METACHARS = frozenset('&|<>^%"()!\r\n')
 
 # Allowlist for the head (program) of any command we execute. Same character
 # class as sccs/git/operations.py:_GIT_REMOTE_PATTERN, plus '/' and '@' so we
@@ -41,6 +49,39 @@ def _validate_head(value: str, label: str = "command") -> None:
         raise DoctorError("sccs doctor refuses to invoke sudo")
 
 
+def _resolve_exec_command(
+    cmd: list[str],
+    *,
+    is_windows: bool,
+    which=None,
+) -> list[str]:
+    """Rewrite a command so a Windows batch wrapper (npm.cmd/npx.cmd) is launchable.
+
+    On Windows `npm`/`npx` are `.cmd` batch wrappers, not real `.exe` files;
+    `subprocess.run(shell=False)` → CreateProcess cannot launch a `.cmd`/`.bat`
+    directly (only PE executables) and raises FileNotFoundError. The documented
+    shell-free fix is to invoke the wrapper through the command interpreter:
+    `cmd.exe /c <resolved-path> <args>` (NOT shell=True — argv stays a list, no
+    string interpolation). Real `.exe` targets and every non-Windows platform
+    are returned untouched, so behaviour off-Windows is identical to before.
+
+    Pure + injectable (`which`) for testing.
+    """
+    if not is_windows or not cmd:
+        return cmd
+    resolver = which if which is not None else shutil.which
+    resolved = resolver(cmd[0])
+    if resolved is None:
+        return cmd  # let subprocess raise the usual "Command not found"
+    if resolved.lower().endswith((".cmd", ".bat")):
+        bad = [a for a in cmd[1:] if any(ch in _CMD_METACHARS for ch in a)]
+        if bad:
+            raise DoctorError(f"refusing to pass cmd.exe metacharacters to a batch wrapper: {bad!r}")
+        comspec = os.environ.get("COMSPEC") or "cmd.exe"
+        return [comspec, "/c", resolved, *cmd[1:]]
+    return cmd  # real .exe — CreateProcess handles it as today
+
+
 def _run(
     cmd: list[str],
     *,
@@ -52,9 +93,10 @@ def _run(
     if not cmd:
         raise DoctorError("Empty command")
     _validate_head(cmd[0])
+    exec_cmd = _resolve_exec_command(cmd, is_windows=(os.name == "nt"))
     try:
         result = subprocess.run(  # nosec B603 - shell=False, head validated above
-            cmd,
+            exec_cmd,
             check=False,
             capture_output=capture,
             text=True,

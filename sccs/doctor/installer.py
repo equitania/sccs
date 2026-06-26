@@ -371,47 +371,85 @@ def _marketplace_missing_actions(statuses: list[MarketplaceStatus]) -> list[Doct
     return actions
 
 
-def _path_prefix_actions(statuses: list[PathPrefixStatus]) -> list[DoctorAction]:
+def _powershell_path_block(label: str, purpose: str, expected_path: str) -> str:
+    """PowerShell PATH-fix instructions for Windows.
+
+    The bash/zsh/fish snippets are useless in PowerShell, so on Windows we emit
+    a persistent User-PATH edit via `[Environment]::SetEnvironmentVariable`
+    (idempotent) plus the temporary `$env:Path` form. Print-only — SCCS never
+    edits the environment itself.
+    """
+    return "\n".join(
+        [
+            f"# {label}: {purpose}",
+            f"# Detected: {expected_path} is not on your PATH.",
+            "",
+            "# Add it PERMANENTLY (User PATH, survives new shells):",
+            f"$dir = '{expected_path}'",
+            "$userPath = [Environment]::GetEnvironmentVariable('Path','User')",
+            "if (($userPath -split ';') -notcontains $dir) {",
+            "    [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $dir), 'User')",
+            "}",
+            "",
+            "# Or TEMPORARILY (current session only):",
+            "$env:Path += ';' + $dir",
+            "",
+            "# Then START A NEW PowerShell and re-run:",
+            "sccs doctor install",
+        ]
+    )
+
+
+def _path_prefix_actions(
+    statuses: list[PathPrefixStatus],
+    *,
+    platform_name: str | None = None,
+) -> list[DoctorAction]:
     """Surface PATH-mismatch issues (e.g. user changed npm prefix but PATH
     in the current shell still points to the system prefix).
 
     The block is print-only: SCCS cannot mutate the user's shell rc files.
     `blocks_downstream=True` so any action that *uses* the npm-installed
     binary (post_install steps, browser-bundle fetches) is reported as
-    `skipped` rather than failing with `command not found`.
+    `skipped` rather than failing with `command not found`. On Windows the
+    snippet is PowerShell; elsewhere bash/zsh/fish.
     """
+    platform = platform_name or get_current_platform()
     actions: list[DoctorAction] = []
     for st in statuses:
         if st.ok:
             continue
-        block_lines: list[str] = []
-        block_lines.append(f"# {st.spec.label}: {st.spec.purpose}")
         if st.skipped_reason:
-            block_lines.append(f"# Skipped: {st.skipped_reason}")
             continue
-        block_lines.append(f"# Detected: {st.expected_path} is not on $PATH for this shell session.")
-        block_lines.append("")
-        block_lines.append("# Add it PERMANENTLY (survives new shells):")
-        block_lines.append("# fish (3.2+, idempotent):")
-        block_lines.append(f"fish_add_path {st.expected_path}")
-        block_lines.append("# bash — append to ~/.bashrc:")
-        block_lines.append(f"echo 'export PATH=\"{st.expected_path}:$PATH\"' >> ~/.bashrc")
-        block_lines.append("# zsh — append to ~/.zshrc:")
-        block_lines.append(f"echo 'export PATH=\"{st.expected_path}:$PATH\"' >> ~/.zshrc")
-        block_lines.append("")
-        block_lines.append("# Or TEMPORARILY (current session only):")
-        block_lines.append("# bash/zsh:")
-        block_lines.append(f'export PATH="{st.expected_path}:$PATH"')
-        block_lines.append("# fish:")
-        block_lines.append(f"set -gx PATH {st.expected_path} $PATH")
-        block_lines.append("")
-        block_lines.append("# After updating, START A NEW SHELL and re-run:")
-        block_lines.append("sccs doctor install")
+        if platform == "windows":
+            manual_block = _powershell_path_block(st.spec.label, st.spec.purpose, st.expected_path)
+        else:
+            block_lines: list[str] = []
+            block_lines.append(f"# {st.spec.label}: {st.spec.purpose}")
+            block_lines.append(f"# Detected: {st.expected_path} is not on $PATH for this shell session.")
+            block_lines.append("")
+            block_lines.append("# Add it PERMANENTLY (survives new shells):")
+            block_lines.append("# fish (3.2+, idempotent):")
+            block_lines.append(f"fish_add_path {st.expected_path}")
+            block_lines.append("# bash — append to ~/.bashrc:")
+            block_lines.append(f"echo 'export PATH=\"{st.expected_path}:$PATH\"' >> ~/.bashrc")
+            block_lines.append("# zsh — append to ~/.zshrc:")
+            block_lines.append(f"echo 'export PATH=\"{st.expected_path}:$PATH\"' >> ~/.zshrc")
+            block_lines.append("")
+            block_lines.append("# Or TEMPORARILY (current session only):")
+            block_lines.append("# bash/zsh:")
+            block_lines.append(f'export PATH="{st.expected_path}:$PATH"')
+            block_lines.append("# fish:")
+            block_lines.append(f"set -gx PATH {st.expected_path} $PATH")
+            block_lines.append("")
+            block_lines.append("# After updating, START A NEW SHELL and re-run:")
+            block_lines.append("sccs doctor install")
+            manual_block = "\n".join(block_lines)
         actions.append(
             DoctorAction(
                 label=f"add to PATH: {st.spec.label}",
                 cmd=None,
-                manual_block="\n".join(block_lines),
+                manual_block=manual_block,
                 runnable=False,
                 component=f"path:{st.spec.identifier}",
                 blocks_downstream=True,

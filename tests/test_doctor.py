@@ -4991,3 +4991,150 @@ class TestCliToolReporting:
         cli = ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude")
         # has_problems takes no cli_tools arg → missing tools can't affect it by design.
         assert has_problems(node=node, claude_cli=cli, plugins=[], npx_tools=[]) is False
+
+
+class TestResolveExecCommand:
+    """v2.43.1: Windows npm/npx are .cmd wrappers — subprocess(shell=False)
+    can't launch them directly, so _run routes them through `cmd.exe /c`."""
+
+    def test_windows_cmd_wrapper_is_routed_through_comspec(self, monkeypatch):
+        from sccs.doctor.runner import _resolve_exec_command
+
+        monkeypatch.setenv("COMSPEC", "C:\\Windows\\System32\\cmd.exe")
+        out = _resolve_exec_command(
+            ["npm", "install", "-g", "@playwright/cli@latest"],
+            is_windows=True,
+            which=lambda _: "C:\\Program Files\\nodejs\\npm.cmd",
+        )
+        assert out == [
+            "C:\\Windows\\System32\\cmd.exe",
+            "/c",
+            "C:\\Program Files\\nodejs\\npm.cmd",
+            "install",
+            "-g",
+            "@playwright/cli@latest",
+        ]
+
+    def test_windows_comspec_falls_back_to_cmd_exe(self, monkeypatch):
+        from sccs.doctor.runner import _resolve_exec_command
+
+        monkeypatch.delenv("COMSPEC", raising=False)
+        out = _resolve_exec_command(["npx", "-y", "x"], is_windows=True, which=lambda _: "C:\\n\\npx.cmd")
+        assert out[0] == "cmd.exe"
+        assert out[1:3] == ["/c", "C:\\n\\npx.cmd"]
+
+    def test_windows_real_exe_is_unchanged(self):
+        from sccs.doctor.runner import _resolve_exec_command
+
+        cmd = ["node", "--version"]
+        assert _resolve_exec_command(cmd, is_windows=True, which=lambda _: "C:\\n\\node.exe") == cmd
+
+    def test_windows_unresolved_is_unchanged(self):
+        from sccs.doctor.runner import _resolve_exec_command
+
+        cmd = ["npm", "root", "-g"]
+        assert _resolve_exec_command(cmd, is_windows=True, which=lambda _: None) == cmd
+
+    def test_non_windows_is_always_noop(self):
+        from sccs.doctor.runner import _resolve_exec_command
+
+        cmd = ["npm", "install"]
+        # Even if which would resolve a .cmd, off-Windows we never rewrite.
+        assert _resolve_exec_command(cmd, is_windows=False, which=lambda _: "/x/npm.cmd") == cmd
+
+    def test_metachar_guard_rejects_injection(self):
+        from sccs.doctor.runner import DoctorError, _resolve_exec_command
+
+        with pytest.raises(DoctorError, match="metacharacter"):
+            _resolve_exec_command(
+                ["npm", "install", "x & calc.exe"],
+                is_windows=True,
+                which=lambda _: "C:\\n\\npm.cmd",
+            )
+
+    def test_run_routes_cmd_wrapper_on_windows(self, monkeypatch):
+        from sccs.doctor import runner
+        from sccs.doctor.runner import _run
+
+        monkeypatch.setattr(runner.os, "name", "nt")
+        monkeypatch.setattr(runner.shutil, "which", lambda _: "C:\\n\\npm.cmd")
+        monkeypatch.setenv("COMSPEC", "cmd.exe")
+        fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+        with patch("sccs.doctor.runner.subprocess.run", return_value=fake) as run_mock:
+            _run(["npm", "root", "-g"])
+        argv = run_mock.call_args.args[0]
+        assert argv[:4] == ["cmd.exe", "/c", "C:\\n\\npm.cmd", "root"]
+
+
+class TestNpmPrefixBinWindows:
+    """v2.43.2: on Windows the npm global bin IS the prefix (no /bin subdir)."""
+
+    def _mock_prefix(self, monkeypatch, prefix):
+        fake = subprocess.CompletedProcess(args=[], returncode=0, stdout=prefix + "\n", stderr="")
+        monkeypatch.setattr("sccs.doctor.detectors._run", lambda *a, **k: fake)
+
+    def test_windows_returns_prefix_without_bin(self, monkeypatch):
+        from sccs.doctor.detectors import _resolve_npm_prefix_bin
+
+        self._mock_prefix(monkeypatch, "C:\\Users\\u\\AppData\\Roaming\\npm")
+        out = _resolve_npm_prefix_bin(is_windows=True)
+        assert out == "C:\\Users\\u\\AppData\\Roaming\\npm"
+        assert not out.endswith("bin")
+
+    def test_unix_keeps_bin_suffix(self, monkeypatch):
+        from sccs.doctor.detectors import _resolve_npm_prefix_bin
+
+        self._mock_prefix(monkeypatch, "/home/u/.npm-global")
+        out = _resolve_npm_prefix_bin(is_windows=False)
+        assert out == str(Path("/home/u/.npm-global") / "bin")
+
+    def test_path_detector_matches_prefix_on_path(self, monkeypatch):
+        # Use a Unix-style prefix so os.pathsep splitting works on the CI host
+        # (a Windows drive colon would be split by macOS/Linux ':'). Proves the
+        # detector marks the resolved prefix dir on_path once /bin is dropped.
+        from sccs.doctor.detectors import PathPrefixDetector
+        from sccs.doctor.schema import PathPrefixCheckSpec
+
+        prefix = "/home/u/.npm-global"
+        monkeypatch.setattr("sccs.doctor.detectors._resolve_npm_prefix_bin", lambda: prefix)
+        det = PathPrefixDetector(env={"PATH": prefix})
+        spec = PathPrefixCheckSpec(identifier="npm-prefix-bin", label="npm global bin in PATH", purpose="x")
+        st = det.get_statuses([spec])[0]
+        assert st.in_path is True
+
+
+class TestPathPrefixActionsPowerShell:
+    """v2.43.2: PATH-fix block is PowerShell on Windows, bash/zsh/fish elsewhere."""
+
+    def _status(self):
+        from sccs.doctor.detectors import PathPrefixStatus
+        from sccs.doctor.schema import PathPrefixCheckSpec
+
+        return PathPrefixStatus(
+            spec=PathPrefixCheckSpec(identifier="npm-prefix-bin", label="npm global bin in PATH", purpose="needed"),
+            expected_path="C:\\Users\\u\\AppData\\Roaming\\npm",
+            in_path=False,
+        )
+
+    def test_windows_emits_powershell(self):
+        from sccs.doctor.installer import _path_prefix_actions
+
+        block = _path_prefix_actions([self._status()], platform_name="windows")[0].manual_block
+        assert "[Environment]::SetEnvironmentVariable('Path'" in block
+        assert "$env:Path" in block
+        assert "fish_add_path" not in block
+        assert "~/.bashrc" not in block
+
+    def test_non_windows_emits_bash_fish(self):
+        from sccs.doctor.detectors import PathPrefixStatus
+        from sccs.doctor.installer import _path_prefix_actions
+        from sccs.doctor.schema import PathPrefixCheckSpec
+
+        st = PathPrefixStatus(
+            spec=PathPrefixCheckSpec(identifier="npm-prefix-bin", label="npm global bin in PATH", purpose="needed"),
+            expected_path="/home/u/.npm-global/bin",
+            in_path=False,
+        )
+        block = _path_prefix_actions([st], platform_name="linux")[0].manual_block
+        assert "fish_add_path /home/u/.npm-global/bin" in block
+        assert "SetEnvironmentVariable" not in block

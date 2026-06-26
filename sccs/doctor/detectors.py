@@ -784,8 +784,15 @@ def _resolve_npm_root_global() -> str | None:
     return raw.splitlines()[0].strip() or None
 
 
-def _resolve_npm_prefix_bin() -> str | None:
-    """Return `<npm config get prefix>/bin`, or None if npm is missing.
+def _resolve_npm_prefix_bin(*, is_windows: bool | None = None) -> str | None:
+    """Return the directory `npm install -g` puts executables in, or None.
+
+    On Unix that is `<npm config get prefix>/bin`; on **Windows** the global
+    binaries (`*.CMD` shims) land directly in `<prefix>` itself — there is no
+    `bin/` subdir (e.g. `C:\\Users\\u\\AppData\\Roaming\\npm\\playwright-cli.CMD`).
+    Appending `/bin` on Windows pointed the PATH check at a non-existent
+    directory, so the row stayed MISSING forever even though the real dir was
+    on PATH. `is_windows` is injectable for tests (default: `os.name == 'nt'`).
 
     Used by PathPrefixDetector to spot the Debian 13 follow-up failure mode:
     user fixes ownership by switching the prefix to `~/.npm-global`, but
@@ -793,6 +800,8 @@ def _resolve_npm_prefix_bin() -> str | None:
     next `playwright-cli install-browser …` dies with `command not found`
     even though `npm install -g @playwright/cli` succeeded one second earlier.
     """
+    if is_windows is None:
+        is_windows = os.name == "nt"
     try:
         proc = _run(["npm", "config", "get", "prefix"], check=True, capture=True, timeout=15)
     except DoctorError:
@@ -803,7 +812,8 @@ def _resolve_npm_prefix_bin() -> str | None:
     prefix = raw.splitlines()[0].strip()
     if not prefix:
         return None
-    return str(Path(prefix) / "bin")
+    # Windows: the prefix dir IS the global bin dir; Unix: <prefix>/bin.
+    return str(Path(prefix)) if is_windows else str(Path(prefix) / "bin")
 
 
 class PathPrefixDetector:

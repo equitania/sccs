@@ -52,7 +52,7 @@ doctor:
 | **Bundled Skills** (z.B. `playwright-cli`-Skill) | `SKILL.md` im konfigurierten Target-Verzeichnis existiert | Kopiert das Skill-Verzeichnis aus dem npm-Paket nach `~/.claude/skills/<name>/` |
 | **Browser-Bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` Verzeichnisse vorhanden | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem-Permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` (lib) **und** `<npm prefix>/bin` (v2.32.1) schreibbar | Manual-Block — SCCS ruft niemals `sudo` auf; System-prefix → nur user-local Prefix |
-| **PATH-Prefixes** (v2.28.0) | `<npm config get prefix>/bin` ist auf `$PATH` der aktuellen Shell | Manual-Block mit Snippets für bash/zsh/fish — neue Shell starten und `sccs doctor install` erneut ausführen |
+| **PATH-Prefixes** (v2.28.0) | npm-Global-Bin auf `$PATH` der aktuellen Shell — unter Windows = `<npm config get prefix>` (Prefix selbst, kein `\bin`, v2.43.2), sonst `<prefix>/bin` | Manual-Block: **PowerShell** unter Windows (`SetEnvironmentVariable`/`$env:Path`, v2.43.2), sonst bash/zsh/fish — neue Shell starten und `sccs doctor install` erneut ausführen |
 | **Statusline** (v2.29.0) | `~/.claude/settings.json` → `statusLine.command` zeigt auf existierende Binary + Skript; Apple-Silicon-Homebrew-Cellar-Pfade nicht stale | Auto-Fix für `stale_cellar` (rewrite zu `/opt/homebrew/bin/<binary>` mit Backup); Manual-Block für `missing_binary`/`missing_script`/`missing`; `opaque` (Pipes/Env-Prefix) wird informativ angezeigt aber nicht eskaliert |
 
 ### Beispiel-Tabelle (`sccs doctor check`)
@@ -264,7 +264,7 @@ doctor:
 | **Bundled skills** (e.g. the `playwright-cli` skill) | `SKILL.md` exists in the configured target directory | Copies the skill directory out of the npm package into `~/.claude/skills/<name>/` |
 | **Browser bundles** (Playwright Chromium + Firefox) | `<cache>/<bundle>-*` directories present | `playwright-cli install-browser <bundle>` (idempotent) |
 | **Filesystem permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` (lib) **and** `<npm prefix>/bin` (v2.32.1) writable | manual block — SCCS never invokes `sudo`; system prefix → user-local prefix only |
-| **PATH prefixes** (v2.28.0) | `<npm config get prefix>/bin` is on `$PATH` for the current shell | manual block with bash/zsh/fish snippets — start a new shell and re-run `sccs doctor install` |
+| **PATH prefixes** (v2.28.0) | npm global bin on `$PATH` for the current shell — on Windows = `<npm config get prefix>` (the prefix itself, no `\bin`, v2.43.2), otherwise `<prefix>/bin` | manual block: **PowerShell** on Windows (`SetEnvironmentVariable`/`$env:Path`, v2.43.2), otherwise bash/zsh/fish — start a new shell and re-run `sccs doctor install` |
 | **Statusline** (v2.29.0) | `~/.claude/settings.json` → `statusLine.command` resolves to existing binary + script; Apple-Silicon Homebrew Cellar paths are not stale | auto-fix for `stale_cellar` (rewrite to `/opt/homebrew/bin/<binary>` with backup); manual block for `missing_binary`/`missing_script`/`missing`; `opaque` (pipelines/env-prefix) shown as info but not escalated |
 
 ### Sample `sccs doctor check` table
