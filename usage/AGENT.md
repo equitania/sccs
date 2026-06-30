@@ -63,7 +63,7 @@
 | `sccs integrations trust-repo` | Register SCCS repository as trusted in Claude Desktop. | -n/--dry-run |
 | `sccs log` | Show sync history. | --last INTEGER |
 | `sccs status` | Show synchronization status. | -c/--category TEXT |
-| `sccs sync` | Synchronize files between local and repository. | -c/--category TEXT, -n/--dry-run, -f/--force local\|repo\|newer, -i/--interactive, --commit, --no-commit, --push, --no-push, --pull, --no-pull-check, --docs/--no-docs, --no-migrate |
+| `sccs sync` | Synchronize files between local and repository. | -c/--category TEXT, -n/--dry-run, -f/--force local\|repo\|newer, -i/--interactive, --commit, --no-commit, --push, --no-push, --pull, --no-pull-check, --docs/--no-docs, --migrate/--no-migrate |
 
 Notation: `[ARG]` optional positional · `ARG` required positional · `a|b` choice · `--flag` boolean.
 

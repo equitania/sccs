@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.44.0 (30.06.2026)
+
+### Changed
+- **`sccs sync` no longer proactively offers new default categories — the prompt is now opt-in.** Previously `sccs sync` would interrupt with "New categories available (3) … Add all 3 categories at once?" whenever the default config gained optional integrations (currently the three `opencode_*` categories, plus Pi) that the user's config was missing. Those integrations aren't for everyone, so the prompt should only appear on explicit request. The `--no-migrate` opt-out flag is replaced by a `--migrate/--no-migrate` boolean pair defaulting to **off**: a plain `sccs sync` (and any non-TTY/CI run) is now completely silent — no prompt, no notice. To adopt newly available categories, use the dedicated `sccs config upgrade` (unchanged) or pass `sccs sync --migrate`. `--no-migrate` stays valid as a no-op (backwards compatible). `_run_migration_check`'s early-exit is inverted (`if not migrate: return`); the `declined_categories` state logic is untouched and still applies under `--migrate`/`config upgrade`.
+
+### Notes
+- Tests flipped from opt-out to opt-in, plus a new "default sync is silent about new categories" assertion. `ruff` format/lint clean, build OK. Full suite verified on Linux CI (platform-independent change).
+
 ## Version 2.43.2 (26.06.2026)
 
 ### Fixed

@@ -130,7 +130,11 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.option("--pull", "do_pull", is_flag=True, help="Pull remote changes before sync")
 @click.option("--no-pull-check", is_flag=True, help="Skip remote status check before sync")
 @click.option("--docs/--no-docs", "do_docs", default=None, help="Regenerate hub README after sync (auto when --commit)")
-@click.option("--no-migrate", is_flag=True, help="Skip new-category migration check")
+@click.option(
+    "--migrate/--no-migrate",
+    default=False,
+    help="Offer newly available default categories during sync (default: off — use `sccs config upgrade`).",
+)
 @click.pass_context
 def sync(
     ctx: click.Context,
@@ -145,7 +149,7 @@ def sync(
     do_pull: bool,
     no_pull_check: bool,
     do_docs: bool,
-    no_migrate: bool,
+    migrate: bool,
 ) -> None:
     """Synchronize files between local and repository.
 
@@ -179,8 +183,9 @@ def sync(
         console.print_error(str(e))
         sys.exit(1)
 
-    # Check for new default categories
-    _run_migration_check(console, no_migrate, get_config_path())
+    # New-category check is opt-in (default off): only when --migrate is given.
+    # The dedicated path is `sccs config upgrade`.
+    _run_migration_check(console, migrate, get_config_path())
 
     repo_path = Path(config.repository.path).expanduser()
 
@@ -1188,16 +1193,18 @@ def _print_platform_hint(console: Console, cfg) -> None:
 
 def _run_migration_check(
     console: Console,
-    no_migrate: bool,
+    migrate: bool,
     config_path: Path | None = None,
 ) -> None:
     """
-    Check for new default categories and prompt user to adopt them.
+    Check for new default categories and prompt the user to adopt them.
 
-    Non-blocking: sync continues whether or not user adopts anything.
-    In non-TTY mode (CI), only prints a notice without interaction.
+    Opt-in: only runs when `migrate` is True (`sccs sync --migrate`). By
+    default `sccs sync` is silent about new categories — the dedicated path
+    is `sccs config upgrade`. Non-blocking: sync continues whether or not the
+    user adopts anything. In non-TTY mode (CI), only prints a notice.
     """
-    if no_migrate:
+    if not migrate:
         return
 
     raw_data = load_raw_user_data(config_path)

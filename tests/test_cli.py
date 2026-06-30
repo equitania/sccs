@@ -1410,10 +1410,46 @@ class TestMigrationCheck:
         mock_engine_cls.return_value = mock_engine
 
         runner = CliRunner()
-        # CliRunner is non-TTY by default → CI branch
-        result = runner.invoke(cli, ["sync", "--dry-run"])
+        # CliRunner is non-TTY by default → CI branch. The check is opt-in now,
+        # so the notice only appears with --migrate.
+        result = runner.invoke(cli, ["sync", "--migrate", "--dry-run"])
         assert result.exit_code == 0
         assert "Notice" in result.output or "new" in result.output.lower()
+
+    @patch("sccs.cli.load_config")
+    @patch("sccs.cli.get_remote_status", return_value={"up_to_date": True})
+    @patch("sccs.cli.SyncEngine")
+    @patch("sccs.cli.load_raw_user_data", return_value={})
+    @patch("sccs.cli.detect_new_categories", return_value=["new_cat"])
+    @patch("sccs.cli.get_categories_to_offer", return_value=["new_cat"])
+    @patch("sccs.cli.MigrationStateManager")
+    def test_sync_default_is_silent_about_new_categories(
+        self, mock_mgr, mock_offer, mock_detect, mock_raw, mock_engine_cls, mock_remote, mock_load
+    ):
+        """Without --migrate, sync never touches the migration check (opt-in)."""
+        mock_config = MagicMock()
+        mock_config.repository.path = "/tmp/repo"
+        mock_load.return_value = mock_config
+
+        mock_result = MagicMock()
+        mock_result.synced_items = 0
+        mock_result.conflicts = 0
+        mock_result.errors = 0
+        mock_result.success = True
+        mock_result.aborted = False
+        mock_result.category_results = {}
+
+        mock_engine = MagicMock()
+        mock_engine.sync.return_value = mock_result
+        mock_engine_cls.return_value = mock_engine
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["sync", "--dry-run"])
+        assert result.exit_code == 0
+        mock_offer.assert_not_called()
+        mock_detect.assert_not_called()
+        assert "Notice" not in result.output
+        assert "new categories available" not in result.output.lower()
 
 
 class TestIntegrationsStatusWithData:
@@ -1695,17 +1731,17 @@ class TestHelperFunctions:
         mock_cd.is_repo_trusted.assert_called_once()
         mock_console.print_integrations_status.assert_called_once()
 
-    def test_run_migration_check_no_migrate_flag(self):
-        """_run_migration_check returns immediately when no_migrate=True."""
+    def test_run_migration_check_off_by_default(self):
+        """_run_migration_check returns immediately when migrate=False (opt-in)."""
         from sccs.cli import _run_migration_check
 
         mock_console = MagicMock()
         with patch("sccs.cli.load_raw_user_data") as mock_raw:
-            _run_migration_check(mock_console, no_migrate=True)
+            _run_migration_check(mock_console, migrate=False)
             mock_raw.assert_not_called()
 
     def test_run_migration_check_ci_no_new_categories(self):
-        """In CI (non-TTY), no output when no new categories exist."""
+        """With migrate=True in CI (non-TTY), no output when nothing is new."""
         from sccs.cli import _run_migration_check
 
         mock_console = MagicMock()
@@ -1714,7 +1750,7 @@ class TestHelperFunctions:
             patch("sccs.cli.MigrationStateManager"),
             patch("sccs.cli.detect_new_categories", return_value=[]),
         ):
-            _run_migration_check(mock_console, no_migrate=False)
+            _run_migration_check(mock_console, migrate=True)
         mock_console.print_info.assert_not_called()
 
 

@@ -256,4 +256,20 @@ Before overwriting any file, SCCS creates timestamped backups:
     └── config.fish.20250123_143052.bak
 ```
 
+### Adopting new default categories (opt-in)
+
+When SCCS ships new default sync categories (e.g. the `opencode_*` or Pi integrations), `sccs sync`
+does **not** offer them automatically — those integrations aren't for everyone, so a plain `sync`
+stays silent (no prompt, no notice, CI-friendly).
+
+To adopt newly available categories, choose one of:
+
+```bash
+sccs config upgrade    # dedicated interactive flow (also re-offers previously declined ones)
+sccs sync --migrate    # opt-in: offer new categories as part of a sync run
+```
+
+`--no-migrate` remains valid as the (default) no-op. Categories you decline are remembered and not
+re-offered by `sccs sync --migrate`; use `sccs config upgrade` to revisit them.
+
 See also: [categories.md](categories.md), [doctor.md](doctor.md), [transfer.md](transfer.md), [memory-bridge.md](memory-bridge.md), [cli-reference.md](cli-reference.md)

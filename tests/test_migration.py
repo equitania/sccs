@@ -285,14 +285,22 @@ class TestLoadRawUserData:
 
 
 class TestCliNoMigrateFlag:
-    """Tests for --no-migrate flag on sync command."""
+    """Tests for the --migrate/--no-migrate flag on the sync command."""
 
     def test_no_migrate_flag_accepted(self):
-        """The --no-migrate flag is accepted without error."""
+        """The --no-migrate flag is accepted without error (still the default)."""
         runner = CliRunner()
         from sccs.cli import cli
 
         # This will fail because no config exists, but the flag should be parsed
         result = runner.invoke(cli, ["sync", "--no-migrate", "--dry-run"])
         # Should not fail with "no such option" error
+        assert "no such option" not in (result.output or "").lower()
+
+    def test_migrate_flag_accepted(self):
+        """The opt-in --migrate flag is accepted without error."""
+        runner = CliRunner()
+        from sccs.cli import cli
+
+        result = runner.invoke(cli, ["sync", "--migrate", "--dry-run"])
         assert "no such option" not in (result.output or "").lower()
