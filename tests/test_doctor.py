@@ -211,7 +211,10 @@ class TestNodeDetector:
         status = NodeDetector(platform_name="windows").get_status(min_major=20)
         assert status.installed is True
         assert status.meets_minimum is True
-        assert status.install_hint.cmd == ["winget", "install", "OpenJS.NodeJS"]
+        # Windows uses Chocolatey (print-only — bootstrapping choco needs elevation).
+        assert status.install_hint.runnable is False
+        assert "choco install nodejs" in (status.install_hint.manual_block or "")
+        assert "community.chocolatey.org/install.ps1" in (status.install_hint.manual_block or "")
 
 
 class TestPowerShellDetector:

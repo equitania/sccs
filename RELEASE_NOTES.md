@@ -1,5 +1,20 @@
 # Release Notes
 
+## Version 2.45.1 (30.06.2026)
+
+### Changed
+- **`sccs doctor` now recommends Chocolatey (not winget) for installing Node.js on Windows.** The Windows Node.js install hint was a runnable `winget install OpenJS.NodeJS`; it is now a print-only Chocolatey recipe (`runnable=False`, mirroring the Linux NodeSource block) because bootstrapping Chocolatey requires an *elevated* PowerShell that SCCS must never spawn on the user's behalf. Both `doctor check` and `doctor install` print, below the table:
+
+  ```text
+  powershell -c "irm https://community.chocolatey.org/install.ps1 | iex"
+  choco install nodejs
+  ```
+
+  `choco install nodejs` installs the latest Node (no hard-pinned version that would age in the codebase). winget was removed entirely for Windows Node; macOS (`brew install node`) and Linux (NodeSource) are unchanged. The PowerShell 7 check added in 2.45.0 still uses winget for `Microsoft.PowerShell` — that is unrelated and unchanged.
+
+### Notes
+- Test `test_current_node_passes` updated to assert the Chocolatey block; `docs/usage/doctor.md` (DE + EN) updated. `ruff`/`mypy` clean, build OK. Full suite runs on Linux CI.
+
 ## Version 2.45.0 (30.06.2026)
 
 ### Added

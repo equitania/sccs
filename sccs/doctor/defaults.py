@@ -272,10 +272,13 @@ DEFAULT_STATUS_LINE_CHECKS: list[StatusLineCheckSpec] = [
 # because the standard NodeSource recipe requires sudo, and SCCS never calls
 # sudo on the user's behalf.
 NODE_INSTALL: dict[str, NodeInstallSpec] = {
+    # Windows uses Chocolatey (runnable=False → print-only): bootstrapping
+    # Chocolatey needs an *elevated* PowerShell, which SCCS must never spawn on
+    # the user's behalf, so the recipe is shown for manual copy-paste only.
     "windows": NodeInstallSpec(
-        runnable=True,
-        cmd=["winget", "install", "OpenJS.NodeJS"],
-        label="install Node.js via winget",
+        runnable=False,
+        manual_block=('powershell -c "irm https://community.chocolatey.org/install.ps1 | iex"\nchoco install nodejs'),
+        label="install Node.js via Chocolatey (run in an ELEVATED PowerShell, then verify with `node -v`)",
     ),
     "macos": NodeInstallSpec(
         runnable=True,

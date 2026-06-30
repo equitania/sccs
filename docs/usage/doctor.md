@@ -44,7 +44,7 @@ doctor:
 
 | Komponente | Check (`check`) | Reparatur (`install` / `update`) |
 |---|---|---|
-| **Node.js** | installiert + Mindestversion (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), Manual-Block für Linux (NodeSource, sudo) |
+| **Node.js** | installiert + Mindestversion (≥ 20) | `brew install node` (macOS), Chocolatey-Block für Windows (`irm …/install.ps1 \| iex` → `choco install nodejs`, elevated, print-only), Manual-Block für Linux (NodeSource, sudo) |
 | **CLI-Tools** (opt-in: `zoxide`, `coreutils`) | `which` + (Windows) `winget list`; `on_path` / `installed_not_on_path` / `missing` — **informativ, nie Exit 1** | `winget install`/`brew install` (confirm) bzw. PowerShell-PATH-Block; SCCS mutiert nie Profil/Umgebung |
 | **`claude` CLI** | Binary auf PATH | `npm install -g @anthropic-ai/claude-code` |
 | **Claude-Plugins** | je nach Marketplace via `claude plugin list`; **Update verfügbar** via Marketplace-Manifest (v2.42.0) | `claude plugin install/update <name>@<marketplace>` mit korrektem `--scope <user/project/local/managed>` |
@@ -267,7 +267,7 @@ PowerShell 7+ not found — install (Windows 11):
 
 | Component | Check (`check`) | Repair (`install` / `update`) |
 |---|---|---|
-| **Node.js** | installed + minimum major version (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), manual block for Linux (NodeSource, sudo) |
+| **Node.js** | installed + minimum major version (≥ 20) | `brew install node` (macOS), Chocolatey block for Windows (`irm …/install.ps1 \| iex` → `choco install nodejs`, elevated, print-only), manual block for Linux (NodeSource, sudo) |
 | **PowerShell 7+** (Windows only, v2.45.0) | `pwsh --version` ≥ 7.x; `OK` / `OUTDATED` / `MISSING` — **informational, never exit 1** | suggestion only: `winget install/upgrade --id Microsoft.PowerShell` (printed, never executed) |
 | **CLI tools** (opt-in: `zoxide`, `coreutils`) | `which` + (Windows) `winget list`; `on_path` / `installed_not_on_path` / `missing` — **informational, never exit 1** | `winget install` / `brew install` (confirm) or a PowerShell PATH block; SCCS never mutates profile/environment |
 | **`claude` CLI** | binary on PATH | `npm install -g @anthropic-ai/claude-code` |
