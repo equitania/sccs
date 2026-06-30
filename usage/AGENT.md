@@ -39,7 +39,7 @@
 | `sccs config show` | Show current configuration. | — |
 | `sccs config upgrade` | Check for new default categories and add them to config. | — |
 | `sccs config validate` | Validate configuration file. | — |
-| `sccs convert fish-to-pwsh` | Generate a PowerShell profile from Fish shell configuration. | --src PATH, --dst PATH, --force, -n/--dry-run |
+| `sccs convert fish-to-pwsh` | Generate a PowerShell profile from Fish shell configuration. | --src PATH, --dst PATH, --force, -n/--dry-run, --conveniences/--no-conveniences |
 | `sccs diff` | Show diff for items. | [ITEM_NAME], -c/--category TEXT |
 | `sccs docs generate` | Generate hub README for the sync repository. | -n/--dry-run, --commit, --push |
 | `sccs doctor check` | Status table of Node.js, claude CLI, plugins, npx tools (+ opt-in CLI tools zoxide/coreutils); live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged); shows Node + CLI-tool install commands inline. | --update-check/--no-update-check |

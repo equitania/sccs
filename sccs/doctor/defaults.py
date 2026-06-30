@@ -19,6 +19,15 @@ from sccs.doctor.schema import (
 
 MIN_NODE_MAJOR = 22
 
+# PowerShell 7+ is the modern, cross-platform shell that the Fish→PowerShell
+# converter targets (its profile lives under ~/Documents/PowerShell, distinct
+# from the legacy Windows PowerShell 5.1). The doctor only *suggests* installing
+# or upgrading it on Windows via winget — it never executes the change itself.
+MIN_PWSH_MAJOR = 7
+PWSH_WINGET_ID = "Microsoft.PowerShell"
+PWSH_INSTALL_CMD: list[str] = ["winget", "install", "--id", PWSH_WINGET_ID]
+PWSH_UPGRADE_CMD: list[str] = ["winget", "upgrade", "--id", PWSH_WINGET_ID]
+
 DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
     PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
     PluginSpec(name="superpowers", marketplace="claude-plugins-official"),

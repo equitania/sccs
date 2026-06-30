@@ -4,7 +4,7 @@
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
-**Version:** 2.44.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
+**Version:** 2.45.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
 
 ---
 
@@ -33,6 +33,7 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 - 🧰 **Optionale CLI-Tools im Doctor** *(v2.43.0)* — opt-in `doctor.cli_tools: [zoxide, coreutils]`: erkennt zoxide (alle Plattformen) und Microsoft Coreutils (nur Windows, native Unix-Tools in PowerShell) und hilft bei der Installation via `winget`/`brew`. `winget list` fängt die WinGet-Links-PATH-Falle ab (PowerShell-PATH-Block); nur Hinweis, **kein** Exit 1. Plus: `doctor check` zeigt den Node-Install-Befehl inline; Windows-UTF-8-Crash gefixt → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🪟 **Windows-Doctor-Fixes** *(v2.43.1/2.43.2)* — `npm`/`npx` (`.cmd`-Wrapper) laufen jetzt über `cmd.exe /c`, sodass `doctor install` funktioniert; `path: npm-prefix-bin` zeigt nicht mehr fälschlich MISSING (npm-Global-Bin == Prefix, kein `\bin`); der PATH-Fix-Block ist unter Windows echtes PowerShell statt bash/fish → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🤫 **New-Category-Prompt opt-in** *(v2.44.0)* — `sccs sync` schlägt neue Default-Kategorien (OpenCode, Pi) **nicht** mehr automatisch vor; der Prompt kommt nur noch mit `sccs sync --migrate` oder weiterhin via `sccs config upgrade`. Default-`sync` ist still — kein Prompt, keine Notice (auch in CI). `--no-migrate` bleibt als No-op gültig → [docs/usage/sync.md](docs/usage/sync.md)
+- 🐚 **PowerShell-Komfort + pwsh-7-Check** *(v2.45.0)* — `sccs convert fish-to-pwsh` legt jetzt `conf.d/95-conveniences.ps1` mit gewohnten Fish-Shortcuts an (`ll`/`la`/`l` mit eza/lsd-Fallback, `..`/`...`/`....`, `which`/`touch`/`mkcd`); lädt zuletzt und gewinnt über die auto-konvertierten `ls`/`ll` (opt-out via `--no-conveniences`). Zusätzlich prüft `sccs doctor check` unter Windows, ob PowerShell 7+ installiert/aktuell ist, und schlägt sonst `winget install/upgrade --id Microsoft.PowerShell` vor (nur Hinweis, kein Auto-Install) → [docs/usage/platforms.md](docs/usage/platforms.md) · [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🪟 **Plattformübergreifend** macOS, Linux, Windows mit nativer PowerShell-7-Unterstützung und Fish→PowerShell-Konvertierung → [docs/usage/platforms.md](docs/usage/platforms.md)
 - 🗂️ **Mehr als 30 vordefinierte Kategorien** mit Plattform-Filtern, anpassbaren Include/Exclude-Patterns und Sync-Modi → [docs/usage/categories.md](docs/usage/categories.md)
 
@@ -123,6 +124,7 @@ SCCS is a YAML-configured, bidirectional synchronization tool for Claude Code fi
 - 🧰 **Optional CLI tools in the doctor** *(v2.43.0)* — opt-in `doctor.cli_tools: [zoxide, coreutils]`: detects zoxide (all platforms) and Microsoft Coreutils (Windows-only, native UNIX tools in PowerShell) and helps install them via `winget`/`brew`. `winget list` catches the WinGet-Links PATH trap (PowerShell PATH block); informational only, **no** exit 1. Plus: `doctor check` shows the Node install command inline; Windows UTF-8 crash fixed → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🪟 **Windows doctor fixes** *(v2.43.1/2.43.2)* — `npm`/`npx` (`.cmd` wrappers) now run via `cmd.exe /c`, so `doctor install` works; `path: npm-prefix-bin` no longer shows a false MISSING (npm global bin == prefix on Windows, no `\bin`); the PATH-fix block is real PowerShell on Windows instead of bash/fish → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🤫 **New-category prompt is opt-in** *(v2.44.0)* — `sccs sync` no longer auto-offers new default categories (OpenCode, Pi); the prompt only appears with `sccs sync --migrate` or via the dedicated `sccs config upgrade`. A plain `sync` is silent — no prompt, no notice (CI-friendly too). `--no-migrate` stays valid as a no-op → [docs/usage/sync.md](docs/usage/sync.md)
+- 🐚 **PowerShell comfort + pwsh 7 check** *(v2.45.0)* — `sccs convert fish-to-pwsh` now writes `conf.d/95-conveniences.ps1` with the Fish-style shortcuts you're used to (`ll`/`la`/`l` with an eza/lsd fallback, `..`/`...`/`....`, `which`/`touch`/`mkcd`); it loads last and wins over the auto-converted `ls`/`ll` (opt out with `--no-conveniences`). On Windows, `sccs doctor check` also verifies PowerShell 7+ is installed/current and otherwise suggests `winget install/upgrade --id Microsoft.PowerShell` (a suggestion only, never an auto-install) → [docs/usage/platforms.md](docs/usage/platforms.md) · [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🪟 **Cross-platform** macOS, Linux, Windows with native PowerShell 7 support and Fish→PowerShell conversion → [docs/usage/platforms.md](docs/usage/platforms.md)
 - 🗂️ **Over 30 predefined categories** with platform filters, customizable include/exclude patterns and sync modes → [docs/usage/categories.md](docs/usage/categories.md)
 

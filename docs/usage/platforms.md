@@ -69,7 +69,19 @@ Was wird konvertiert:
 
 Nach Edits in `~/.config/fish/` einfach `sccs convert fish-to-pwsh --force` erneut aufrufen — bestehende Zieldateien werden mit `.bak` gesichert.
 
-Querverweise: [categories.md](categories.md), [sync.md](sync.md)
+#### Komfort-Shortcuts (`95-conveniences.ps1`) — ab v2.45.0
+
+Zusätzlich legt der Converter `conf.d/95-conveniences.ps1` mit den gewohnten Fish-Shortcuts an — PowerShell-nativ, damit sie unter Windows direkt funktionieren:
+
+| Shortcut | Wirkung |
+|---|---|
+| `ll` / `la` / `l` | Listing (bevorzugt `eza`/`lsd`, sonst `Get-ChildItem`) |
+| `..` / `...` / `....` | eine/zwei/drei Ebenen hoch (statt `cd ..`) |
+| `which` / `touch` / `mkcd` | Unix-Helfer (Pfad zeigen / Datei anlegen / Verzeichnis anlegen + hinein) |
+
+Die Datei lädt **zuletzt** in `conf.d/` und gewinnt damit bewusst über die automatisch konvertierten `ls`/`ll` (die oft GNU/BSD-Flags tragen, die PowerShell nicht versteht). Bearbeiten oder löschen erlaubt; mit `sccs convert fish-to-pwsh --no-conveniences` komplett überspringen.
+
+Querverweise: [categories.md](categories.md), [sync.md](sync.md), [doctor.md](doctor.md)
 
 ---
 
@@ -136,4 +148,16 @@ Conversion rules:
 
 After editing Fish files, just rerun `sccs convert fish-to-pwsh --force` — existing target files are backed up as `.bak`.
 
-See also: [categories.md](categories.md), [sync.md](sync.md)
+#### Comfort shortcuts (`95-conveniences.ps1`) — since v2.45.0
+
+The converter also writes `conf.d/95-conveniences.ps1` with the Fish-style shortcuts you're used to — all PowerShell-native so they work on Windows out of the box:
+
+| Shortcut | Effect |
+|---|---|
+| `ll` / `la` / `l` | Listing (prefers `eza`/`lsd`, else `Get-ChildItem`) |
+| `..` / `...` / `....` | Go up one/two/three levels (instead of `cd ..`) |
+| `which` / `touch` / `mkcd` | Unix helpers (resolve path / create file / make dir + cd) |
+
+This file loads **last** in `conf.d/` and intentionally wins over the auto-converted `ls`/`ll` (which often carry GNU/BSD flags PowerShell rejects). Edit or delete it, or pass `sccs convert fish-to-pwsh --no-conveniences` to skip it entirely.
+
+See also: [categories.md](categories.md), [sync.md](sync.md), [doctor.md](doctor.md)

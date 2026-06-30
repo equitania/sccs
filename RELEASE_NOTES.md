@@ -1,5 +1,14 @@
 # Release Notes
 
+## Version 2.45.0 (30.06.2026)
+
+### Added
+- **`sccs convert fish-to-pwsh` now ships Fish-style comfort shortcuts (`conf.d/95-conveniences.ps1`).** The converter writes a curated, PowerShell-native block with the shortcuts you're used to from Fish: `ll`/`la`/`l` listing (preferring `eza` → `lsd` → native `Get-ChildItem`), navigation `..`/`...`/`....` (type `..` instead of `cd ..` — PowerShell has no built-in for it), plus the small Unix helpers `which`, `touch` and `mkcd`. The file's `95-` prefix makes it load **last** in `conf.d/`, so it intentionally wins over the auto-converted `ls`/`ll`. (Why this matters: a typical Fish config defines `ll` inside an `if command -q uu-ls … else … end` block; the converter only understands `function/end` blocks, so it converts *both* branches and the `else` branch — `ll = ls -alhFG` — wins, which is broken on Windows where `ls` is `Get-ChildItem` and `-alhFG` is rejected.) Opt out with `sccs convert fish-to-pwsh --no-conveniences`; the summary reports `Conveniences: enabled (95-conveniences.ps1)` or `skipped`.
+- **`sccs doctor check` verifies PowerShell 7+ on Windows and suggests a winget install/upgrade.** Modelled on the existing Node check: on Windows the report adds a `PowerShell 7+ (pwsh)` row (`OK`/`OUTDATED`/`MISSING`) by probing `pwsh --version` against a minimum major of 7 (the modern, cross-platform shell that consumes the converted profile — not the legacy Windows PowerShell 5.1). When `pwsh` is missing or older than 7.x, the report prints `winget install --id Microsoft.PowerShell` (or `winget upgrade …`) below the table. It is **a suggestion only** — SCCS never installs/upgrades PowerShell itself — and a missing/outdated `pwsh` does **not** flip the exit code (informational, CI-friendly). On macOS/Linux the row is hidden entirely and no subprocess is spawned.
+
+### Notes
+- New tests: `TestConveniences` (convert), `TestPowerShellDetector` + `TestPowerShellReporter` (doctor). `ruff` format/lint clean, `mypy` clean (56 files), build OK. Behaviour verified directly on macOS (convert dry-run shows the conveniences line; `doctor check` hides the pwsh row off Windows; a simulated Windows render shows the row + winget block for missing/outdated/ok). Full suite runs on Linux CI (platform-independent change).
+
 ## Version 2.44.0 (30.06.2026)
 
 ### Changed

@@ -1,4 +1,4 @@
-# sccs v2.44.0 | Claude Code Sync Tool (UV)
+# sccs v2.45.0 | Claude Code Sync Tool (UV)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Setup:      uv venv --python 3.12 && venv+ && uv pip install -e ".[dev]"
 ▸ Sync:       sccs sync --dry-run
@@ -30,6 +30,13 @@
   (v2.42.1: check shows Node.js install/upgrade cmd inline below the table | v2.42.2: subprocess wrappers force UTF-8 decode → no Windows cp1252 crash)
   (v2.43.0: opt-in `doctor.cli_tools: [zoxide, coreutils]` — detect+install optional CLI tools; zoxide all-OS, coreutils Windows-only via winget; `winget list` catches WinGet-Links PATH trap; informational, never exit 1)
   (v2.43.1: Windows npm/npx .cmd wrappers run via `cmd.exe /c` so `doctor install` works | v2.43.2: npm-prefix-bin = prefix itself on Windows (no /bin) → no false MISSING; PATH-fix block is PowerShell on Windows)
+  (v2.45.0: Windows-only pwsh-7 check — `doctor check` flags PowerShell <7 / missing + suggests `winget install/upgrade --id Microsoft.PowerShell`; suggestion only, never exit 1, hidden off-Windows)
+
+# Convert (Fish → PowerShell)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ Convert:    sccs convert fish-to-pwsh --force        # generate PS profile from ~/.config/fish
+▸ No comfort: sccs convert fish-to-pwsh --no-conveniences
+  (v2.45.0: emits conf.d/95-conveniences.ps1 — ll/la/l (eza/lsd fallback), ../.../...., which/touch/mkcd; loads last, wins over converted ls/ll; --no-conveniences to skip)
 
 # OpenCode Integration (v2.37.0+)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -18,6 +18,7 @@ from sccs.doctor.detectors import (
     PathPrefixStatus,
     PermissionStatus,
     PluginStatus,
+    PowerShellStatus,
     StatusLineStatus,
 )
 from sccs.doctor.installer import ExecuteResult, _npm_global_fix_block
@@ -45,6 +46,14 @@ def _node_row(status: NodeStatus, min_major: int) -> tuple[str, str, str, str]:
     if not status.meets_minimum:
         return ("Node.js", _OUTDATED, f"v{status.version}", f"< {min_major}.x required")
     return ("Node.js", _OK, f"v{status.version}", "")
+
+
+def _powershell_row(status: PowerShellStatus, min_major: int) -> tuple[str, str, str, str]:
+    if not status.installed:
+        return ("PowerShell 7+ (pwsh)", _MISSING, "", f"need >= {min_major}.x — install below")
+    if not status.meets_minimum:
+        return ("PowerShell 7+ (pwsh)", _OUTDATED, f"v{status.version}", f"< {min_major}.x — upgrade below")
+    return ("PowerShell 7+ (pwsh)", _OK, f"v{status.version}", "")
 
 
 def _claude_cli_row(status: ClaudeCliStatus) -> tuple[str, str, str, str]:
@@ -197,6 +206,8 @@ def render_doctor_report(
     status_lines: list[StatusLineStatus] | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
+    powershell: PowerShellStatus | None = None,
+    min_pwsh_major: int = 7,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -206,6 +217,10 @@ def render_doctor_report(
     table.add_column("Detail", style="dim")
 
     table.add_row(*_node_row(node, min_node_major))
+    # Windows-only: the converted PowerShell profile is consumed on Windows, so
+    # the pwsh-7 check is noise on macOS/Linux and is hidden there.
+    if powershell is not None and powershell.platform == "windows":
+        table.add_row(*_powershell_row(powershell, min_pwsh_major))
     table.add_row(*_claude_cli_row(claude_cli))
     if marketplaces:
         for market_st in marketplaces:
@@ -258,6 +273,28 @@ def render_doctor_report(
             # collapses onto one line.
             for line in hint.manual_block.splitlines():
                 console.print(f"  [bold]{line}[/bold]")
+        console.print()
+
+    # PowerShell 7+ install/upgrade suggestion (Windows only) — surfaced below
+    # the table so `doctor check` hands over the exact winget command. A
+    # suggestion only: SCCS never installs/upgrades PowerShell itself, and this
+    # never flips the exit code (has_problems ignores it → CI-friendly).
+    if (
+        powershell is not None
+        and powershell.platform == "windows"
+        and not (powershell.installed and powershell.meets_minimum)
+    ):
+        console.print()
+        if not powershell.installed:
+            console.print("[yellow]PowerShell 7+ not found — install (Windows 11):[/yellow]")
+            console.print(f"  [bold]{' '.join(powershell.install_cmd)}[/bold]")
+        else:
+            console.print(
+                f"[yellow]PowerShell v{powershell.version} is older than the recommended "
+                f"v{min_pwsh_major}.x — upgrade (Windows 11):[/yellow]"
+            )
+            console.print(f"  [bold]{' '.join(powershell.upgrade_cmd)}[/bold]")
+        console.print("  [dim]winget ships with Windows 11; restart the shell afterwards.[/dim]")
         console.print()
 
     # Detailed remediation block for permission issues — shown below the table

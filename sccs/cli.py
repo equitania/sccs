@@ -792,6 +792,14 @@ def convert_group() -> None:
 )
 @click.option("--force", is_flag=True, help="Overwrite existing PowerShell files")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview without writing files")
+@click.option(
+    "--conveniences/--no-conveniences",
+    default=True,
+    help=(
+        "Add Fish-style comfort shortcuts (ll, la, .., ..., which, touch, mkcd) as "
+        "conf.d/95-conveniences.ps1 — loads last, wins over converted aliases (default: on)."
+    ),
+)
 @click.pass_context
 def convert_fish_to_pwsh(
     ctx: click.Context,
@@ -799,6 +807,7 @@ def convert_fish_to_pwsh(
     dst: Path | None,
     force: bool,
     dry_run: bool,
+    conveniences: bool,
 ) -> None:
     """Generate a PowerShell profile from Fish shell configuration.
 
@@ -808,6 +817,11 @@ def convert_fish_to_pwsh(
       - set -gx VAR value            → $env:VAR = "value"
       - fish_add_path /some/dir      → duplicate-aware $env:PATH prepend
       - abbr -a name expansion       → Set-Alias / function
+
+    \b
+    Also emits conf.d/95-conveniences.ps1 with Fish-style comfort shortcuts
+    (ll, la, l, .., ..., ...., which, touch, mkcd). It loads last and wins
+    over the auto-converted ls/ll. Pass --no-conveniences to skip it.
 
     \b
     Fish function bodies (~/.config/fish/functions/*.fish) are emitted
@@ -863,7 +877,7 @@ def convert_fish_to_pwsh(
     console.print(f"[bold]Source:[/bold] {src_path}")
     console.print(f"[bold]Target:[/bold] {dst_path}\n")
 
-    converter = FishToPwshConverter(src_path, dst_path)
+    converter = FishToPwshConverter(src_path, dst_path, include_conveniences=conveniences)
     report = converter.convert_directory(dry_run=dry_run)
 
     # Summary table
@@ -876,6 +890,10 @@ def convert_fish_to_pwsh(
     console.print(f"  PATH lines:            {report.path_lines_converted}")
     console.print(f"  Function stubs:        {report.functions_stubbed}")
     console.print(f"  Fish-only passthrough: {report.fish_lines_passthrough}")
+    if report.conveniences_emitted:
+        console.print("  Conveniences:          enabled (95-conveniences.ps1)")
+    else:
+        console.print("  Conveniences:          skipped (--no-conveniences)")
 
     if report.warnings:
         console.print("\n[yellow]Warnings:[/yellow]")
@@ -2114,6 +2132,7 @@ def _collect_doctor_statuses(
     Off by default so install/update/optimize — which refresh blindly anyway —
     don't pay the network cost.
     """
+    from sccs.doctor.defaults import MIN_PWSH_MAJOR
     from sccs.doctor.detectors import (
         BrowserBundleDetector,
         BundledSkillDetector,
@@ -2127,6 +2146,7 @@ def _collect_doctor_statuses(
         NpxToolDetector,
         PathPrefixDetector,
         PermissionDetector,
+        PowerShellDetector,
         SettingsHookDetector,
         StatusLineDetector,
     )
@@ -2153,6 +2173,7 @@ def _collect_doctor_statuses(
 
     result = {
         "node": NodeDetector().get_status(doctor_cfg.min_node_major),
+        "powershell": PowerShellDetector().get_status(MIN_PWSH_MAJOR),
         "claude_cli": claude_cli_status,
         "plugins": plugin_detector.get_statuses(plugin_specs, check_updates=check_updates),
         "marketplaces": ClaudeMarketplaceDetector().get_statuses(
@@ -2245,6 +2266,7 @@ def doctor_check(ctx: click.Context, update_check: bool) -> None:
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
+        powershell=statuses.get("powershell"),
     )
 
     if has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"]):

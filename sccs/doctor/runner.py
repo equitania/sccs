@@ -143,6 +143,27 @@ def run_node_version() -> str | None:
     return proc.stdout.strip().lstrip("vV")
 
 
+def run_pwsh_version() -> str | None:
+    """Return the PowerShell 7+ version (e.g. '7.4.6') or None when missing.
+
+    Probes the modern, cross-platform `pwsh` binary — NOT the legacy Windows
+    `powershell.exe` (which is 5.1 and uses a different profile path). Output of
+    `pwsh --version` is `PowerShell 7.4.6`; we return the trailing version token.
+    Any failure (not installed, error) degrades silently to None.
+    """
+    if which("pwsh") is None:
+        return None
+    try:
+        proc = _run(["pwsh", "--version"], timeout=10)
+    except DoctorError:
+        return None
+    out = (proc.stdout or "").strip()
+    if not out:
+        return None
+    # "PowerShell 7.4.6" -> "7.4.6"; tolerate a bare version too.
+    return out.split()[-1].lstrip("vV") or None
+
+
 def run_claude_plugin_list() -> str:
     """Return raw stdout of `claude plugin list`. Empty on failure."""
     try:

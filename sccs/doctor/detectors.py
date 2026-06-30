@@ -13,7 +13,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from sccs.doctor._paths import is_home_path
-from sccs.doctor.defaults import get_node_install_spec
+from sccs.doctor.defaults import (
+    PWSH_INSTALL_CMD,
+    PWSH_UPGRADE_CMD,
+    get_node_install_spec,
+)
 from sccs.doctor.runner import (
     DoctorError,
     _run,
@@ -24,6 +28,7 @@ from sccs.doctor.runner import (
     run_claude_plugin_list,
     run_node_version,
     run_npm_view_version,
+    run_pwsh_version,
     run_winget_list,
     which,
 )
@@ -155,6 +160,24 @@ class NodeStatus:
     meets_minimum: bool
     install_hint: NodeInstallSpec
     platform: str
+
+
+@dataclass
+class PowerShellStatus:
+    """Result of inspecting modern PowerShell (pwsh 7+) on the current host.
+
+    Windows-focused: the reporter only renders this on Windows, where the
+    converted PowerShell profile is actually consumed. `install_cmd`/`upgrade_cmd`
+    are the winget commands the doctor *suggests* (it never runs them itself).
+    """
+
+    installed: bool
+    version: str | None
+    major: int | None
+    meets_minimum: bool
+    platform: str
+    install_cmd: list[str]
+    upgrade_cmd: list[str]
 
 
 @dataclass
@@ -410,6 +433,45 @@ class NodeDetector:
             meets_minimum=bool(meets),
             install_hint=get_node_install_spec(self._platform),
             platform=self._platform,
+        )
+
+
+class PowerShellDetector:
+    """Detect modern PowerShell (pwsh 7+) and major-version compliance.
+
+    Only probes on Windows — on macOS/Linux the check is moot (the converter
+    *generates* profiles there; they're consumed on Windows) and a non-Windows
+    status comes back `installed=False` but is never rendered by the reporter.
+    """
+
+    def __init__(self, platform_name: str | None = None) -> None:
+        self._platform = platform_name or get_current_platform()
+
+    def get_status(self, min_major: int) -> PowerShellStatus:
+        if self._platform != "windows":
+            # Skip the subprocess entirely off Windows; the reporter hides the row.
+            return PowerShellStatus(
+                installed=False,
+                version=None,
+                major=None,
+                meets_minimum=False,
+                platform=self._platform,
+                install_cmd=list(PWSH_INSTALL_CMD),
+                upgrade_cmd=list(PWSH_UPGRADE_CMD),
+            )
+        version = run_pwsh_version()
+        parsed = _parse_version(version)
+        major = parsed[0] if parsed else None
+        installed = version is not None
+        meets = installed and major is not None and major >= min_major
+        return PowerShellStatus(
+            installed=installed,
+            version=version,
+            major=major,
+            meets_minimum=bool(meets),
+            platform=self._platform,
+            install_cmd=list(PWSH_INSTALL_CMD),
+            upgrade_cmd=list(PWSH_UPGRADE_CMD),
         )
 
 

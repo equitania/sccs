@@ -252,11 +252,23 @@ doctor:
 
 `zoxide` (smart `cd`) is checked on **all** platforms (winget / `brew install zoxide` / install script); **Microsoft Coreutils** (`Microsoft.Coreutils`, the Rust uutils port of `cat`/`grep`/`wc`/`cut`/`xargs`) is **Windows-only** — it gives PowerShell the same UNIX commands as Linux/macOS/WSL. Detection: `which` for "on PATH"; on Windows a `winget list --id <id>` fallback is the authoritative install check (catches the WinGet-Links-not-on-PATH trap). States: `OK` / yellow "installed, not on PATH" (+ a copy-paste PowerShell PATH block below the table) / blue "not installed (optional)". **Informational only — missing = no exit 1.** `doctor install` offers `winget install` / `brew install` (confirm-gated); SCCS never edits PATH/profile itself. Note: zoxide also needs `zoxide init <shell>` in the profile for the `z` command (intentionally not done by the doctor — it only ensures the binary); Coreutils needs no profile init. Shell conflicts (PowerShell aliases `cat`/`sort`/`tee` win over the `.exe` → call `cat.exe`/`sort.exe`): see <https://github.com/microsoft/coreutils#shell-conflicts>.
 
+### PowerShell 7+ check (Windows) — since v2.45.0
+
+On **Windows**, `sccs doctor check` verifies that modern **PowerShell 7+** (`pwsh`, not the legacy Windows PowerShell 5.1) is installed and current — it is the shell that consumes the profile produced by `sccs convert fish-to-pwsh`. The table shows a `PowerShell 7+ (pwsh)` row (`OK` / `OUTDATED` / `MISSING`), and when it's missing or older than 7.x the report prints a copy-paste suggestion below the table:
+
+```text
+PowerShell 7+ not found — install (Windows 11):
+  winget install --id Microsoft.PowerShell
+```
+
+(or `winget upgrade --id Microsoft.PowerShell` when an older version is found). This is **a suggestion only** — SCCS never installs or upgrades PowerShell itself, and a missing/outdated `pwsh` does **not** flip the exit code (informational, CI-friendly). On macOS/Linux the row is hidden entirely (the check is Windows-specific).
+
 ### What is checked?
 
 | Component | Check (`check`) | Repair (`install` / `update`) |
 |---|---|---|
 | **Node.js** | installed + minimum major version (≥ 20) | `brew install node` (macOS), `winget install OpenJS.NodeJS` (Windows), manual block for Linux (NodeSource, sudo) |
+| **PowerShell 7+** (Windows only, v2.45.0) | `pwsh --version` ≥ 7.x; `OK` / `OUTDATED` / `MISSING` — **informational, never exit 1** | suggestion only: `winget install/upgrade --id Microsoft.PowerShell` (printed, never executed) |
 | **CLI tools** (opt-in: `zoxide`, `coreutils`) | `which` + (Windows) `winget list`; `on_path` / `installed_not_on_path` / `missing` — **informational, never exit 1** | `winget install` / `brew install` (confirm) or a PowerShell PATH block; SCCS never mutates profile/environment |
 | **`claude` CLI** | binary on PATH | `npm install -g @anthropic-ai/claude-code` |
 | **Claude plugins** | per marketplace via `claude plugin list`; **update available** via marketplace manifest (v2.42.0) | `claude plugin install/update <name>@<marketplace>` with the correct `--scope <user/project/local/managed>` |

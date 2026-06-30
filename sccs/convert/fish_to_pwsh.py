@@ -13,6 +13,7 @@ from pathlib import Path
 from sccs.convert.rules import convert_line
 from sccs.convert.templates import (
     CONFD_FILE_HEADER,
+    CONVENIENCES_BLOCK,
     FUNCTION_STUB_HEADER,
     PROFILE_HEADER,
     PROFILE_LOADER,
@@ -74,6 +75,7 @@ class ConversionReport:
     path_lines_converted: int = 0
     functions_stubbed: int = 0
     fish_lines_passthrough: int = 0
+    conveniences_emitted: bool = False
     warnings: list[str] = field(default_factory=list)
     written_files: list[Path] = field(default_factory=list)
     skipped_files: list[Path] = field(default_factory=list)
@@ -97,10 +99,13 @@ class FishToPwshConverter:
         src_root: Path,
         dst_root: Path,
         skip_patterns: tuple[str, ...] | None = None,
+        *,
+        include_conveniences: bool = True,
     ):
         self.src_root = src_root
         self.dst_root = dst_root
         self.skip_patterns = skip_patterns or DEFAULT_SKIP_PATTERNS
+        self.include_conveniences = include_conveniences
 
     # ------------------------------------------------------------------ public
 
@@ -120,13 +125,19 @@ class FishToPwshConverter:
         # 1) conf.d/ — alias / env / path conversion
         self._convert_confd(report, dry_run=dry_run)
 
-        # 2) functions/ — emit stubs
+        # 2) conf.d/95-conveniences.ps1 — curated Fish-style comfort shortcuts.
+        #    Emitted after the converted conf.d files so it loads last and wins
+        #    over the auto-converted ls/ll (which carry flags PowerShell rejects).
+        if self.include_conveniences:
+            self._write_conveniences(report, dry_run=dry_run)
+
+        # 3) functions/ — emit stubs
         self._convert_functions(report, dry_run=dry_run)
 
-        # 3) Profile entry point
+        # 4) Profile entry point
         self._write_profile_entry(report, dry_run=dry_run)
 
-        # 4) README.md
+        # 5) README.md
         self._write_readme(report, dry_run=dry_run)
 
         return report
@@ -158,6 +169,19 @@ class FishToPwshConverter:
 
             self._write(ps_file, content, dry_run=dry_run)
             report.written_files.append(ps_file)
+
+    def _write_conveniences(self, report: ConversionReport, *, dry_run: bool) -> None:
+        """
+        Write the curated Fish-style comfort shortcuts to
+        conf.d/95-conveniences.ps1 (ll/la/l, ../.../...., which, touch, mkcd).
+
+        The high `95-` prefix makes it load last in conf.d/, so its PowerShell-
+        native definitions win over the auto-converted ls/ll aliases.
+        """
+        target = self.dst_root / "conf.d" / "95-conveniences.ps1"
+        self._write(target, CONVENIENCES_BLOCK, dry_run=dry_run)
+        report.conveniences_emitted = True
+        report.written_files.append(target)
 
     def _convert_functions(self, report: ConversionReport, *, dry_run: bool) -> None:
         fn_src = self.src_root / "functions"

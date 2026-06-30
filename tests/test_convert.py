@@ -353,3 +353,61 @@ class TestFishToPwshCliDefaults:
         assert result.exit_code == 1
         assert "Source directory not found" in result.output
         assert "sccs sync --pull" in result.output
+
+
+class TestConveniences:
+    """conf.d/95-conveniences.ps1 — Fish-style comfort shortcuts."""
+
+    def test_conveniences_emitted_by_default(self, fish_tree: Path, tmp_path: Path) -> None:
+        dst = tmp_path / "powershell"
+        report = FishToPwshConverter(fish_tree, dst).convert_directory()
+
+        target = dst / "conf.d" / "95-conveniences.ps1"
+        assert target.exists()
+        assert report.conveniences_emitted is True
+
+        content = target.read_text(encoding="utf-8")
+        # Navigation, listing (with eza preference) and the small helpers.
+        assert "function .. { Set-Location .. }" in content
+        assert "function ll" in content
+        assert "eza" in content
+        assert "function which" in content
+        assert "function mkcd" in content
+
+    def test_no_conveniences_skips_file(self, fish_tree: Path, tmp_path: Path) -> None:
+        dst = tmp_path / "powershell"
+        report = FishToPwshConverter(fish_tree, dst, include_conveniences=False).convert_directory()
+
+        assert not (dst / "conf.d" / "95-conveniences.ps1").exists()
+        assert report.conveniences_emitted is False
+
+    def test_conveniences_load_after_converted_aliases(self, fish_tree: Path, tmp_path: Path) -> None:
+        """The 95- prefix must sort after the converted alias files so the
+        comfort shortcuts win over the auto-converted ls/ll."""
+        dst = tmp_path / "powershell"
+        FishToPwshConverter(fish_tree, dst).convert_directory()
+
+        names = sorted(p.name for p in (dst / "conf.d").glob("*.ps1"))
+        assert names[-1] == "95-conveniences.ps1"
+        assert "31-aliases-git.ps1" in names
+
+    def test_cli_no_conveniences_flag(self, fish_tree: Path, tmp_path: Path) -> None:
+        cfg = MagicMock()
+        cfg.repository.path = str(tmp_path / "repo")
+        with patch("sccs.cli.load_config", return_value=cfg):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                [
+                    "convert",
+                    "fish-to-pwsh",
+                    "--dry-run",
+                    "--no-conveniences",
+                    "--src",
+                    str(fish_tree),
+                    "--dst",
+                    str(tmp_path / "out"),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert "skipped (--no-conveniences)" in result.output

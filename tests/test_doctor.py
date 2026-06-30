@@ -16,17 +16,24 @@ from sccs.doctor.defaults import (
     DEFAULT_CLAUDE_PLUGINS,
     DEFAULT_IGNORED_MCP_PATTERNS,
     DEFAULT_NPX_TOOLS,
+    MIN_PWSH_MAJOR,
     NODE_INSTALL,
+    PWSH_INSTALL_CMD,
+    PWSH_UPGRADE_CMD,
     get_node_install_spec,
 )
 from sccs.doctor.detectors import (
     ClaudeCliDetector,
+    ClaudeCliStatus,
     ClaudePluginDetector,
     ForeignMCPServerStatus,
     ForeignPluginStatus,
     MCPServerDetector,
     NodeDetector,
+    NodeStatus,
     NpxToolDetector,
+    PowerShellDetector,
+    PowerShellStatus,
     SettingsHookDetector,
     SettingsHookViolation,
 )
@@ -205,6 +212,104 @@ class TestNodeDetector:
         assert status.installed is True
         assert status.meets_minimum is True
         assert status.install_hint.cmd == ["winget", "install", "OpenJS.NodeJS"]
+
+
+class TestPowerShellDetector:
+    def test_non_windows_skips_probe(self, monkeypatch):
+        """On macOS/Linux the detector must NOT spawn pwsh and reports not-installed."""
+
+        def _boom():
+            raise AssertionError("run_pwsh_version should not be called off Windows")
+
+        monkeypatch.setattr("sccs.doctor.detectors.run_pwsh_version", _boom)
+        status = PowerShellDetector(platform_name="macos").get_status(MIN_PWSH_MAJOR)
+        assert status.installed is False
+        assert status.platform == "macos"
+
+    def test_windows_missing(self, monkeypatch):
+        monkeypatch.setattr("sccs.doctor.detectors.run_pwsh_version", lambda: None)
+        status = PowerShellDetector(platform_name="windows").get_status(MIN_PWSH_MAJOR)
+        assert status.installed is False
+        assert status.meets_minimum is False
+        assert status.install_cmd == ["winget", "install", "--id", "Microsoft.PowerShell"]
+
+    def test_windows_outdated(self, monkeypatch):
+        monkeypatch.setattr("sccs.doctor.detectors.run_pwsh_version", lambda: "5.1.0")
+        status = PowerShellDetector(platform_name="windows").get_status(MIN_PWSH_MAJOR)
+        assert status.installed is True
+        assert status.major == 5
+        assert status.meets_minimum is False
+
+    def test_windows_current(self, monkeypatch):
+        monkeypatch.setattr("sccs.doctor.detectors.run_pwsh_version", lambda: "7.4.6")
+        status = PowerShellDetector(platform_name="windows").get_status(MIN_PWSH_MAJOR)
+        assert status.installed is True
+        assert status.major == 7
+        assert status.meets_minimum is True
+
+
+def _render_doctor(powershell: PowerShellStatus | None):
+    """Render a minimal doctor report to a string for reporter assertions."""
+    from io import StringIO
+
+    from rich.console import Console as RichConsole
+
+    from sccs.doctor.reporter import render_doctor_report
+    from sccs.output.console import Console
+
+    buf = StringIO()
+    console = Console()
+    console._console = RichConsole(file=buf, width=120, force_terminal=False)
+    node = NodeStatus(True, "26.4.0", 26, True, get_node_install_spec("windows"), "windows")
+    render_doctor_report(
+        console,
+        node=node,
+        claude_cli=ClaudeCliStatus(True, "C:/claude.exe"),
+        plugins=[],
+        npx_tools=[],
+        min_node_major=22,
+        powershell=powershell,
+        min_pwsh_major=MIN_PWSH_MAJOR,
+    )
+    return buf.getvalue()
+
+
+def _pwsh(installed, version, major, meets, platform):
+    return PowerShellStatus(
+        installed=installed,
+        version=version,
+        major=major,
+        meets_minimum=meets,
+        platform=platform,
+        install_cmd=list(PWSH_INSTALL_CMD),
+        upgrade_cmd=list(PWSH_UPGRADE_CMD),
+    )
+
+
+class TestPowerShellReporter:
+    def test_missing_shows_row_and_install(self):
+        out = _render_doctor(_pwsh(False, None, None, False, "windows"))
+        assert "pwsh" in out
+        assert "winget install --id Microsoft.PowerShell" in out
+
+    def test_outdated_shows_upgrade(self):
+        out = _render_doctor(_pwsh(True, "5.1.0", 5, False, "windows"))
+        assert "OUTDATED" in out
+        assert "winget upgrade --id Microsoft.PowerShell" in out
+
+    def test_current_no_winget_block(self):
+        out = _render_doctor(_pwsh(True, "7.4.6", 7, True, "windows"))
+        assert "v7.4.6" in out
+        assert "winget" not in out
+
+    def test_non_windows_hides_row(self):
+        out = _render_doctor(_pwsh(False, None, None, False, "macos"))
+        assert "pwsh" not in out
+        assert "winget" not in out
+
+    def test_none_is_noop(self):
+        out = _render_doctor(None)
+        assert "pwsh" not in out
 
 
 # --------------------------------------------------------------------------- #
