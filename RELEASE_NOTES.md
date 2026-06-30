@@ -1,5 +1,10 @@
 # Release Notes
 
+## Version 2.45.2 (30.06.2026)
+
+### Fixed
+- **CI: `test_cli_no_conveniences_flag` no longer fails under colorized output.** The test asserted the raw substring `skipped (--no-conveniences)` against the CLI output, but Rich colorizes in CI (GitHub Actions sets `FORCE_COLOR`) and wraps the parentheses in ANSI bold codes, so the literal match failed (it passed locally where the piped output is uncolored). The assertion now strips ANSI via the existing `_ANSI_RE` first, matching the other CLI-output tests in the file. Test-only change — no runtime behavior affected (the v2.45.0 conveniences feature and v2.45.1 Chocolatey hint are unchanged).
+
 ## Version 2.45.1 (30.06.2026)
 
 ### Changed

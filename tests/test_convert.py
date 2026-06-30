@@ -410,4 +410,8 @@ class TestConveniences:
                 ],
             )
         assert result.exit_code == 0, result.output
-        assert "skipped (--no-conveniences)" in result.output
+        # Rich colorizes in CI (FORCE_COLOR), bolding the parens with ANSI codes
+        # that break a raw substring match — strip ANSI first, like the other
+        # CLI output assertions in this file.
+        cleaned = _ANSI_RE.sub("", result.output)
+        assert "skipped (--no-conveniences)" in cleaned
