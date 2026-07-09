@@ -174,6 +174,21 @@ class TestCommandConversion:
         assert "allowed-tools" not in oc
         assert len(warns) == 2
 
+    def test_passes_through_agent_and_subtask(self) -> None:
+        # `agent` and `subtask` are native OpenCode command fields — kept verbatim.
+        oc, warns = convert_command_frontmatter(
+            {"description": "d", "agent": "reviewer", "subtask": True, "model": "opus"}
+        )
+        assert oc["agent"] == "reviewer"
+        assert oc["subtask"] is True
+        assert oc["model"] == MODEL_MAP["opus"]
+        assert warns == []
+
+    def test_omits_agent_and_subtask_when_absent(self) -> None:
+        oc, _ = convert_command_frontmatter({"description": "d"})
+        assert "agent" not in oc
+        assert "subtask" not in oc
+
 
 # --- MCP server ---
 

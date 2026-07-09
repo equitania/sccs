@@ -1871,7 +1871,7 @@ class TestOpenCodeCli:
 
     def test_status_installed(self):
         runner = CliRunner()
-        info = MagicMock(config_dir="/x/opencode", reads_claude_skills=True)
+        info = MagicMock(config_dir="/x/opencode")
         with patch("sccs.integrations.opencode.OpenCodeDetector") as mock_cls:
             inst = mock_cls.return_value
             inst.get_info.return_value = info

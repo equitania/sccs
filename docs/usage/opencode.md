@@ -10,16 +10,26 @@
 
 Claude-Code-Artefakte für [OpenCode](https://opencode.ai) nutzbar machen. Die Synchronisierung ist **einseitig** (Claude Code ist die Quelle der Wahrheit): Skills und Rules werden von OpenCode nativ gelesen, Agents/Commands werden ins OpenCode-Format konvertiert, MCP-Server in `opencode.json` gemerged.
 
+### Grundkonzept: „Skills-first, Agents-als-Subagents"
+
+OpenCode hat drei Erweiterungsmechanismen, und sein eigenes Mentalmodell fasst sie so zusammen: **„Commands = *was* zu tun ist, Skills = *wie* es zu tun ist, Agents = *wer* es tut."** Die drei koexistieren — Skills lösen Subagents nicht ab.
+
+Für SCCS heißt das:
+
+- **Skills sind der Schwerpunkt und brauchen von SCCS am wenigsten.** OpenCode liest `~/.claude/skills/<name>/SKILL.md` seit **v1.16 (Juni 2026)** direkt — das Format ist mit Claude Code identisch (`name`/`description`/`license`/`compatibility`/`metadata`). SCCS kopiert oder konvertiert Skills deshalb bewusst **nicht** (Zero-Touch); das ist der reibungsloseste Weg. Es gibt in OpenCode keine Option, dieses native Lesen abzuschalten.
+- **Agents werden als Subagents abgebildet.** Ein Claude-Subagent ist konzeptionell dasselbe wie ein OpenCode-`mode: subagent` — die Konvertierung schreibt eine `.md` mit `description`, `mode: subagent`, gemapptem `model` und (verlustbehaftet) `permission`. SCCS emittiert bewusst `permission` statt des in OpenCode inzwischen deprecateten `tools:`-Boolean-Maps.
+- **Commands** werden dünn konvertiert (`description`, `model`, plus die OpenCode-nativen `agent`/`subtask`, falls im Claude-Frontmatter vorhanden).
+
 ### Auf einen Blick
 
 | Artefakt | Verhalten | Aufwand |
 |----------|-----------|---------|
-| Skills, `CLAUDE.md` | OpenCode liest `~/.claude/skills/` und `CLAUDE.md` nativ | **keiner** |
-| Agents | Frontmatter-Konvertierung → `~/.config/opencode/agent/` | Export-Befehl |
+| Skills, `CLAUDE.md` | OpenCode liest `~/.claude/skills/` und `CLAUDE.md` nativ (seit v1.16) | **keiner** (Zero-Touch) |
+| Agents | Frontmatter-Konvertierung → `~/.config/opencode/agent/` (`mode: subagent`) | Export-Befehl |
 | Commands | Frontmatter-Konvertierung → `~/.config/opencode/command/` | Export-Befehl |
 | MCP-Server | Merge in `opencode.json` (`mcp`-Block) | Merge-Befehl |
 
-> Der native Skill-Read lässt sich in OpenCode mit `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` abschalten.
+> **Verzeichnisnamen:** SCCS schreibt in die Singular-Verzeichnisse `agent/` und `command/`. Der OpenCode-Loader liest über Brace-Globs (`{agent,agents}`, `{command,commands}`) **beide** Formen — Singular und Plural sind auf aktuellen Versionen (verifiziert gegen 1.17.x) gleichwertig gültig. Getestet gegen OpenCode (Projekt seit 2026 von `sst` nach `anomalyco` umgezogen; Docs unter opencode.ai).
 
 ### Status
 
@@ -136,16 +146,26 @@ Querverweise: [sync.md](sync.md), [categories.md](categories.md), [cli-reference
 
 Make Claude Code artefacts usable in [OpenCode](https://opencode.ai). Synchronisation is **one-way** (Claude Code is the source of truth): skills and rules are read natively by OpenCode, agents/commands are converted to the OpenCode format, and MCP servers are merged into `opencode.json`.
 
+### Core concept: "skills-first, agents-as-subagents"
+
+OpenCode has three extension mechanisms, and its own mental model sums them up as: **"Commands are *what* to do, skills are *how* to do it, agents are *who* does it."** The three coexist — skills do not replace subagents.
+
+For SCCS this means:
+
+- **Skills are the focus and need the least from SCCS.** OpenCode reads `~/.claude/skills/<name>/SKILL.md` directly since **v1.16 (Jun 2026)** — the format is identical to Claude Code (`name`/`description`/`license`/`compatibility`/`metadata`). SCCS therefore deliberately does **not** copy or convert skills (zero-touch); this is the lowest-friction path. There is no OpenCode option to disable this native read.
+- **Agents map to subagents.** A Claude subagent is conceptually the same as an OpenCode `mode: subagent` — the conversion writes a `.md` with `description`, `mode: subagent`, mapped `model`, and (lossy) `permission`. SCCS deliberately emits `permission` rather than OpenCode's now-deprecated `tools:` boolean map.
+- **Commands** are thinly converted (`description`, `model`, plus OpenCode-native `agent`/`subtask` when present in the Claude frontmatter).
+
 ### At a Glance
 
 | Artefact | Behaviour | Effort |
 |----------|-----------|--------|
-| Skills, `CLAUDE.md` | OpenCode reads `~/.claude/skills/` and `CLAUDE.md` natively | **none** |
-| Agents | frontmatter conversion → `~/.config/opencode/agent/` | export command |
+| Skills, `CLAUDE.md` | OpenCode reads `~/.claude/skills/` and `CLAUDE.md` natively (since v1.16) | **none** (zero-touch) |
+| Agents | frontmatter conversion → `~/.config/opencode/agent/` (`mode: subagent`) | export command |
 | Commands | frontmatter conversion → `~/.config/opencode/command/` | export command |
 | MCP servers | merged into `opencode.json` (`mcp` block) | merge command |
 
-> The native skill read can be disabled in OpenCode with `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`.
+> **Directory names:** SCCS writes to the singular `agent/` and `command/` directories. The OpenCode loader reads via brace globs (`{agent,agents}`, `{command,commands}`), so **both** singular and plural are equally valid on current versions (verified against 1.17.x). Tested against OpenCode (the project moved from `sst` to `anomalyco` in 2026; docs live at opencode.ai).
 
 ### Status
 
@@ -154,7 +174,7 @@ Make Claude Code artefacts usable in [OpenCode](https://opencode.ai). Synchronis
 sccs integrations opencode status
 ```
 
-Shows the install path, whether skills are read natively, the agents/commands still to export, and MCP servers not yet in `opencode.json`.
+Shows the install path, a note that skills are read natively, the agents/commands still to export, and MCP servers not yet in `opencode.json`.
 
 ### Mapping Models
 

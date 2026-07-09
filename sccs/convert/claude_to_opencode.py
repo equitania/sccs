@@ -26,8 +26,18 @@ from __future__ import annotations
 # honours an explicit user map from config, then (2) discovers the models the
 # local OpenCode install actually offers (`opencode models`) and matches by
 # family — so we map to a model that REALLY EXISTS instead of guessing an id.
-# These static values are only used when discovery yields nothing (offline / no
-# provider authenticated). UNKNOWN values still pass through with a warning.
+#
+# IMPORTANT: this static map is a LAST-RESORT OFFLINE FALLBACK only. The normal
+# export path resolves models via integrations.opencode.resolve_model_map(),
+# which runs `opencode models` live and picks a really-available id — that
+# discovery layer returns the actual provider prefix your install uses (e.g.
+# `openrouter/anthropic/claude-sonnet-4.5`, which may NOT be a bare `anthropic/`
+# provider at all, and uses dot-notation). These `anthropic/...` values are just
+# a plausible guess for a fully-offline run with no authenticated provider; they
+# WILL age as models drift. Discovery always wins over them, and an unknown value
+# passes through unchanged with a warning — so a stale entry here never blocks a
+# correct export, it only shapes the offline fallback. Prefer `opencode
+# map-models` (persists real ids into config) over trusting these.
 DEFAULT_OPENCODE_MODEL_MAP: dict[str, str] = {
     "sonnet": "anthropic/claude-sonnet-4-5",
     "opus": "anthropic/claude-opus-4",
@@ -288,9 +298,11 @@ def convert_agent_frontmatter(cc_meta: dict, model_map: dict[str, str] | None = 
 # --------------------------------------------------------------------------- #
 # Command frontmatter
 # --------------------------------------------------------------------------- #
-# CC command frontmatter: description, tags, allowed-tools. OpenCode command
-# frontmatter: description, agent, model, subtask. tags/allowed-tools are
-# dropped (OpenCode ignores them).
+# CC command frontmatter: description, tags, allowed-tools (+ occasionally the
+# OpenCode-native `agent`/`subtask` when a command is authored cross-tool).
+# OpenCode command frontmatter: description, agent, model, subtask. `agent` and
+# `subtask` are passed through when present; tags/allowed-tools are dropped
+# (OpenCode commands ignore them — a command has no permission block of its own).
 
 
 def convert_command_frontmatter(cc_meta: dict, model_map: dict[str, str] | None = None) -> tuple[dict, list[str]]:
@@ -309,10 +321,21 @@ def convert_command_frontmatter(cc_meta: dict, model_map: dict[str, str] | None 
     if description:
         oc_meta["description"] = description
 
+    # `agent` (which OpenCode agent runs the command) is a native OpenCode
+    # command field — pass it through verbatim when authored cross-tool.
+    agent = cc_meta.get("agent")
+    if agent:
+        oc_meta["agent"] = agent
+
     oc_model, model_warnings = map_model(cc_meta.get("model"), model_map)
     warnings.extend(model_warnings)
     if oc_model is not None:
         oc_meta["model"] = oc_model
+
+    # `subtask` (force subagent invocation to avoid polluting the main context)
+    # is a native OpenCode command field — pass it through when present.
+    if "subtask" in cc_meta:
+        oc_meta["subtask"] = cc_meta["subtask"]
 
     # Note dropped fields so the user is not surprised.
     for dropped in ("tags", "allowed-tools"):

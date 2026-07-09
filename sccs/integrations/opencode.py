@@ -4,7 +4,12 @@
 # Claude Code artefacts into the OpenCode formats:
 #
 #   - Skills + Rules  : read natively by OpenCode from ~/.claude/ — NO action
-#                       needed here (see get_info().reads_claude_skills).
+#                       needed here. OpenCode discovers ~/.claude/skills/<name>/
+#                       SKILL.md directly (native support since OpenCode v1.16,
+#                       Jun 2026); the SKILL.md format is identical, so there is
+#                       nothing to convert, copy or toggle. This is the primary,
+#                       zero-friction path (see the "skills-first" concept in
+#                       docs/usage/opencode.md).
 #   - Agents          : converted CC frontmatter -> ~/.config/opencode/agent/
 #   - Commands        : converted CC frontmatter -> ~/.config/opencode/command/
 #   - MCP servers      : merged from ~/.claude/settings.json into opencode.json
@@ -37,6 +42,12 @@ from sccs.utils.paths import atomic_write, create_backup, ensure_dir, matches_an
 _SKIP_PATTERNS = ("_", ".")
 _LOCAL_SUFFIX = ".local.md"
 
+# OpenCode reads Claude Code skills natively (SKILL.md discovery landed in
+# OpenCode v1.16, Jun 2026) with an identical frontmatter format, so SCCS never
+# exports skills — the honest, constant fact shown in every status view. There
+# is no OpenCode option to disable this native read.
+SKILLS_NATIVE_NOTE = "Skills: read natively by OpenCode from ~/.claude/skills (since v1.16) — nothing to export"
+
 
 @dataclass
 class OpenCodeInfo:
@@ -50,7 +61,6 @@ class OpenCodeInfo:
     skills_dir_exists: bool
     agent_dir_exists: bool
     command_dir_exists: bool
-    reads_claude_skills: bool  # True unless OPENCODE_DISABLE_CLAUDE_CODE_SKILLS is set
 
 
 @dataclass
@@ -109,14 +119,11 @@ class OpenCodeDetector:
         cc_agents_dir: Path | None = None,
         cc_commands_dir: Path | None = None,
         cc_skills_dir: Path | None = None,
-        *,
-        disable_claude_skills: bool = False,
     ) -> None:
         self._config_dir = config_dir or Path.home() / ".config" / "opencode"
         self._cc_agents_dir = cc_agents_dir or Path.home() / ".claude" / "agents"
         self._cc_commands_dir = cc_commands_dir or Path.home() / ".claude" / "commands"
         self._cc_skills_dir = cc_skills_dir or Path.home() / ".claude" / "skills"
-        self._disable_claude_skills = disable_claude_skills
 
     # canonical singular dirs (OpenCode also accepts the plural alias)
     @property
@@ -149,7 +156,6 @@ class OpenCodeDetector:
             skills_dir_exists=(self._config_dir / "skills").is_dir(),
             agent_dir_exists=self.agent_dir.is_dir(),
             command_dir_exists=self.command_dir.is_dir(),
-            reads_claude_skills=not self._disable_claude_skills,
         )
 
     # ----- gap detection ------------------------------------------------- #

@@ -52,15 +52,15 @@ class TestOpenCodeDetector:
         assert info.installed is True
         assert info.config_file is not None
         assert info.config_file.name == "opencode.jsonc"
-        assert info.reads_claude_skills is True
 
-    def test_get_info_disable_skills_flag(self, tmp_path: Path) -> None:
-        config_dir, *_ = _make_dirs(tmp_path)
-        config_dir.mkdir(parents=True)
-        detector = OpenCodeDetector(config_dir=config_dir, disable_claude_skills=True)
-        info = detector.get_info()
-        assert info is not None
-        assert info.reads_claude_skills is False
+    def test_skills_native_note_is_constant(self) -> None:
+        # OpenCode reads ~/.claude/skills natively (since v1.16); there is no
+        # OpenCode toggle for it, so SCCS states this as a plain fact rather
+        # than a per-detector flag.
+        from sccs.integrations.opencode import SKILLS_NATIVE_NOTE
+
+        assert "natively" in SKILLS_NATIVE_NOTE
+        assert "nothing to export" in SKILLS_NATIVE_NOTE
 
     def test_agent_gap_missing(self, tmp_path: Path) -> None:
         config_dir, cc_agents, cc_commands, _ = _make_dirs(tmp_path)

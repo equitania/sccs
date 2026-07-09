@@ -1,5 +1,21 @@
 # Release Notes
 
+## Version 2.46.0 (09.07.2026)
+
+### Changed (OpenCode integration — deep review against the current version)
+- **Skills honesty — the invented `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` flag is gone.** A deep re-review against a live OpenCode install (**1.17.15**) and the official docs found that this env var does not exist in current OpenCode — the `reads_claude_skills` detector flag was never set by the CLI (always hardcoded `True`), so the "verification" was fiction. Removed the `disable_claude_skills` constructor param, the `reads_claude_skills` field, and the misleading comment/doc line. `sccs integrations opencode status` and `sccs integrations status` now state the plain fact: **OpenCode reads `~/.claude/skills/` natively (since v1.16, Jun 2026) — nothing to export** (new `SKILLS_NATIVE_NOTE` constant). The `SKILL.md` format is identical, so skills stay strictly zero-touch.
+- **Concept documented: "skills-first, agents-as-subagents".** `docs/usage/opencode.md` (DE+EN) now leads with OpenCode's own mental model — *"Commands are what to do, skills are how to do it, agents are who does it"* (coexistence, not deprecation). Skills are the low-friction focus (native read, no SCCS action); agents map to `mode: subagent`; commands are thinly converted.
+- **Command conversion completed.** `convert_command_frontmatter` now passes through the OpenCode-native `agent` and `subtask` fields when present in the Claude frontmatter (previously only `description`+`model` were emitted, despite the docstring claiming otherwise). `tags`/`allowed-tools` are still dropped with a warning.
+- **Model-map fallback de-staled.** `DEFAULT_OPENCODE_MODEL_MAP` is now clearly documented as an offline last-resort only — the normal export path resolves models live via `resolve_model_map()` / `opencode models` (which returns the real provider prefix, e.g. `openrouter/anthropic/claude-sonnet-4.5`, not a hardcoded bare `anthropic/`). No behavior forced; the guidance points users at `opencode map-models`.
+
+### Verified as still correct (no change needed)
+- **Singular vs plural directories:** SCCS writes to `agent/`/`command/`; the OpenCode loader globs `{agent,agents}`/`{command,commands}`, so both are valid. Confirmed empirically — `opencode agent list` on 1.17.15 picks up an agent written to the singular `.opencode/agent/`.
+- **MCP merge** (`mcp` block, `type: local/remote`, `command` array, `environment`, `headers`, `enabled`) matches current docs; `cwd` for local servers already supported.
+- **`permission` over deprecated `tools:`** — SCCS already emits the modern shape.
+
+### Notes
+- Findings from a deep review (2 agents: SCCS-code map + live OpenCode research) plus binary/string analysis of the installed OpenCode (project renamed sst → anomalyco; docs at opencode.ai). Tests: `reads_claude_skills` toggle tests replaced with a constant-note test; new `agent`/`subtask` passthrough tests — 1132 total. `ruff`/`mypy`/`bandit -ll` clean, coverage floor 82 held. Live `sccs integrations opencode status` verified against 1.17.15.
+
 ## Version 2.45.3 (09.07.2026)
 
 ### Fixed (security hardening — project audit follow-up)

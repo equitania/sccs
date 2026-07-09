@@ -1389,9 +1389,10 @@ def integrations_status(ctx: click.Context) -> None:
 
     # OpenCode section
     if oc_info is not None:
+        from sccs.integrations.opencode import SKILLS_NATIVE_NOTE
+
         console.print(f"\n[bold]OpenCode[/bold] detected at {oc_info.config_dir}")
-        if oc_info.reads_claude_skills:
-            console.print("  [green]✓[/green] reads ~/.claude/skills natively (no skill export needed)")
+        console.print(f"  [green]✓[/green] {SKILLS_NATIVE_NOTE}")
         agent_gaps = oc_detector.get_agent_gaps()
         command_gaps = oc_detector.get_command_gaps()
         mcp_status = oc_detector.get_mcp_status()
@@ -1647,7 +1648,7 @@ def _resolve_opencode_excludes() -> list[str]:
 @click.pass_context
 def opencode_status(ctx: click.Context) -> None:
     """Show OpenCode installation and conversion gaps."""
-    from sccs.integrations.opencode import OpenCodeDetector
+    from sccs.integrations.opencode import SKILLS_NATIVE_NOTE, OpenCodeDetector
 
     console = ctx.obj["console"]
     detector = OpenCodeDetector()
@@ -1658,8 +1659,7 @@ def opencode_status(ctx: click.Context) -> None:
         return
 
     console.print(f"[bold]OpenCode[/bold] detected at {info.config_dir}")
-    if info.reads_claude_skills:
-        console.print("  [green]✓[/green] reads ~/.claude/skills natively (no skill export needed)")
+    console.print(f"  [green]✓[/green] {SKILLS_NATIVE_NOTE}")
 
     exclude = _resolve_opencode_excludes()
     agent_gaps = detector.get_agent_gaps(exclude_patterns=exclude)
