@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import re
+
 # --------------------------------------------------------------------------- #
 # Model-ID mapping
 # --------------------------------------------------------------------------- #
@@ -162,49 +164,90 @@ def match_models(
 # --------------------------------------------------------------------------- #
 # allowed-tools -> permission
 # --------------------------------------------------------------------------- #
-# CC `allowed-tools` is either a space-separated string or a list of tokens
-# like: "Read Write Edit Bash(git:*) WebFetch". OpenCode uses a `permission`
-# object whose values are "allow" | "ask" | "deny" (bash may carry a glob map).
+# CC `tools` / `allowed-tools` is a positive allowlist — usually COMMA-separated
+# ("Read, Write, Edit, Bash, Grep, Glob"), occasionally space-separated or a
+# YAML list. OpenCode expresses tool access via a `permission` object whose keys
+# are matched as wildcard patterns against tool names and whose values are
+# "allow" | "ask" | "deny" (a few keys also accept a glob→action map).
 #
-# This mapping is LOSSY by nature: CC's allowed-tools is a positive allowlist
-# (only those tools are usable), while OpenCode's permission object grants the
-# named permissions without implying everything else is denied. We grant the
-# named tools and emit a warning rather than synthesising a blanket deny.
+# We reproduce the allowlist FAITHFULLY: emit a catch-all `"*": "deny"` and then
+# grant exactly the listed tools. OpenCode resolves most-specific-wins, so an
+# agent restricted to Read+Bash in Claude is restricted to Read+Bash in OpenCode.
+#
+# Authoritative permission keys (opencode.ai/docs/agents): read, edit (gates
+# write+edit+apply_patch), glob, grep, list, bash, task, webfetch, websearch,
+# lsp, skill, question. Bash & task additionally accept a glob→action map.
 
-# CC tool token -> OpenCode permission key (for the simple, non-bash tools).
+# CC tool token (lowercased) -> OpenCode permission key. Note `write`/`edit` BOTH
+# map to `edit` (OpenCode's single edit key gates write/edit/apply_patch).
 _TOOL_KEY_MAP: dict[str, str] = {
     "read": "read",
-    "write": "write",
+    "write": "edit",
     "edit": "edit",
+    "bash": "bash",
+    "grep": "grep",
+    "glob": "glob",
+    "list": "list",
+    "ls": "list",
     "webfetch": "webfetch",
+    "websearch": "websearch",
+    "skill": "skill",
+    "task": "task",
+    "agent": "task",  # CC's Agent (subagent dispatch) == OpenCode's task tool
+    "askuserquestion": "question",
+    "lsp": "lsp",
 }
 
 
 def _split_allowed_tools(allowed_tools: object) -> list[str]:
-    """Normalise allowed-tools (str or list) into a flat token list."""
+    """Normalise allowed-tools (str or list) into a flat token list.
+
+    Splits on commas AND whitespace — real Claude Code frontmatter is almost
+    always comma-separated ("Read, Write, Edit"), so a whitespace-only split
+    left a trailing comma on every token and nothing matched.
+    """
     if allowed_tools is None:
         return []
     if isinstance(allowed_tools, str):
-        return allowed_tools.split()
-    if isinstance(allowed_tools, list):
-        tokens: list[str] = []
+        raw = re.split(r"[,\s]+", allowed_tools)
+    elif isinstance(allowed_tools, list):
+        raw = []
         for entry in allowed_tools:
-            tokens.extend(str(entry).split())
-        return tokens
-    return []
+            raw.extend(re.split(r"[,\s]+", str(entry)))
+    else:
+        return []
+    return [t for t in (tok.strip() for tok in raw) if t]
+
+
+def _mcp_permission_key(token: str) -> str | None:
+    """Map a CC MCP tool token to an OpenCode wildcard permission key.
+
+    `mcp__context7__*`            -> `context7_*`
+    `mcp__context7__resolve-lib`  -> `context7_resolve-lib`
+    OpenCode names MCP tools `<server>_<tool>` and matches permission keys as
+    wildcards, so both forms are valid grants.
+    """
+    if not token.lower().startswith("mcp__"):
+        return None
+    rest = token[len("mcp__") :]
+    if not rest:
+        return None
+    return rest.replace("__", "_")
 
 
 def tools_to_permission(allowed_tools: object) -> tuple[dict | None, list[str]]:
-    """Convert CC allowed-tools into an OpenCode `permission` object.
+    """Convert a CC tool allowlist into an OpenCode `permission` object.
 
     Returns (permission_or_None, warnings). None when there is nothing to map.
+    The result reproduces the allowlist faithfully via a catch-all deny.
     """
     tokens = _split_allowed_tools(allowed_tools)
     if not tokens:
         return None, []
 
-    permission: dict[str, object] = {}
+    grants: dict[str, str] = {}
     bash_rules: dict[str, str] = {}
+    unknown: list[str] = []
     warnings: list[str] = []
 
     for token in tokens:
@@ -212,37 +255,47 @@ def tools_to_permission(allowed_tools: object) -> tuple[dict | None, list[str]]:
 
         # Bash(scope:pattern) / Bash(scope:*) / bare Bash
         if lowered.startswith("bash(") and token.endswith(")"):
-            inner = token[len("Bash(") : -1] if token[:5].lower() == "bash(" else token[5:-1]
+            inner = token[5:-1]
             # CC uses "git:*" style; OpenCode bash globs are shell-like "git *".
-            glob = inner.replace(":", " ").strip()
-            glob = glob if glob else "*"
+            glob = inner.replace(":", " ").strip() or "*"
             bash_rules[glob] = "allow"
             continue
         if lowered == "bash":
-            bash_rules["*"] = "allow"
+            grants["bash"] = "allow"
             continue
 
-        # MCP tools (mcp__server__tool) have no permission-object equivalent.
-        if lowered.startswith("mcp__"):
-            warnings.append(f"MCP tool '{token}' has no OpenCode permission mapping — skipped")
+        # MCP tools (mcp__server__tool) -> OpenCode wildcard permission key.
+        mcp_key = _mcp_permission_key(token)
+        if mcp_key is not None:
+            grants[mcp_key] = "allow"
             continue
 
         key = _TOOL_KEY_MAP.get(lowered)
         if key is not None:
-            permission[key] = "allow"
+            grants[key] = "allow"
             continue
 
-        warnings.append(f"tool '{token}' has no OpenCode permission mapping — skipped")
+        unknown.append(token)
 
+    # A bare `bash` grant and scoped `Bash(...)` globs both target the bash key;
+    # the glob map wins (more specific) when present.
+    if bash_rules:
+        grants.pop("bash", None)
+
+    if not grants and not bash_rules:
+        if unknown:
+            warnings.append(f"no OpenCode permission mapping for: {', '.join(unknown)} — skipped")
+        return None, warnings
+
+    # Faithful allowlist: deny everything, then grant the listed tools. OpenCode
+    # resolves most-specific-wins, so the catch-all only affects unlisted tools.
+    permission: dict[str, object] = {"*": "deny"}
+    permission.update(grants)
     if bash_rules:
         permission["bash"] = bash_rules
 
-    if not permission:
-        return None, warnings
-
-    warnings.append(
-        "allowed-tools is a positive allowlist; converted to grants only (other tools are NOT auto-denied in OpenCode)"
-    )
+    if unknown:
+        warnings.append(f"no OpenCode permission mapping for: {', '.join(unknown)} — skipped")
     return permission, warnings
 
 
@@ -337,10 +390,11 @@ def convert_command_frontmatter(cc_meta: dict, model_map: dict[str, str] | None 
     if "subtask" in cc_meta:
         oc_meta["subtask"] = cc_meta["subtask"]
 
-    # Note dropped fields so the user is not surprised.
-    for dropped in ("tags", "allowed-tools"):
-        if dropped in cc_meta:
-            warnings.append(f"dropped CC-only field '{dropped}' (no OpenCode command equivalent)")
+    # `tags` is cosmetic CC-only metadata — drop it silently (not worth a warning).
+    # `allowed-tools` on a command is meaningless in OpenCode (a command runs
+    # under an agent and inherits that agent's tool access), so note it once, softly.
+    if "allowed-tools" in cc_meta:
+        warnings.append("dropped 'allowed-tools' — OpenCode commands inherit tool access from their agent")
 
     return oc_meta, warnings
 

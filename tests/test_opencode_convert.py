@@ -98,32 +98,78 @@ class TestToolsToPermission:
     def test_none(self) -> None:
         assert tools_to_permission(None) == (None, [])
 
-    def test_string_tools(self) -> None:
-        perm, warns = tools_to_permission("Read Write Edit")
-        assert perm == {"read": "allow", "write": "allow", "edit": "allow"}
-        assert any("allowlist" in w for w in warns)
+    def test_comma_separated_real_frontmatter(self) -> None:
+        # Regression: real CC frontmatter is comma-separated. A whitespace-only
+        # split left a trailing comma on every token and matched nothing.
+        perm, warns = tools_to_permission("Read, Write, Edit, Glob, Grep, WebFetch")
+        assert perm == {
+            "*": "deny",
+            "read": "allow",
+            "edit": "allow",  # Write + Edit both fold into `edit`
+            "glob": "allow",
+            "grep": "allow",
+            "webfetch": "allow",
+        }
+        assert warns == []
+
+    def test_write_and_edit_fold_into_edit(self) -> None:
+        perm, _ = tools_to_permission("Read, Write, Edit")
+        assert perm == {"*": "deny", "read": "allow", "edit": "allow"}
+
+    def test_space_separated_still_works(self) -> None:
+        perm, _ = tools_to_permission("Read Bash")
+        assert perm == {"*": "deny", "read": "allow", "bash": "allow"}
 
     def test_list_tools(self) -> None:
         perm, _ = tools_to_permission(["Read", "Write"])
-        assert perm == {"read": "allow", "write": "allow"}
+        assert perm == {"*": "deny", "read": "allow", "edit": "allow"}
+
+    def test_extended_tool_keys(self) -> None:
+        perm, warns = tools_to_permission("WebSearch, Skill, Agent, AskUserQuestion")
+        assert perm == {
+            "*": "deny",
+            "websearch": "allow",
+            "skill": "allow",
+            "task": "allow",  # Agent -> task
+            "question": "allow",  # AskUserQuestion -> question
+        }
+        assert warns == []
+
+    def test_catch_all_deny_makes_it_faithful(self) -> None:
+        # A read-only allowlist becomes a read-only agent in OpenCode.
+        perm, warns = tools_to_permission("Read, Grep, Glob")
+        assert perm["*"] == "deny"
+        assert "write" not in perm and "edit" not in perm
+        assert not any("allowlist" in w for w in warns)  # no longer lossy
 
     def test_bash_scoped(self) -> None:
         perm, _ = tools_to_permission("Bash(git:*)")
-        assert perm == {"bash": {"git *": "allow"}}
+        assert perm == {"*": "deny", "bash": {"git *": "allow"}}
 
     def test_bash_bare(self) -> None:
         perm, _ = tools_to_permission("Bash")
-        assert perm == {"bash": {"*": "allow"}}
+        assert perm == {"*": "deny", "bash": "allow"}
 
-    def test_mcp_tool_warns_and_skips(self) -> None:
-        perm, warns = tools_to_permission("mcp__server__tool")
-        assert perm is None
-        assert any("MCP tool" in w for w in warns)
+    def test_mcp_tool_maps_to_wildcard(self) -> None:
+        perm, warns = tools_to_permission("mcp__context7__*")
+        assert perm == {"*": "deny", "context7_*": "allow"}
+        assert warns == []
 
-    def test_unknown_tool_warns(self) -> None:
+    def test_mcp_specific_tool(self) -> None:
+        perm, _ = tools_to_permission("mcp__context7__resolve-lib")
+        assert perm == {"*": "deny", "context7_resolve-lib": "allow"}
+
+    def test_unknown_tool_single_summary_warning(self) -> None:
         perm, warns = tools_to_permission("Frobnicate")
         assert perm is None
-        assert any("Frobnicate" in w for w in warns)
+        assert len(warns) == 1
+        assert "Frobnicate" in warns[0]
+
+    def test_unknown_tools_collapsed_into_one_warning(self) -> None:
+        perm, warns = tools_to_permission("Read, Frobnicate, Wibble")
+        assert perm == {"*": "deny", "read": "allow"}
+        assert len(warns) == 1
+        assert "Frobnicate" in warns[0] and "Wibble" in warns[0]
 
 
 # --- Agent frontmatter ---
@@ -147,12 +193,19 @@ class TestAgentConversion:
         assert "model" not in oc
 
     def test_allowed_tools_become_permission(self) -> None:
-        oc, _ = convert_agent_frontmatter({"description": "d", "allowed-tools": "Read Edit"})
-        assert oc["permission"] == {"read": "allow", "edit": "allow"}
+        oc, _ = convert_agent_frontmatter({"description": "d", "allowed-tools": "Read, Edit"})
+        assert oc["permission"] == {"*": "deny", "read": "allow", "edit": "allow"}
 
-    def test_tools_field_fallback(self) -> None:
-        oc, _ = convert_agent_frontmatter({"description": "d", "tools": "Write"})
-        assert oc["permission"] == {"write": "allow"}
+    def test_tools_field_fallback_comma_separated(self) -> None:
+        # The `tools:` field (real CC agents use this, comma-separated).
+        oc, _ = convert_agent_frontmatter({"description": "d", "tools": "Read, Bash, Grep, Glob"})
+        assert oc["permission"] == {
+            "*": "deny",
+            "read": "allow",
+            "bash": "allow",
+            "grep": "allow",
+            "glob": "allow",
+        }
 
     def test_temperature_passthrough(self) -> None:
         oc, _ = convert_agent_frontmatter({"description": "d", "temperature": 0.2})
@@ -168,11 +221,17 @@ class TestCommandConversion:
         assert oc["description"] == "d"
         assert oc["model"] == MODEL_MAP["opus"]
 
-    def test_drops_tags_and_tools_with_warning(self) -> None:
-        oc, warns = convert_command_frontmatter({"description": "d", "tags": ["a"], "allowed-tools": "Read"})
+    def test_tags_dropped_silently(self) -> None:
+        # tags is cosmetic metadata — no warning.
+        oc, warns = convert_command_frontmatter({"description": "d", "tags": ["a"]})
         assert "tags" not in oc
+        assert warns == []
+
+    def test_allowed_tools_dropped_with_one_soft_note(self) -> None:
+        oc, warns = convert_command_frontmatter({"description": "d", "allowed-tools": "Read"})
         assert "allowed-tools" not in oc
-        assert len(warns) == 2
+        assert len(warns) == 1
+        assert "inherit tool access" in warns[0]
 
     def test_passes_through_agent_and_subtask(self) -> None:
         # `agent` and `subtask` are native OpenCode command fields — kept verbatim.

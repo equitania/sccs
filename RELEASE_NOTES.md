@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.47.0 (09.07.2026)
+
+### Fixed (OpenCode agent export — tool permissions were fully broken)
+- **`export-agents` produced a wall of `tool 'Read,' has no OpenCode permission mapping — skipped` warnings and exported agents with NO tool restrictions.** Root cause: `_split_allowed_tools` split only on whitespace, but real Claude Code agent frontmatter is **comma-separated** (`tools: Read, Write, Edit, Bash`) — so every token kept a trailing comma (`Read,`), matched nothing, and the `permission` block came out empty. The splitter now splits on commas *and* whitespace.
+- **The permission key table was wrong and incomplete.** It mapped only `read/write/edit/webfetch`, but OpenCode's `write` permission key does not exist (it's `edit`, which gates write+edit+apply_patch), and `glob/grep/list/websearch/skill/task/question` were missing entirely — so even without the comma bug most tools warned. The table is now complete and correct per opencode.ai/docs/agents (`Write`/`Edit`→`edit`, `Agent`/`Task`→`task`, `AskUserQuestion`→`question`, `Skill`→`skill`, etc.), and MCP tools map to OpenCode's wildcard keys (`mcp__context7__*` → `context7_*`).
+
+### Changed
+- **Tool allowlists are now reproduced faithfully.** Claude's `tools:` is a positive allowlist (only those tools). The export now emits `permission: {"*": "deny", …grants}` — OpenCode resolves most-specific-wins, so a read-only agent (e.g. `security-auditor`) is genuinely read-only in OpenCode instead of getting a meaningless grants-only block. This makes the export actually useful; the old "converted to grants only / not auto-denied" caveat is gone (no longer lossy). Verified end-to-end against a live OpenCode 1.17.15 (`opencode agent list` reads the exported agent and resolves its permission block).
+- **Much quieter output.** Unmappable tools collapse into one summary warning per agent instead of one per tool. For commands, cosmetic `tags` are dropped silently and `allowed-tools` yields a single soft note (commands inherit tool access from their agent).
+
+### Notes
+- Triggered by a real `export-agents` run that surfaced the wall of warnings. Findings verified against the code, the official OpenCode docs, and a binary/string analysis of the installed OpenCode. Tests: comma-separated parsing regression, the full extended key table, catch-all-deny faithfulness, MCP wildcard mapping, and command noise reduction — 1139 total. `ruff`/`mypy`/`bandit -ll` clean.
+
 ## Version 2.46.0 (09.07.2026)
 
 ### Changed (OpenCode integration — deep review against the current version)

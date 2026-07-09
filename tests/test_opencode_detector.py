@@ -184,9 +184,14 @@ class TestMaterialize:
 
     def test_warnings_collected(self, tmp_path: Path) -> None:
         detector, _ = self._detector(tmp_path)
+        # An unmapped tool produces a single summary warning attached to the agent.
+        (detector._cc_agents_dir / "noisy.md").write_text(
+            "---\nname: noisy\ndescription: d\ntools: Read, Frobnicate\n---\nBody.\n",
+            encoding="utf-8",
+        )
         result = convert_agents_to_opencode(detector.get_agent_gaps())
-        # allowed-tools allowlist warning is attached to the agent
-        assert "a1" in result.warnings
+        assert "noisy" in result.warnings
+        assert any("Frobnicate" in w for w in result.warnings["noisy"])
 
     def test_empty_gaps(self, tmp_path: Path) -> None:
         result = convert_commands_to_opencode([])

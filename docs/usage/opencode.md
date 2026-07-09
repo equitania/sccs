@@ -83,8 +83,33 @@ Konvertierungsregeln (Claude → OpenCode):
 |------|-------------|----------|
 | `name` | im Frontmatter | entfällt (Dateiname = Name) |
 | `model` | `sonnet` | `anthropic/claude-sonnet-4-5` (aufgelöst) |
-| `allowed-tools` | `Read Bash(git:*)` | `permission`-Objekt (`bash: {"git *": allow}`) |
+| `tools` / `allowed-tools` | `Read, Bash, Grep` | `permission`-Objekt, originalgetreu (siehe unten) |
 | Modus | — | `mode: subagent` |
+
+**Tool-Allowlist → `permission` (originalgetreu).** Claudes `tools:` ist eine positive Allowlist (nur diese Tools). SCCS bildet das exakt ab: es setzt `"*": deny` und erlaubt dann gezielt die gelisteten Tools — ein read-only-Agent bleibt in OpenCode read-only. Die Tool-Namen werden auf OpenCodes Permission-Keys gemappt:
+
+| Claude-Tool | OpenCode-Key |
+|---|---|
+| `Read` | `read` |
+| `Write`, `Edit` | `edit` (ein Key deckt beide ab) |
+| `Bash`, `Bash(git:*)` | `bash` (Glob-Map bei Scopes) |
+| `Grep` / `Glob` / `LS` | `grep` / `glob` / `list` |
+| `WebFetch` / `WebSearch` | `webfetch` / `websearch` |
+| `Skill` | `skill` |
+| `Agent` / `Task` | `task` |
+| `AskUserQuestion` | `question` |
+| `mcp__<server>__*` | `<server>_*` (Wildcard) |
+
+Beispiel: `tools: Read, Bash, Grep, Glob` →
+```yaml
+permission:
+  '*': deny
+  read: allow
+  bash: allow
+  grep: allow
+  glob: allow
+```
+Ein Tool ohne OpenCode-Äquivalent wird übersprungen (eine knappe Sammelwarnung, kein Spam pro Tool). Commands haben kein eigenes `permission` (sie erben den Tool-Zugriff ihres Agents), daher wird `allowed-tools` dort verworfen.
 
 **Plugin-Artefakte werden nicht exportiert** *(ab v2.39.0)*: Doctor-gemanagte Agents/Commands (`gsd-*`, `playwright-cli` — dasselbe Managed-Registry, das auch der Sync ausschließt) fallen per Default aus `status`, `export-agents` und `export-commands` raus. So landen nur deine eigenen Artefakte in OpenCode, nicht die vom get-shit-done-Plugin installierten. Eigene Patterns ergänzt du über `opencode.exclude` (Glob, gegen den Basename). Ein explizites `-a <name>` / `-c <name>` umgeht den Exclude — so exportierst du gezielt auch einen gemanagten Agent (z.B. `-a gsd-debugger`).
 
@@ -219,8 +244,33 @@ Conversion rules (Claude → OpenCode):
 |-------|-------------|----------|
 | `name` | in frontmatter | dropped (filename = name) |
 | `model` | `sonnet` | `anthropic/claude-sonnet-4-5` (resolved) |
-| `allowed-tools` | `Read Bash(git:*)` | `permission` object (`bash: {"git *": allow}`) |
+| `tools` / `allowed-tools` | `Read, Bash, Grep` | `permission` object, faithful (see below) |
 | mode | — | `mode: subagent` |
+
+**Tool allowlist → `permission` (faithful).** Claude's `tools:` is a positive allowlist (only those tools). SCCS reproduces it exactly: it sets `"*": deny` and then grants the listed tools — a read-only agent stays read-only in OpenCode. Tool names map onto OpenCode's permission keys:
+
+| Claude tool | OpenCode key |
+|---|---|
+| `Read` | `read` |
+| `Write`, `Edit` | `edit` (one key covers both) |
+| `Bash`, `Bash(git:*)` | `bash` (glob map for scopes) |
+| `Grep` / `Glob` / `LS` | `grep` / `glob` / `list` |
+| `WebFetch` / `WebSearch` | `webfetch` / `websearch` |
+| `Skill` | `skill` |
+| `Agent` / `Task` | `task` |
+| `AskUserQuestion` | `question` |
+| `mcp__<server>__*` | `<server>_*` (wildcard) |
+
+Example: `tools: Read, Bash, Grep, Glob` →
+```yaml
+permission:
+  '*': deny
+  read: allow
+  bash: allow
+  grep: allow
+  glob: allow
+```
+A tool with no OpenCode equivalent is skipped (one concise summary warning, no per-tool spam). Commands have no `permission` of their own (they inherit their agent's tool access), so `allowed-tools` is dropped there.
 
 **Plugin artefacts are not exported** *(since v2.39.0)*: doctor-managed agents/commands (`gsd-*`, `playwright-cli` — the same managed registry the sync engine excludes) are dropped from `status`, `export-agents` and `export-commands` by default, so only your own artefacts reach OpenCode rather than the ones installed by the get-shit-done plugin. Add your own patterns via `opencode.exclude` (glob, matched against the basename). An explicit `-a <name>` / `-c <name>` bypasses the exclude, so you can still export a managed artefact on purpose (e.g. `-a gsd-debugger`).
 
