@@ -20,6 +20,7 @@ from sccs.convert.templates import (
     README_TEMPLATE,
 )
 from sccs.utils.logging import get_logger
+from sccs.utils.paths import atomic_write
 
 logger = get_logger("sccs.convert")
 
@@ -320,7 +321,9 @@ class FishToPwshConverter:
             return
         target.parent.mkdir(parents=True, exist_ok=True)
         # Backup any pre-existing file so the user can recover hand edits.
+        # Atomic + 0600: shell profiles can carry exported secrets, and a
+        # crash mid-backup must not leave a truncated .bak behind.
         if target.exists():
             backup = target.with_suffix(target.suffix + ".bak")
-            backup.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+            atomic_write(backup, target.read_text(encoding="utf-8"), mode=0o600)
         target.write_text(content, encoding="utf-8")

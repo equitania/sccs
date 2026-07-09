@@ -274,6 +274,24 @@ class TestConverterDirectory:
         assert backup.exists()
         assert "old hand-written content" in backup.read_text(encoding="utf-8")
 
+    def test_backup_is_private_0600(self, fish_tree: Path, tmp_path: Path) -> None:
+        """Backups of pre-existing profile files are written 0600 — shell
+        profiles can carry exported secrets, so the .bak must not inherit a
+        permissive umask."""
+        import os
+
+        dst = tmp_path / "powershell"
+        target = dst / "conf.d" / "00-env.ps1"
+        target.parent.mkdir(parents=True)
+        target.write_text("# old content with $env:API_KEY\n", encoding="utf-8")
+
+        FishToPwshConverter(fish_tree, dst).convert_directory()
+
+        backup = target.with_suffix(target.suffix + ".bak")
+        assert backup.exists()
+        if os.name == "posix":
+            assert backup.stat().st_mode & 0o077 == 0
+
     def test_readme_template_emitted(self, fish_tree: Path, tmp_path: Path) -> None:
         dst = tmp_path / "powershell"
         converter = FishToPwshConverter(fish_tree, dst)

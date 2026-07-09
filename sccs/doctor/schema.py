@@ -242,6 +242,14 @@ class NpxToolSpec(BaseModel):
     def _validate_name(cls, v: str) -> str:
         return _validate_safe_name(v, "Npx tool name")
 
+    @field_validator("npm_package")
+    @classmethod
+    def _validate_npm_package(cls, v: str | None) -> str | None:
+        # Becomes argv[2] of `npm view <package> version` — a leading '-'
+        # would be parsed as an npm flag (e.g. --registry=<url>). The safe-name
+        # pattern still admits scoped names like '@opengsd/gsd-core'.
+        return _validate_safe_name(v, "npm_package") if v else v
+
     @field_validator("invocation")
     @classmethod
     def _validate_invocation(cls, v: list[str]) -> list[str]:
@@ -606,6 +614,14 @@ class CliToolSpec(BaseModel):
     @classmethod
     def _validate_detect_command(cls, v: str) -> str:
         return _validate_safe_name(v, "detect_command")
+
+    @field_validator("winget_id")
+    @classmethod
+    def _validate_winget_id(cls, v: str | None) -> str | None:
+        # Becomes argv[3] of `winget list --id <id> -e` — a leading '-' would
+        # be parsed as a winget flag. Dotted ids like 'Microsoft.Coreutils'
+        # pass the safe-name pattern unchanged.
+        return _validate_safe_name(v, "winget_id") if v else v
 
     @field_validator("platforms")
     @classmethod

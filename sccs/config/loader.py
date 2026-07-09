@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
 from sccs.config.schema import SccsConfig
-from sccs.utils.paths import create_backup
+from sccs.utils.paths import atomic_write, create_backup
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +107,9 @@ def save_config(config: SccsConfig, config_path: Path | None = None) -> Path:
         raise ConfigWriteError(f"Cannot serialize config to YAML: {exc}") from exc
 
     try:
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(yaml_text)
+        # Atomic (temp + os.replace): a crash mid-write must not leave a
+        # truncated config.yaml behind.
+        atomic_write(config_path, yaml_text)
     except OSError as exc:
         logger.error("Could not write config %s: %s", config_path, exc)
         raise ConfigWriteError(f"Cannot write config file {config_path}: {exc}") from exc
@@ -130,7 +131,7 @@ def ensure_config_exists() -> tuple[Path, bool]:
         return config_path, False
 
     ensure_config_dir()
-    config_path.write_text(generate_default_config(), encoding="utf-8")
+    atomic_write(config_path, generate_default_config())
     return config_path, True
 
 

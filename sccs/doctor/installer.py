@@ -183,6 +183,21 @@ def _diagnose_hint(text: str) -> str | None:
 from sccs.doctor._paths import is_home_path as _is_home_path  # noqa: E402
 
 
+def _write_settings_backup(p: Path, text: str) -> Path:
+    """Write a timestamped settings.json backup with private (0600) perms.
+
+    The primary file is written via atomic_write(mode=0o600) because it may
+    hold MCP tokens — the backup carries the exact same content, so it gets
+    the exact same hardening. A plain write_text() would inherit the process
+    umask (often 0644) and leave the secrets world-readable indefinitely on
+    multi-user hosts.
+    """
+    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = p.with_name(f"{p.name}.bak-{timestamp}")
+    atomic_write(backup, text, mode=0o600)
+    return backup
+
+
 def _user_local_prefix_lines(header: str) -> list[str]:
     """Option-A remediation snippet: relocate npm's global prefix under $HOME.
 
@@ -532,9 +547,7 @@ def _status_line_actions(statuses: list[StatusLineStatus]) -> list[DoctorAction]
                     sl = data.get("statusLine")
                     if not isinstance(sl, dict):
                         raise DoctorError("statusLine key missing or non-dict")
-                    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-                    backup = p.with_name(f"{p.name}.bak-{timestamp}")
-                    backup.write_text(text, encoding="utf-8")
+                    _write_settings_backup(p, text)
                     sl["command"] = new
                     # Atomic write (temp + os.replace) so a crash mid-write cannot
                     # leave settings.json truncated; mode=0o600 forces private
@@ -574,9 +587,7 @@ def _status_line_actions(statuses: list[StatusLineStatus]) -> list[DoctorAction]
                     sl = data.get("statusLine")
                     if not isinstance(sl, dict):
                         raise DoctorError("statusLine key missing or non-dict")
-                    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-                    backup = p.with_name(f"{p.name}.bak-{timestamp}")
-                    backup.write_text(text, encoding="utf-8")
+                    _write_settings_backup(p, text)
                     sl["command"] = new
                     atomic_write(p, json.dumps(data, indent=2) + "\n", mode=0o600)
 
@@ -1203,9 +1214,7 @@ def _settings_hook_cleanup_actions(
         if not isinstance(hooks_root, dict):
             return  # no hooks block — nothing to sanitise
 
-        timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = p.with_name(f"{p.name}.bak-{timestamp}")
-        backup.write_text(text, encoding="utf-8")
+        _write_settings_backup(p, text)
 
         new_hooks: dict[str, list[dict]] = {}
         for event, entries in hooks_root.items():

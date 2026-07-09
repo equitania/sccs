@@ -19,8 +19,11 @@ from sccs.transfer.manifest import (
     create_manifest,
     serialize_manifest,
 )
+from sccs.utils.logging import get_logger
 from sccs.utils.paths import expand_path, matches_any_pattern
 from sccs.utils.platform import is_platform_match
+
+logger = get_logger("sccs.transfer")
 
 
 @dataclass
@@ -74,8 +77,18 @@ class Exporter:
                 global_exclude=self._config.global_exclude,
             )
 
-            # Only include items that exist locally
-            local_items = [item for item in items if item.exists_local]
+            # Only include items that exist locally. Symlink items are dropped
+            # here so they never reach the selection UI or the manifest — the
+            # ZIP writer would refuse them anyway (see _add_category_to_zip),
+            # and a manifest entry without a ZIP payload would break import.
+            local_items = []
+            for item in items:
+                if not item.exists_local:
+                    continue
+                if item.local_path is not None and item.local_path.is_symlink():
+                    logger.warning("Excluding symlink item from export scan: %s", item.local_path)
+                    continue
+                local_items.append(item)
             if local_items:
                 result[cat_name] = local_items
 
@@ -240,6 +253,15 @@ class Exporter:
             if item.local_path is None or not item.local_path.exists():
                 continue
 
+            if item.local_path.is_symlink():
+                # Refusing to export symlinks: zf.write() dereferences the link
+                # and would embed the *target's* contents in the archive — a
+                # planted link (e.g. SKILL.md -> ~/.ssh/id_ed25519) would turn
+                # a shared export ZIP into secret exfiltration. Same policy as
+                # safe_copy and the importer's symlink-entry rejection.
+                logger.warning("Skipping symlink item during export: %s", item.local_path)
+                continue
+
             if item.item_type == ItemType.DIRECTORY:
                 self._add_directory_to_zip(
                     zf,
@@ -263,9 +285,21 @@ class Exporter:
         global_exclude: list[str],
     ) -> None:
         """Recursively add directory contents to ZIP."""
-        for root, _dirs, files in os.walk(dir_path):
+        for root, dirs, files in os.walk(dir_path):
+            # os.walk(followlinks=False) never descends into symlinked dirs,
+            # but prune them explicitly so the skip is deliberate and logged
+            # rather than an accident of the walk default.
+            for d in [d for d in dirs if (Path(root) / d).is_symlink()]:
+                dirs.remove(d)
+                logger.warning("Skipping symlink directory during export: %s", Path(root) / d)
+
             for fname in files:
                 full_path = Path(root) / fname
+                if full_path.is_symlink():
+                    # See _add_category_to_zip: never dereference symlinks into
+                    # the archive — that would leak the target file's contents.
+                    logger.warning("Skipping symlink during export: %s", full_path)
+                    continue
                 rel_path = full_path.relative_to(dir_path)
 
                 # Apply global excludes

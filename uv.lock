@@ -759,7 +759,7 @@ wheels = [
 
 [[package]]
 name = "sccs"
-version = "2.45.1"
+version = "2.45.3"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -784,7 +784,7 @@ dev = [
 requires-dist = [
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.9.0" },
     { name = "click", specifier = ">=8.1.0,<9.0.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.14.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.14.0,<2.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "pydantic", specifier = ">=2.0.0,<3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },

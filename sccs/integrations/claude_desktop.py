@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from sccs.utils.paths import create_backup
+from sccs.utils.paths import atomic_write, create_backup
 from sccs.utils.platform import get_current_platform
 
 
@@ -92,12 +92,13 @@ def register_trusted_folder(
     # Backup before modification
     create_backup(config_file, category="claude_desktop")
 
-    # Add and write
+    # Add and write (atomic: a crash mid-write must not truncate the
+    # user's Claude Desktop config — temp file + os.replace).
     trusted_folders.append(resolved_path)
     try:
-        config_file.write_text(
+        atomic_write(
+            config_file,
             json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
         )
     except OSError as e:
         return TrustRegistrationResult(

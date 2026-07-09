@@ -90,6 +90,29 @@ class TestSchemaValidation:
         with pytest.raises(ValidationError):
             NpxToolSpec(name="--evil", invocation=["npx", "x"])
 
+    def test_npx_tool_spec_rejects_flag_injection_in_npm_package(self):
+        # npm_package becomes argv[2] of `npm view <pkg> version` — a leading
+        # '-' would be parsed as an npm flag (e.g. --registry=<evil-url>).
+        with pytest.raises(ValidationError):
+            NpxToolSpec(name="x", invocation=["npx", "x"], npm_package="--registry=https://evil.example")
+
+    def test_npx_tool_spec_accepts_scoped_npm_package(self):
+        spec = NpxToolSpec(name="x", invocation=["npx", "x"], npm_package="@opengsd/gsd-core")
+        assert spec.npm_package == "@opengsd/gsd-core"
+
+    def test_cli_tool_spec_rejects_flag_injection_in_winget_id(self):
+        # winget_id becomes argv[3] of `winget list --id <id> -e`.
+        from sccs.doctor.schema import CliToolSpec
+
+        with pytest.raises(ValidationError):
+            CliToolSpec(name="x", detect_command="x", winget_id="--evil-flag")
+
+    def test_cli_tool_spec_accepts_dotted_winget_id(self):
+        from sccs.doctor.schema import CliToolSpec
+
+        spec = CliToolSpec(name="coreutils", detect_command="coreutils", winget_id="Microsoft.Coreutils")
+        assert spec.winget_id == "Microsoft.Coreutils"
+
 
 # --------------------------------------------------------------------------- #
 # Runner — argument-injection guard                                           #
@@ -3329,6 +3352,36 @@ class TestStatusLineAutoFix:
         assert len(backups) == 1
         assert _json.loads(backups[0].read_text()) == original
 
+    def test_auto_fix_backup_private_0600(self, tmp_path):
+        """The statusline auto-fix backup must be 0600 like the primary file
+        (settings.json may hold MCP tokens — same content, same hardening)."""
+        import json as _json
+        import os as _os
+
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.installer import _status_line_actions
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = tmp_path / "settings.json"
+        sf.write_text(
+            _json.dumps(
+                {
+                    "statusLine": {
+                        "type": "command",
+                        "command": '"/opt/homebrew/Cellar/node/99.99.99/bin/node" "/tmp/s.js"',
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        actions = _status_line_actions(StatusLineDetector().get_statuses([spec]))
+        actions[0].python_callable()
+        backups = list(tmp_path.glob("settings.json.bak-*"))
+        assert len(backups) == 1
+        if _os.name == "posix":
+            assert backups[0].stat().st_mode & 0o077 == 0
+
     def test_auto_fix_idempotent_for_cellar(self, tmp_path):
         """Running the fix twice produces a single rewrite; the second pass
         is a no-op because the Cellar marker is already gone."""
@@ -4050,6 +4103,22 @@ class TestSettingsHookCleanupAction:
         # mkstemp creates the temp file 0600; os.replace preserves it. Not on Windows.
         if os.name == "posix":
             assert sp.stat().st_mode & 0o077 == 0
+
+    def test_backup_written_private_0600(self, tmp_path: Path):
+        """The .bak-* sibling carries the same secrets as settings.json and
+        must get the same 0600 hardening — a plain write_text() would inherit
+        the umask and leave MCP tokens world-readable on multi-user hosts."""
+        import os
+
+        sp = tmp_path / "settings.json"
+        sp.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": "/a/bad"}]}]}}))
+        v = SettingsHookViolation(event="PreToolUse", matcher=None, command="/a/bad", matched_pattern="bad")
+        actions = _settings_hook_cleanup_actions([v], settings_path=sp)
+        actions[0].python_callable()
+        backups = list(tmp_path.glob("settings.json.bak-*"))
+        assert len(backups) == 1
+        if os.name == "posix":
+            assert backups[0].stat().st_mode & 0o077 == 0
 
 
 class TestDoctorConfigDisallowedHooks:
