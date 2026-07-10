@@ -1,5 +1,14 @@
 # Release Notes
 
+## Version 2.49.0 (10.07.2026)
+
+### Added (Doctor — GSD scope-boundary auto-patch)
+- **`sccs doctor install|update|optimize` now auto-patches externally-delivered GSD prompts.** New module `sccs/doctor/scope_patch.py` prepends a **SCOPE BOUNDARY** directive to any `gsd-*` skill/agent/command whose body runs an unbounded `find .` / `grep -r <relpath>` scan not pinned to the git project root — the same bug class that made `/project-audit` scan sibling projects in a monorepo. GSD is delivered verbatim via `npx @opengsd/gsd-core` and cannot be fixed upstream, so we patch the files *after* every (re)install, before they are used.
+  - Strategy is **directive-prepend only** — vendor shell snippets are left untouched, so an isolated snippet with an undefined `$PROJECT_ROOT` can never break.
+  - **Idempotent**: a versioned sentinel (`<!-- sccs:scope-boundary v1 -->`) guards against double-patching; a GSD reinstall overwrites the file, and the next doctor run re-applies the directive. Original file permissions are preserved.
+- **New `NpxToolSpec.patch_scope_boundary` flag** (default `False`, `True` for `@opengsd/gsd-core`) gates the new `_gsd_patch_action`, wired into both `_npx_install_actions` and `_npx_update_actions` (mirrors the existing `_bundled_skill_action` follow-up pattern).
+- 12 new tests (`TestScopePatch`); suite now at **1151 passing**. `ruff`, `mypy sccs/` and the hatchling wheel build are clean.
+
 ## Version 2.48.0 (10.07.2026)
 
 ### Changed (Project-Audit Follow-up — maintainability hardening)

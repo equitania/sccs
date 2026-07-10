@@ -4,7 +4,7 @@
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
-**Version:** 2.48.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
+**Version:** 2.49.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
 
 ---
 
@@ -34,6 +34,7 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 - 🪟 **Windows-Doctor-Fixes** *(v2.43.1/2.43.2)* — `npm`/`npx` (`.cmd`-Wrapper) laufen jetzt über `cmd.exe /c`, sodass `doctor install` funktioniert; `path: npm-prefix-bin` zeigt nicht mehr fälschlich MISSING (npm-Global-Bin == Prefix, kein `\bin`); der PATH-Fix-Block ist unter Windows echtes PowerShell statt bash/fish → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🤫 **New-Category-Prompt opt-in** *(v2.44.0)* — `sccs sync` schlägt neue Default-Kategorien (OpenCode, Pi) **nicht** mehr automatisch vor; der Prompt kommt nur noch mit `sccs sync --migrate` oder weiterhin via `sccs config upgrade`. Default-`sync` ist still — kein Prompt, keine Notice (auch in CI). `--no-migrate` bleibt als No-op gültig → [docs/usage/sync.md](docs/usage/sync.md)
 - 🐚 **PowerShell-Komfort + pwsh-7-Check** *(v2.45.0)* — `sccs convert fish-to-pwsh` legt jetzt `conf.d/95-conveniences.ps1` mit gewohnten Fish-Shortcuts an (`ll`/`la`/`l` mit eza/lsd-Fallback, `..`/`...`/`....`, `which`/`touch`/`mkcd`); lädt zuletzt und gewinnt über die auto-konvertierten `ls`/`ll` (opt-out via `--no-conveniences`). Zusätzlich prüft `sccs doctor check` unter Windows, ob PowerShell 7+ installiert/aktuell ist, und schlägt sonst `winget install/upgrade --id Microsoft.PowerShell` vor (nur Hinweis, kein Auto-Install) → [docs/usage/platforms.md](docs/usage/platforms.md) · [docs/usage/doctor.md](docs/usage/doctor.md)
+- 🛡️ **GSD Scope-Boundary Auto-Patch** *(v2.49.0)* — `sccs doctor install/update` stellt extern gelieferten `gsd-*`-Prompts, die ungebundene `find`/`grep -r`-Scans ohne Projektwurzel-Pin ausführen, automatisch eine **SCOPE BOUNDARY**-Direktive voran (idempotent per Sentinel, nur Direktive — Vendor-Snippets bleiben unangetastet). Verhindert, dass GSD-Prompts im Monorepo Schwester-Projekte scannen; kein Upstream-Zugriff nötig → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🪟 **Plattformübergreifend** macOS, Linux, Windows mit nativer PowerShell-7-Unterstützung und Fish→PowerShell-Konvertierung → [docs/usage/platforms.md](docs/usage/platforms.md)
 - 🗂️ **Mehr als 30 vordefinierte Kategorien** mit Plattform-Filtern, anpassbaren Include/Exclude-Patterns und Sync-Modi → [docs/usage/categories.md](docs/usage/categories.md)
 

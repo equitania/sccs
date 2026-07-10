@@ -17,6 +17,7 @@ from pathlib import Path
 
 import questionary
 
+from sccs.doctor import scope_patch
 from sccs.doctor.detectors import (
     BrowserBundleStatus,
     BundledSkillStatus,
@@ -957,6 +958,37 @@ def _sync_bundled_skill(bs: BundledSkillSpec) -> None:
     logger.info("doctor copied bundled skill: %s → %s", source, target)
 
 
+def _gsd_patch_action(
+    spec: NpxToolSpec,
+    *,
+    extra_deps: tuple[str, ...] = (),
+) -> DoctorAction | None:
+    """Action that prepends a SCOPE BOUNDARY directive to the tool's prompt files.
+
+    Only emitted when `spec.patch_scope_boundary` is set (GSD). Runs after the
+    npx (re)install so it re-applies on every install/update — the vendor
+    overwrites the files each run, so the patch must be idempotent (it is; see
+    scope_patch.patch_file). Mirrors `_bundled_skill_action`: a python_callable
+    follow-up, auto-confirmed, cascade-skipped if the install itself failed.
+    """
+    if not spec.patch_scope_boundary:
+        return None
+
+    scan_dirs = list(spec.managed_scan_dirs)
+
+    def _run_scope_patch() -> None:
+        scope_patch.patch_gsd_scope(scan_dirs, print_fn=logger.info)
+
+    return DoctorAction(
+        label=f"pin scope boundary in {spec.name} prompts",
+        runnable=True,
+        component=f"npx:{spec.name}:scope",
+        depends_on_components=extra_deps,
+        python_callable=_run_scope_patch,
+        auto_confirm=True,  # follow-up of an auto-confirmed npx maintenance step
+    )
+
+
 def _npx_install_actions(
     statuses: list[NpxToolStatus],
     *,
@@ -995,6 +1027,9 @@ def _npx_install_actions(
         skill_action = _bundled_skill_action(spec, extra_deps=(install_component, *install_deps))
         if skill_action:
             actions.append(skill_action)
+        scope_action = _gsd_patch_action(spec, extra_deps=(install_component, *install_deps))
+        if scope_action:
+            actions.append(scope_action)
     return actions
 
 
@@ -1031,6 +1066,9 @@ def _npx_update_actions(
         skill_action = _bundled_skill_action(spec, extra_deps=(install_component, *install_deps))
         if skill_action:
             actions.append(skill_action)
+        scope_action = _gsd_patch_action(spec, extra_deps=(install_component, *install_deps))
+        if scope_action:
+            actions.append(scope_action)
     return actions
 
 

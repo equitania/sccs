@@ -115,6 +115,11 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
         # ~/.claude/get-shit-done/; gsd-core uses ~/.claude/gsd-core/ instead,
         # so the old directory becomes a stale leftover once migrated.
         managed_legacy_dirs=["~/.claude/get-shit-done"],
+        # Several gsd-* prompts run unbounded `find .` / `grep -r src/` scans not
+        # pinned to the project root (same bug class as the project-audit fix).
+        # We can't patch upstream, so doctor prepends a SCOPE BOUNDARY directive
+        # to the offending prompts after every (re)install. See scope_patch.py.
+        patch_scope_boundary=True,
     ),
     NpxToolSpec(
         name="playwright-cli",

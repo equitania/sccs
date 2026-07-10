@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.47.0
+**Version**: 2.49.0
 
 ### Key Features
 
@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Bidirectional Sync**: Full two-way synchronization with conflict detection
 - **Git Integration**: Auto-commit and push after sync operations
 - **Doctor Update-Check** (v2.42.0): `sccs doctor check` flags OUTDATED plugins/npx tools when a newer version exists upstream (`npm view` for npm-backed tools, marketplace manifest for plugins); informational only, `--no-update-check` for offline mode
+- **GSD Scope-Boundary Auto-Patch** (v2.49.0): `sccs doctor install/update` prepends a SCOPE BOUNDARY directive to externally-delivered `gsd-*` prompts that run unbounded `find`/`grep -r` scans not pinned to the git project root. Idempotent (versioned sentinel), directive-prepend only (vendor snippets untouched), gated by `NpxToolSpec.patch_scope_boundary`
 
 ## Commands
 
@@ -93,6 +94,7 @@ sccs/
 │   ├── state.py          # DoctorStateManager (.doctor_state.yaml)
 │   ├── reporter.py       # Rich status table + chown fix block
 │   ├── managed.py        # DEFAULT_MANAGED_PATTERNS (gsd-* exclude from sync)
+│   ├── scope_patch.py    # GSD scope-boundary auto-patch (idempotent, directive-prepend)
 │   └── _paths.py         # is_home_path helper (avoids import cycle)
 ├── transfer/             # ZIP export/import
 │   ├── manifest.py       # Pydantic models for ZIP manifest

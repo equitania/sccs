@@ -162,6 +162,16 @@ class NpxToolSpec(BaseModel):
             "the configured target after a successful install/update."
         ),
     )
+    patch_scope_boundary: bool = Field(
+        default=False,
+        description=(
+            "If True, doctor prepends a SCOPE BOUNDARY directive to this tool's "
+            "prompt files (skills/agents/commands under `managed_scan_dirs`) after "
+            "every install/update, whenever a prompt runs an unbounded `find`/`grep -r` "
+            "scan not pinned to the git project root. Used for externally-delivered "
+            "frameworks (e.g. GSD) we cannot fix upstream. Idempotent."
+        ),
+    )
     browser_bundles: list[str] = Field(
         default_factory=list,
         description=(

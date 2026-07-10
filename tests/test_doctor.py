@@ -5315,3 +5315,135 @@ class TestPathPrefixActionsPowerShell:
         block = _path_prefix_actions([st], platform_name="linux")[0].manual_block
         assert "fish_add_path /home/u/.npm-global/bin" in block
         assert "SetEnvironmentVariable" not in block
+
+
+_GSD_PROMPT = """---
+name: {name}
+description: demo prompt
+---
+
+# {name}
+
+```bash
+find . -type d
+grep -rn "import" src/
+```
+"""
+
+
+class TestScopePatch:
+    """GSD scope-boundary auto-patch (sccs/doctor/scope_patch.py)."""
+
+    def test_has_unbounded_scan_positive(self):
+        from sccs.doctor import scope_patch
+
+        assert scope_patch.has_unbounded_scan("find . -type d")
+        assert scope_patch.has_unbounded_scan('grep -rn "import" src/')
+        assert scope_patch.has_unbounded_scan('grep -r "x" $HOME')
+
+    def test_has_unbounded_scan_negative(self):
+        from sccs.doctor import scope_patch
+
+        assert not scope_patch.has_unbounded_scan('grep -rn "x" "$PROJECT_ROOT"')
+        assert not scope_patch.has_unbounded_scan("# find . -type d")
+        assert not scope_patch.has_unbounded_scan("just prose about find and grep tools")
+
+    def test_directive_does_not_self_trigger(self):
+        from sccs.doctor import scope_patch
+
+        assert not scope_patch.has_unbounded_scan(scope_patch.build_directive())
+
+    def test_patch_file_adds_directive_after_frontmatter(self, tmp_path):
+        from sccs.doctor import scope_patch
+
+        f = tmp_path / "gsd-demo.md"
+        f.write_text(_GSD_PROMPT.format(name="gsd-demo"))
+        assert scope_patch.patch_file(f) is True
+        txt = f.read_text()
+        assert scope_patch.SCOPE_BOUNDARY_SENTINEL in txt
+        assert txt.startswith("---\nname: gsd-demo")
+        # directive lands after the frontmatter fence, before original body
+        after_fm = txt.split("---", 2)[2]
+        assert "SCOPE BOUNDARY" in after_fm
+        assert after_fm.index("SCOPE BOUNDARY") < after_fm.index("find . -type d")
+        # vendor commands are left untouched
+        assert "find . -type d" in txt
+        assert 'grep -rn "import" src/' in txt
+
+    def test_patch_file_idempotent(self, tmp_path):
+        from sccs.doctor import scope_patch
+
+        f = tmp_path / "gsd-demo.md"
+        f.write_text(_GSD_PROMPT.format(name="gsd-demo"))
+        assert scope_patch.patch_file(f) is True
+        first = f.read_text()
+        assert scope_patch.patch_file(f) is False
+        assert f.read_text() == first
+
+    def test_patch_file_skips_clean_file(self, tmp_path):
+        from sccs.doctor import scope_patch
+
+        f = tmp_path / "gsd-clean.md"
+        original = "---\nname: gsd-clean\n---\n\nNo scans here.\n"
+        f.write_text(original)
+        assert scope_patch.patch_file(f) is False
+        assert f.read_text() == original
+
+    def test_patch_file_preserves_mode(self, tmp_path):
+        import os
+        import stat
+
+        from sccs.doctor import scope_patch
+
+        f = tmp_path / "gsd-demo.md"
+        f.write_text(_GSD_PROMPT.format(name="gsd-demo"))
+        os.chmod(f, 0o644)
+        scope_patch.patch_file(f)
+        assert stat.S_IMODE(f.stat().st_mode) == 0o644
+
+    def test_patch_gsd_scope_enumerates_and_skips_hooks(self, tmp_path):
+        from sccs.doctor import scope_patch
+
+        (tmp_path / "skills" / "gsd-foo").mkdir(parents=True)
+        (tmp_path / "skills" / "gsd-foo" / "SKILL.md").write_text(_GSD_PROMPT.format(name="gsd-foo"))
+        (tmp_path / "skills" / "other").mkdir(parents=True)
+        (tmp_path / "skills" / "other" / "SKILL.md").write_text(_GSD_PROMPT.format(name="other"))
+        (tmp_path / "agents").mkdir()
+        (tmp_path / "agents" / "gsd-bar.md").write_text(_GSD_PROMPT.format(name="gsd-bar"))
+        (tmp_path / "commands").mkdir()
+        (tmp_path / "commands" / "gsd-baz.md").write_text(_GSD_PROMPT.format(name="gsd-baz"))
+        (tmp_path / "hooks").mkdir()
+        (tmp_path / "hooks" / "gsd-hook.md").write_text(_GSD_PROMPT.format(name="gsd-hook"))
+
+        scan_dirs = [str(tmp_path / d) for d in ("skills", "agents", "commands", "hooks")]
+        count = scope_patch.patch_gsd_scope(scan_dirs)
+
+        assert count == 3  # gsd-foo, gsd-bar, gsd-baz — not hooks, not non-gsd
+        marker = scope_patch.SCOPE_BOUNDARY_SENTINEL
+        assert marker in (tmp_path / "skills" / "gsd-foo" / "SKILL.md").read_text()
+        assert marker in (tmp_path / "agents" / "gsd-bar.md").read_text()
+        assert marker in (tmp_path / "commands" / "gsd-baz.md").read_text()
+        assert marker not in (tmp_path / "hooks" / "gsd-hook.md").read_text()
+        assert marker not in (tmp_path / "skills" / "other" / "SKILL.md").read_text()
+
+    def test_install_plan_includes_scope_action_for_gsd(self):
+        cfg = DoctorConfig()
+        s = _make_status_set()  # GSD missing → install action generated
+        plan = build_install_plan(cfg, **s)
+        assert "npx:@opengsd/gsd-core:scope" in [a.component for a in plan.actions]
+
+    def test_update_plan_includes_scope_action_for_gsd(self):
+        cfg = DoctorConfig()
+        s = _make_status_set()
+        plan = build_update_plan(cfg, **s)
+        assert "npx:@opengsd/gsd-core:scope" in [a.component for a in plan.actions]
+
+    def test_gsd_patch_action_none_when_flag_false(self):
+        from sccs.doctor.installer import _gsd_patch_action
+
+        spec = NpxToolSpec(name="x", invocation=["npx", "x"], patch_scope_boundary=False)
+        assert _gsd_patch_action(spec) is None
+
+    def test_schema_field_defaults_false(self):
+        spec = NpxToolSpec(name="x", invocation=["npx", "x"])
+        assert spec.patch_scope_boundary is False

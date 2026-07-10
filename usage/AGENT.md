@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.48.0  ·  **Python:** ≥3.10
+- **Version:** 2.49.0  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 
 ## Capabilities at a glance
@@ -43,9 +43,9 @@
 | `sccs diff` | Show diff for items. | [ITEM_NAME], -c/--category TEXT |
 | `sccs docs generate` | Generate hub README for the sync repository. | -n/--dry-run, --commit, --push |
 | `sccs doctor check` | Status table of Node.js, claude CLI, plugins, npx tools (+ opt-in CLI tools zoxide/coreutils); live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged); shows Node + CLI-tool install commands inline. | --update-check/--no-update-check |
-| `sccs doctor install` | Install missing system components after a confirm prompt per action. | --yes |
+| `sccs doctor install` | Install missing system components after a confirm prompt per action; also pins scope boundaries in externally-delivered `gsd-*` prompts (idempotent, directive-prepend). | --yes |
 | `sccs doctor optimize` | Bring the local Claude environment in line with the spec. | --strict, --yes |
-| `sccs doctor update` | Update Claude plugins and refresh npx helper tools. | --yes |
+| `sccs doctor update` | Update Claude plugins and refresh npx helper tools; re-pins scope boundaries in `gsd-*` prompts after the refresh. | --yes |
 | `sccs export` | Export selected items as ZIP archive. | -o/--output PATH, --all, -c/--category TEXT |
 | `sccs import` | Import items from an SCCS export archive. | ZIP_PATH, -n/--dry-run, --overwrite, --no-backup, --all |
 | `sccs integrations migrate-skills` | Migrate Claude Code skills to Antigravity prompts. | -n/--dry-run, --overwrite/--no-overwrite, -s/--skill TEXT |
