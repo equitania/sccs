@@ -2,7 +2,9 @@
 # Command-line interface using Click
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 import click
 
@@ -189,107 +191,15 @@ def sync(
 
     repo_path = Path(config.repository.path).expanduser()
 
-    # Check remote status before sync (unless skipped or dry-run)
     if not dry_run and not no_pull_check:
-        remote_status = get_remote_status(repo_path)
-
-        if "error" in remote_status:
-            # Non-fatal: just warn and continue
-            console.print_warning(f"Could not check remote status: {remote_status['error']}")
-        elif remote_status.get("diverged"):
-            # Diverged: offer an interactive resolution prompt.
-            # In non-TTY contexts the prompt auto-answers ABORT, preserving the
-            # previous fail-loud behaviour for CI/pipe usage.
-            ahead = remote_status.get("ahead", 0)
-            behind = remote_status.get("behind", 0)
-            console.print_warning(f"Repository diverged: {ahead} commit(s) ahead, {behind} commit(s) behind remote")
-            strategy = prompt_divergence_strategy(
-                ahead=ahead,
-                behind=behind,
-                remote=config.repository.remote,
-            )
-            if strategy is DivergenceStrategy.ABORT:
-                console.print_info(
-                    "Run 'sccs sync' in an interactive terminal to pick a strategy, "
-                    "or resolve with git manually (pull --rebase, merge, or push --force-with-lease)."
-                )
-                sys.exit(1)
-            if not apply_divergence_strategy(
-                strategy,
-                repo_path,
-                console,
-                remote=config.repository.remote,
-            ):
-                sys.exit(1)
-        elif remote_status.get("behind", 0) > 0:
-            behind = remote_status["behind"]
-            console.print_warning(f"Repository is {behind} commit(s) behind remote")
-
-            # Determine if we should auto-pull
-            should_pull = do_pull or config.repository.auto_pull
-
-            if should_pull:
-                console.print_info("Pulling remote changes...")
-                if pull(repo_path):
-                    console.print_success("Pull successful")
-                else:
-                    console.print_error("Pull failed")
-                    sys.exit(1)
-            else:
-                console.print_info("Use '--pull' flag or set 'auto_pull: true' in config")
-                console.print_info("Or use '--no-pull-check' to skip this check")
-                sys.exit(1)
-        elif remote_status.get("up_to_date"):
-            if ctx.obj.get("verbose"):
-                console.print_info("Repository is up to date with remote")
+        _handle_remote_status(ctx, console, repo_path, config, do_pull)
 
     engine = SyncEngine(config)
 
     if dry_run:
         console.print_info("Dry run - no changes will be made")
 
-    # Create conflict resolver if interactive mode
-    conflict_resolver = None
-    if interactive and not dry_run and not force:
-
-        def conflict_resolver(action: SyncAction, category_name: str) -> str:
-            """Interactive conflict resolution callback."""
-            while True:
-                resolution = console.resolve_conflict(action, category_name)
-                if resolution == "diff":
-                    # Show diff and ask again
-                    show_diff(action.item, console=console._console)
-                    continue
-                elif resolution == "merge":
-                    # Interactive hunk-by-hunk merge
-                    merge_result = interactive_merge(action, console._console)
-                    if merge_result.aborted:
-                        continue  # Re-show menu
-                    return "merged"
-                elif resolution == "editor":
-                    # Open in external editor
-                    item = action.item
-                    if item.local_path and item.local_path.exists():
-                        content = item.local_path.read_text(encoding="utf-8")
-                        suffix = item.local_path.suffix or ".txt"
-                        edited = edit_in_editor(content, suffix=suffix)
-                        if edited is not None:
-                            from sccs.utils.paths import atomic_write, create_backup
-
-                            create_backup(item.local_path, category="editor")
-                            atomic_write(item.local_path, edited)
-                            if item.repo_path:
-                                create_backup(item.repo_path, category="editor")
-                                atomic_write(item.repo_path, edited)
-                            console.print_success(f"Editor changes saved for {item.name}")
-                            return "merged"
-                        else:
-                            console.print_warning("Editor returned no changes")
-                            continue
-                    else:
-                        console.print_error("No local file to edit")
-                        continue
-                return resolution  # type: ignore[no-any-return]
+    conflict_resolver = _build_conflict_resolver(console) if (interactive and not dry_run and not force) else None
 
     # Perform sync
     result = engine.sync(
@@ -299,52 +209,7 @@ def sync(
         conflict_resolver=conflict_resolver,
     )
 
-    # Display results
-    console.print_sync_result(result, dry_run=dry_run)
-
-    # Generate hub README: auto when committing, explicit with --docs, skip with --no-docs
-    should_commit = (config.repository.auto_commit or do_commit) and not no_commit
-    should_generate_docs = do_docs if do_docs is not None else should_commit
-    if should_generate_docs and not dry_run and result.synced_items > 0:
-        from sccs.docs.generator import DocsGenerator
-
-        docs_gen = DocsGenerator(config)
-        docs_result = docs_gen.generate()
-        if docs_result.success:
-            console.print_success(f"Hub README updated ({docs_result.readmes_found} docs linked)")
-        else:
-            console.print_warning(f"Hub README generation failed: {docs_result.error}")
-
-    # Handle git operations
-    if not dry_run and result.synced_items > 0:
-        if should_commit and has_uncommitted_changes(repo_path):
-            stage_all(repo_path)
-            commit_msg = f"{config.repository.commit_prefix} Sync {result.synced_items} items"
-            commit(commit_msg, repo_path)
-            console.print_success(f"Committed: {commit_msg}")
-
-            # Push if: (auto_push OR --push) AND NOT --no-push
-            should_push = (config.repository.auto_push or do_push) and not no_push
-
-            if should_push:
-                if push(repo_path, remote=config.repository.remote):
-                    console.print_success(f"Pushed to {config.repository.remote}")
-                else:
-                    console.print_warning("Push failed")
-
-    if result.aborted:
-        console.print_warning("Sync aborted by user")
-        sys.exit(1)
-
-    if result.conflicts > 0:
-        console.print_warning(f"{result.conflicts} conflicts need manual resolution")
-        console.print_info("Tip: Use 'sccs sync -i' for interactive conflict resolution")
-        console.print_info("     Or use '--force local' / '--force repo' to resolve all at once")
-
-    if result.errors > 0 and result.conflicts == 0:
-        console.print_info("Tip: Run 'sccs sync -v' for more details on errors")
-
-    sys.exit(0 if result.success else 1)
+    _finish_sync(ctx, console, config, repo_path, result, do_commit, no_commit, do_push, no_push, do_docs, dry_run)
 
 
 @cli.command()
@@ -618,7 +483,15 @@ def config_edit(ctx: click.Context) -> None:
         return
 
     try:
-        subprocess.run([editor, str(config_path)], check=True)
+        from sccs.doctor.runner import validate_editor
+
+        validate_editor(editor)
+    except Exception as exc:  # noqa: BLE001
+        console.print_error(f"Invalid editor: {exc}")
+        return
+
+    try:
+        subprocess.run([editor, str(config_path)], check=True)  # nosec B603 - head validated above
     except FileNotFoundError:
         console.print_error(f"Editor not found: {editor}")
         console.print_info(f"Set EDITOR environment variable or open manually: {config_path}")
@@ -1043,7 +916,7 @@ def export_cmd(ctx: click.Context, output_path: Path | None, select_all: bool, c
             console.print_error("Interactive mode requires a TTY. Use --all for non-interactive export.")
             sys.exit(1)
 
-        parsed = interactive_export_selection(scanned, config, raw_config, console=console)
+        parsed = interactive_export_selection(scanned, config, console=console)
 
         if not parsed:
             console.print_warning("No items selected")
@@ -1207,6 +1080,172 @@ def _print_platform_hint(console: Console, cfg) -> None:
     console.print(f"[dim]ℹ Plattform: {current} — {'; '.join(parts)}[/dim]")
     if extra_tip:
         console.print(f"[dim]  {extra_tip}[/dim]")
+
+
+def _handle_remote_status(
+    ctx: click.Context,
+    console: Console,
+    repo_path: Path,
+    config,
+    do_pull: bool,
+) -> None:
+    """Check remote status and pull/resolve divergence before sync."""
+    remote_status = get_remote_status(repo_path)
+
+    if "error" in remote_status:
+        console.print_warning(f"Could not check remote status: {remote_status['error']}")
+        return
+
+    if remote_status.get("diverged"):
+        ahead = remote_status.get("ahead", 0)
+        behind = remote_status.get("behind", 0)
+        console.print_warning(f"Repository diverged: {ahead} commit(s) ahead, {behind} commit(s) behind remote")
+        strategy = prompt_divergence_strategy(
+            ahead=ahead,
+            behind=behind,
+            remote=config.repository.remote,
+        )
+        if strategy is DivergenceStrategy.ABORT:
+            console.print_info(
+                "Run 'sccs sync' in an interactive terminal to pick a strategy, "
+                "or resolve with git manually (pull --rebase, merge, or push --force-with-lease)."
+            )
+            sys.exit(1)
+        if not apply_divergence_strategy(
+            strategy,
+            repo_path,
+            console,
+            remote=config.repository.remote,
+        ):
+            sys.exit(1)
+        return
+
+    if remote_status.get("behind", 0) > 0:
+        behind = remote_status["behind"]
+        console.print_warning(f"Repository is {behind} commit(s) behind remote")
+        should_pull = do_pull or config.repository.auto_pull
+        if should_pull:
+            console.print_info("Pulling remote changes...")
+            if pull(repo_path):
+                console.print_success("Pull successful")
+            else:
+                console.print_error("Pull failed")
+                sys.exit(1)
+        else:
+            console.print_info("Use '--pull' flag or set 'auto_pull: true' in config")
+            console.print_info("Or use '--no-pull-check' to skip this check")
+            sys.exit(1)
+        return
+
+    if remote_status.get("up_to_date") and ctx.obj.get("verbose"):
+        console.print_info("Repository is up to date with remote")
+
+
+def _build_conflict_resolver(
+    console: Console,
+) -> Callable[[SyncAction, str], Literal["merged", "local", "repo", "skip", "abort"]]:
+    """Build the interactive conflict-resolution callback for SyncEngine."""
+
+    def _resolve(action: SyncAction, category_name: str) -> Literal["merged", "local", "repo", "skip", "abort"]:
+        while True:
+            resolution = console.resolve_conflict(action, category_name)
+            if resolution == "diff":
+                show_diff(action.item, console=console._console)
+                continue
+            if resolution == "merge":
+                merge_result = interactive_merge(action, console._console)
+                if merge_result.aborted:
+                    continue
+                return "merged"
+            if resolution == "editor":
+                result = _resolve_with_editor(action)
+                if result is not None:
+                    return result
+                continue
+            if resolution not in ("local", "repo", "skip", "abort"):
+                raise AssertionError(f"unexpected conflict resolution: {resolution!r}")
+            return resolution  # type: ignore[no-any-return]
+
+    return _resolve
+
+
+def _resolve_with_editor(
+    action: SyncAction,
+) -> Literal["merged"] | None:
+    """Resolve a conflict by opening the local file in an external editor."""
+    item = action.item
+    if not (item.local_path and item.local_path.exists()):
+        return None
+    content = item.local_path.read_text(encoding="utf-8")
+    suffix = item.local_path.suffix or ".txt"
+    edited = edit_in_editor(content, suffix=suffix)
+    if edited is None:
+        return None
+    from sccs.utils.paths import atomic_write, create_backup
+
+    create_backup(item.local_path, category="editor")
+    atomic_write(item.local_path, edited)
+    if item.repo_path:
+        create_backup(item.repo_path, category="editor")
+        atomic_write(item.repo_path, edited)
+    return "merged"
+
+
+def _finish_sync(
+    ctx: click.Context,
+    console: Console,
+    config,
+    repo_path: Path,
+    result,
+    do_commit: bool,
+    no_commit: bool,
+    do_push: bool,
+    no_push: bool,
+    do_docs: bool | None,
+    dry_run: bool,
+) -> None:
+    """Print results, generate docs, commit/push, and exit with the right code."""
+    console.print_sync_result(result, dry_run=dry_run)
+
+    should_commit = (config.repository.auto_commit or do_commit) and not no_commit
+    should_generate_docs = do_docs if do_docs is not None else should_commit
+    if should_generate_docs and not dry_run and result.synced_items > 0:
+        from sccs.docs.generator import DocsGenerator
+
+        docs_gen = DocsGenerator(config)
+        docs_result = docs_gen.generate()
+        if docs_result.success:
+            console.print_success(f"Hub README updated ({docs_result.readmes_found} docs linked)")
+        else:
+            console.print_warning(f"Hub README generation failed: {docs_result.error}")
+
+    if not dry_run and result.synced_items > 0:
+        if should_commit and has_uncommitted_changes(repo_path):
+            stage_all(repo_path)
+            commit_msg = f"{config.repository.commit_prefix} Sync {result.synced_items} items"
+            commit(commit_msg, repo_path)
+            console.print_success(f"Committed: {commit_msg}")
+
+            should_push = (config.repository.auto_push or do_push) and not no_push
+            if should_push:
+                if push(repo_path, remote=config.repository.remote):
+                    console.print_success(f"Pushed to {config.repository.remote}")
+                else:
+                    console.print_warning("Push failed")
+
+    if result.aborted:
+        console.print_warning("Sync aborted by user")
+        sys.exit(1)
+
+    if result.conflicts > 0:
+        console.print_warning(f"{result.conflicts} conflicts need manual resolution")
+        console.print_info("Tip: Use 'sccs sync -i' for interactive conflict resolution")
+        console.print_info("     Or use '--force local' / '--force repo' to resolve all at once")
+
+    if result.errors > 0 and result.conflicts == 0:
+        console.print_info("Tip: Run 'sccs sync -v' for more details on errors")
+
+    sys.exit(0 if result.success else 1)
 
 
 def _run_migration_check(

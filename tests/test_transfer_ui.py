@@ -200,7 +200,7 @@ class TestInteractiveExportSelection:
         scanned = {"claude_skills": [_item("a"), _item("b")]}  # 2 <= threshold
         console = _FakeConsole()
         with patch("sccs.transfer.ui.checkbox_with_separators", return_value=["Claude Code"]):
-            result = interactive_export_selection(scanned, export_config, {}, console=console)
+            result = interactive_export_selection(scanned, export_config, console=console)
         assert result == {"claude_skills": ["a", "b"]}
         assert console.infos  # print_info was called for the small group
 

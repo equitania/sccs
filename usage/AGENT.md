@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.39.0  ·  **Python:** ≥3.10
+- **Version:** 2.48.0  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 
 ## Capabilities at a glance

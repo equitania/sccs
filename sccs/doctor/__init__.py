@@ -33,7 +33,7 @@ from sccs.doctor.installer import (
     execute_plan,
 )
 from sccs.doctor.managed import DEFAULT_MANAGED_PATTERNS, get_doctor_managed_excludes
-from sccs.doctor.runner import DoctorError
+from sccs.doctor.runner import DoctorError, validate_command_head, validate_editor
 from sccs.doctor.schema import CliToolSpec, DoctorConfig, NodeInstallSpec, NpxToolSpec, PluginSpec
 from sccs.doctor.state import DoctorState, DoctorStateManager, NpxToolMark
 
@@ -54,6 +54,8 @@ __all__ = [
     "DoctorConfig",
     "DoctorError",
     "DoctorState",
+    "validate_command_head",
+    "validate_editor",
     "DoctorStateManager",
     "NpxToolMark",
     "ExecuteResult",

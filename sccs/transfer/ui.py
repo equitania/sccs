@@ -13,6 +13,7 @@ import questionary
 
 if TYPE_CHECKING:
     from sccs.config.schema import SccsConfig, SyncCategory
+    from sccs.output.console import Console
     from sccs.sync.item import SyncItem
     from sccs.transfer.manifest import ExportManifest, ManifestCategory
 
@@ -169,8 +170,7 @@ def build_category_groups(
 def interactive_export_selection(
     scanned: dict[str, list[SyncItem]],
     config: SccsConfig,
-    raw_config: dict,
-    console: object | None = None,
+    console: Console | None = None,
 ) -> dict[str, list[str]]:
     """Two-stage interactive selection for export.
 
@@ -222,9 +222,9 @@ def interactive_export_selection(
 
         if total <= SMALL_GROUP_THRESHOLD:
             # Small group: include everything, just show info
-            if console and hasattr(console, "print_info"):
+            if console:
                 names = ", ".join(item.name for items in group_scanned.values() for item in items)
-                console.print_info(f"  Including {group.name}: {names} ({total} item{'s' if total != 1 else ''})")  # type: ignore[union-attr]
+                console.print_info(f"  Including {group.name}: {names} ({total} item{'s' if total != 1 else ''})")
             for cat_name, items in group_scanned.items():
                 all_selections[cat_name] = [item.name for item in items]
         else:
@@ -246,7 +246,7 @@ def interactive_export_selection(
 
 def interactive_import_selection(
     manifest: ExportManifest,
-    console: object | None = None,
+    console: Console | None = None,
 ) -> dict[str, list[str]]:
     """Two-stage interactive selection for import.
 
@@ -293,9 +293,9 @@ def interactive_import_selection(
         total = sum(len(data.items) for data in group_cats.values())
 
         if total <= SMALL_GROUP_THRESHOLD:
-            if console and hasattr(console, "print_info"):
+            if console:
                 names = ", ".join(item.name for data in group_cats.values() for item in data.items)
-                console.print_info(f"  Including {group.name}: {names} ({total} item{'s' if total != 1 else ''})")  # type: ignore[union-attr]
+                console.print_info(f"  Including {group.name}: {names} ({total} item{'s' if total != 1 else ''})")
             for cat_name, data in group_cats.items():
                 all_selections[cat_name] = [item.name for item in data.items]
         else:

@@ -26,7 +26,12 @@ _CMD_METACHARS = frozenset('&|<>^%"()!\r\n')
 # Allowlist for the head (program) of any command we execute. Same character
 # class as sccs/git/operations.py:_GIT_REMOTE_PATTERN, plus '/' and '@' so we
 # can pass absolute paths and scoped npm packages downstream when needed.
-_SAFE_HEAD_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./@\-]*$")
+_SAFE_HEAD_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./@\\\-]*$")
+
+# Editor allowlist: absolute paths are legitimate for editors (unlike doctor
+# probes which are looked up on PATH), but option flags, shell metacharacters,
+# and dangerous binaries are still rejected.
+_SAFE_EDITOR_PATTERN = re.compile(r"^[A-Za-z0-9_./\\\-][A-Za-z0-9_./\\\s@\-]*$")
 
 
 class DoctorError(Exception):
@@ -39,14 +44,40 @@ class DoctorError(Exception):
         self.stderr = stderr
 
 
-def _validate_head(value: str, label: str = "command") -> None:
-    """Reject argv[0] values that look like option flags or shell metachars."""
+def validate_command_head(value: str, label: str = "command") -> None:
+    """Reject argv[0] values that look like option flags or shell metachars.
+
+    Exported so other modules (e.g. editor launchers) can apply the same
+    allowlist policy to external binaries.
+    """
     if value.startswith("-"):
         raise DoctorError(f"{label} must not start with '-': {value!r}")
     if not _SAFE_HEAD_PATTERN.match(value):
         raise DoctorError(f"{label} contains invalid characters: {value!r}")
     if value == "sudo":
         raise DoctorError("sccs doctor refuses to invoke sudo")
+
+
+def validate_editor(value: str) -> None:
+    """Validate an external editor path or name.
+
+    Editors differ from doctor probes: absolute paths (``/usr/bin/vim``)
+    and paths containing spaces (``/Applications/Vim.app/Contents/MacOS/Vim``)
+    are legitimate. We still reject option flags, shell metacharacters, and
+    obvious dangerous binaries.
+    """
+    value = value.strip()
+    if not value:
+        raise DoctorError("editor must not be empty")
+    if value.startswith("-"):
+        raise DoctorError(f"editor must not start with '-': {value!r}")
+    if not _SAFE_EDITOR_PATTERN.match(value):
+        raise DoctorError(f"editor contains invalid characters: {value!r}")
+    # Reject interpreters commonly abused as command-execution vehicles.
+    basename = value.split("/")[-1].split("\\")[-1].strip().lower()
+    dangerous = {"sudo", "bash", "sh", "zsh", "fish", "cmd.exe", "powershell.exe", "pwsh"}
+    if basename in dangerous:
+        raise DoctorError(f"refusing to use '{value}' as an editor")
 
 
 def _resolve_exec_command(
@@ -92,7 +123,7 @@ def _run(
     """Execute a command list. Validates argv[0] before exec."""
     if not cmd:
         raise DoctorError("Empty command")
-    _validate_head(cmd[0])
+    validate_command_head(cmd[0])
     exec_cmd = _resolve_exec_command(cmd, is_windows=(os.name == "nt"))
     try:
         result = subprocess.run(  # nosec B603 - shell=False, head validated above

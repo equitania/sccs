@@ -251,117 +251,139 @@ def render_doctor_report(
     console.print(table)
     console.print(f"[dim]Platform: {node.platform}[/dim]")
 
-    # Node.js install/upgrade block — surfaced below the table so `doctor check`
-    # gives the exact, copy-pasteable command (e.g. the NodeSource two-liner on
-    # Linux) instead of only flagging the version in the table. Mirrors the
-    # permission/orphan remediation blocks; the same hint is otherwise only
-    # printed by `doctor install`/`update`.
-    if not (node.installed and node.meets_minimum) and node.install_hint is not None:
-        hint = node.install_hint
-        if not node.installed:
-            headline = "Node.js missing — install:"
+    _print_node_hint(console, node, min_node_major)
+    _print_pwsh_hint(console, powershell, min_pwsh_major)
+    _print_permission_remediation(console, permissions)
+    _print_orphan_remediation(console, gsd_orphans)
+    _print_winget_path_remediation(console, cli_tools)
+
+
+def _print_node_hint(
+    console: Console,
+    node: NodeStatus,
+    min_node_major: int,
+) -> None:
+    """Print Node.js install/upgrade hint below the status table."""
+    if (node.installed and node.meets_minimum) or node.install_hint is None:
+        return
+    hint = node.install_hint
+    if not node.installed:
+        headline = "Node.js missing — install:"
+    else:
+        headline = f"Node.js v{node.version} is older than the required v{min_node_major}.x — upgrade:"
+    console.print()
+    console.print(f"[yellow]{headline}[/yellow]")
+    console.print(f"  [dim]{hint.label}[/dim]")
+    if hint.runnable and hint.cmd:
+        console.print(f"  [bold]{' '.join(hint.cmd)}[/bold]")
+    elif hint.manual_block:
+        # Render each line separately so a multi-step recipe (NodeSource:
+        # curl … | sudo -E bash -  /  sudo apt-get install -y nodejs) never
+        # collapses onto one line.
+        for line in hint.manual_block.splitlines():
+            console.print(f"  [bold]{line}[/bold]")
+    console.print()
+
+
+def _print_pwsh_hint(
+    console: Console,
+    powershell: PowerShellStatus | None,
+    min_pwsh_major: int,
+) -> None:
+    """Print PowerShell 7+ install/upgrade suggestion (Windows only)."""
+    if powershell is None or powershell.platform != "windows" or (powershell.installed and powershell.meets_minimum):
+        return
+    console.print()
+    if not powershell.installed:
+        console.print("[yellow]PowerShell 7+ not found — install (Windows 11):[/yellow]")
+        console.print(f"  [bold]{' '.join(powershell.install_cmd)}[/bold]")
+    else:
+        console.print(
+            f"[yellow]PowerShell v{powershell.version} is older than the recommended "
+            f"v{min_pwsh_major}.x — upgrade (Windows 11):[/yellow]"
+        )
+        console.print(f"  [bold]{' '.join(powershell.upgrade_cmd)}[/bold]")
+    console.print("  [dim]winget ships with Windows 11; restart the shell afterwards.[/dim]")
+    console.print()
+
+
+def _print_permission_remediation(
+    console: Console,
+    permissions: list[PermissionStatus] | None,
+) -> None:
+    """Print detailed remediation block for permission issues."""
+    if not permissions:
+        return
+    bad = [p for p in permissions if not p.ok]
+    if not bad:
+        return
+    console.print()
+    console.print("[yellow]Permission issues — run manually (SCCS never invokes sudo):[/yellow]")
+    for p in bad:
+        console.print(f"  [dim]{p.spec.purpose}[/dim]")
+        if p.offending_paths:
+            sample = "\n    ".join(p.offending_paths[:3])
+            console.print(f"    Examples:\n    {sample}")
+        if p.fix_command:
+            console.print(f"  [bold]{p.fix_command}[/bold]")
+        elif p.spec.path_kind in ("npm-root-global", "npm-bin-global"):
+            # `fix_command` is None → system prefix or multi-user dir.
+            # Reuse the installer's manual-fix block so the user never
+            # sees `sudo chown /usr/bin` from `doctor check`.
+            for line in _npm_global_fix_block(p):
+                console.print(f"  {line}")
         else:
-            headline = f"Node.js v{node.version} is older than the required v{min_node_major}.x — upgrade:"
-        console.print()
-        console.print(f"[yellow]{headline}[/yellow]")
-        console.print(f"  [dim]{hint.label}[/dim]")
-        if hint.runnable and hint.cmd:
-            console.print(f"  [bold]{' '.join(hint.cmd)}[/bold]")
-        elif hint.manual_block:
-            # Render each line separately so a multi-step recipe (NodeSource:
-            # curl … | sudo -E bash -  /  sudo apt-get install -y nodejs) never
-            # collapses onto one line.
-            for line in hint.manual_block.splitlines():
-                console.print(f"  [bold]{line}[/bold]")
+            console.print("  [dim]No safe single-line fix — see `sccs doctor install` for guidance.[/dim]")
         console.print()
 
-    # PowerShell 7+ install/upgrade suggestion (Windows only) — surfaced below
-    # the table so `doctor check` hands over the exact winget command. A
-    # suggestion only: SCCS never installs/upgrades PowerShell itself, and this
-    # never flips the exit code (has_problems ignores it → CI-friendly).
-    if (
-        powershell is not None
-        and powershell.platform == "windows"
-        and not (powershell.installed and powershell.meets_minimum)
-    ):
-        console.print()
-        if not powershell.installed:
-            console.print("[yellow]PowerShell 7+ not found — install (Windows 11):[/yellow]")
-            console.print(f"  [bold]{' '.join(powershell.install_cmd)}[/bold]")
-        else:
-            console.print(
-                f"[yellow]PowerShell v{powershell.version} is older than the recommended "
-                f"v{min_pwsh_major}.x — upgrade (Windows 11):[/yellow]"
-            )
-            console.print(f"  [bold]{' '.join(powershell.upgrade_cmd)}[/bold]")
-        console.print("  [dim]winget ships with Windows 11; restart the shell afterwards.[/dim]")
-        console.print()
 
-    # Detailed remediation block for permission issues — shown below the table
-    # so the user gets the exact `sudo chown` command (or the safe Option-A
-    # alternative for system / multi-user prefixes) to copy.
-    if permissions:
-        bad = [p for p in permissions if not p.ok]
-        if bad:
-            console.print()
-            console.print("[yellow]Permission issues — run manually (SCCS never invokes sudo):[/yellow]")
-            for p in bad:
-                console.print(f"  [dim]{p.spec.purpose}[/dim]")
-                if p.offending_paths:
-                    sample = "\n    ".join(p.offending_paths[:3])
-                    console.print(f"    Examples:\n    {sample}")
-                if p.fix_command:
-                    console.print(f"  [bold]{p.fix_command}[/bold]")
-                elif p.spec.path_kind in ("npm-root-global", "npm-bin-global"):
-                    # `fix_command` is None → system prefix or multi-user dir.
-                    # Reuse the installer's manual-fix block so the user never
-                    # sees `sudo chown /usr/bin` from `doctor check`.
-                    for line in _npm_global_fix_block(p):
-                        console.print(f"  {line}")
-                else:
-                    console.print("  [dim]No safe single-line fix — see `sccs doctor install` for guidance.[/dim]")
-                console.print()
+def _print_orphan_remediation(
+    console: Console,
+    gsd_orphans: list[GsdOrphanStatus] | None,
+) -> None:
+    """Print remediation block for orphaned doctor-managed artefacts."""
+    if not gsd_orphans:
+        return
+    flagged = [g for g in gsd_orphans if g.has_orphans]
+    if not flagged:
+        return
+    console.print()
+    console.print(
+        "[yellow]Orphaned doctor-managed artefacts (run `sccs doctor update` to move them to a backup):[/yellow]"
+    )
+    for g in flagged:
+        console.print(f"  [dim]{g.tool_name} — {g.total} orphan(s) not in the install manifest:[/dim]")
+        for orphan_path in g.orphan_paths[:20]:
+            console.print(f"    {orphan_path}")
+        if g.total > 20:
+            console.print(f"    [dim]… and {g.total - 20} more[/dim]")
+        if g.truncated:
+            console.print("    [dim](list capped — more orphans exist on disk)[/dim]")
+    console.print()
 
-    # Orphaned doctor-managed artefacts — surfaced below the table because the
-    # cleanup is opt-in (run `sccs doctor update`). Only shown when the current
-    # manifest already reveals orphans; pre-migration hosts show nothing here
-    # (the redux manifest still owns everything) and get cleaned during update.
-    if gsd_orphans:
-        flagged = [g for g in gsd_orphans if g.has_orphans]
-        if flagged:
-            console.print()
-            console.print(
-                "[yellow]Orphaned doctor-managed artefacts "
-                "(run `sccs doctor update` to move them to a backup):[/yellow]"
-            )
-            for g in flagged:
-                console.print(f"  [dim]{g.tool_name} — {g.total} orphan(s) not in the install manifest:[/dim]")
-                for orphan_path in g.orphan_paths[:20]:
-                    console.print(f"    {orphan_path}")
-                if g.total > 20:
-                    console.print(f"    [dim]… and {g.total - 20} more[/dim]")
-                if g.truncated:
-                    console.print("    [dim](list capped — more orphans exist on disk)[/dim]")
-            console.print()
 
-    # CLI tools installed (winget) but not on PATH — show the PowerShell PATH
-    # snippet below the table so the user can copy it. SCCS never edits the
-    # environment itself (consistent with the npm PATH-prefix block).
-    if cli_tools:
-        from sccs.doctor.installer import _winget_links_path_block
+def _print_winget_path_remediation(
+    console: Console,
+    cli_tools: list[CliToolStatus] | None,
+) -> None:
+    """Print PATH snippet for winget-installed CLI tools not on PATH."""
+    if not cli_tools:
+        return
+    from sccs.doctor.installer import _winget_links_path_block
 
-        off_path = [c for c in cli_tools if c.state == "installed_not_on_path"]
-        if off_path:
-            console.print()
-            console.print(
-                "[yellow]CLI tools installed but not on PATH "
-                "(SCCS never edits your environment — copy & run yourself):[/yellow]"
-            )
-            for c in off_path:
-                console.print(f"  [dim]{c.spec.name}:[/dim]")
-                for line in _winget_links_path_block(c.spec.name).splitlines():
-                    console.print(f"  {line}")
-            console.print()
+    off_path = [c for c in cli_tools if c.state == "installed_not_on_path"]
+    if not off_path:
+        return
+    console.print()
+    console.print(
+        "[yellow]CLI tools installed but not on PATH "
+        "(SCCS never edits your environment — copy & run yourself):[/yellow]"
+    )
+    for c in off_path:
+        console.print(f"  [dim]{c.spec.name}:[/dim]")
+        for line in _winget_links_path_block(c.spec.name).splitlines():
+            console.print(f"  {line}")
+    console.print()
 
 
 def has_problems(

@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from sccs.config.defaults import get_default_settings_ensure
 from sccs.config.schema import SettingsEnsure, SyncCategory
@@ -214,7 +214,9 @@ class CategoryHandler:
         *,
         dry_run: bool = False,
         force_direction: str | None = None,
-        conflict_resolver: Callable[[SyncAction, str], str] | None = None,
+        conflict_resolver: (
+            Callable[[SyncAction, str], Literal["merged", "local", "repo", "skip", "abort"]] | None
+        ) = None,
     ) -> CategorySyncResult:
         """
         Synchronize this category.

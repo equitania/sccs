@@ -44,7 +44,7 @@ from sccs.doctor.installer import (
     build_update_plan,
     execute_plan,
 )
-from sccs.doctor.runner import DoctorError, _run, _validate_head, parse_node_major
+from sccs.doctor.runner import DoctorError, _run, parse_node_major, validate_command_head
 from sccs.doctor.schema import DoctorConfig, MCPServerSpec, NodeInstallSpec, NpxToolSpec, PluginSpec
 from sccs.doctor.state import DoctorStateManager, _hash_invocation
 
@@ -122,27 +122,27 @@ class TestSchemaValidation:
 class TestRunnerSecurity:
     def test_validate_head_rejects_option_prefix(self):
         with pytest.raises(DoctorError):
-            _validate_head("--upload-pack=evil")
+            validate_command_head("--upload-pack=evil")
 
     def test_validate_head_rejects_metacharacters(self):
         with pytest.raises(DoctorError):
-            _validate_head("foo;rm -rf /")
+            validate_command_head("foo;rm -rf /")
 
     def test_validate_head_rejects_sudo(self):
         with pytest.raises(DoctorError):
-            _validate_head("sudo")
+            validate_command_head("sudo")
 
     def test_validate_head_accepts_known_safe_binaries(self):
         # The whitelist must allow standard binary names we ship in the
         # bundled defaults (brew, winget, npm, npx, node, claude).
         for binary in ("brew", "winget", "npm", "npx", "node", "claude"):
-            _validate_head(binary)
+            validate_command_head(binary)
 
     def test_validate_head_rejects_absolute_path(self):
         # Absolute paths are intentionally not allowed as argv heads — we
         # rely on PATH lookup for all bundled defaults.
         with pytest.raises(DoctorError):
-            _validate_head("/usr/bin/node")
+            validate_command_head("/usr/bin/node")
 
     def test_run_rejects_empty_cmd(self):
         with pytest.raises(DoctorError, match="Empty"):

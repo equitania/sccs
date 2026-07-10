@@ -229,6 +229,13 @@ def edit_in_editor(content: str, suffix: str = ".txt") -> str | None:
     if not editor or not shutil.which(editor):
         return None
 
+    try:
+        from sccs.doctor.runner import validate_editor
+
+        validate_editor(editor)
+    except Exception:  # noqa: BLE001
+        return None
+
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -247,7 +254,7 @@ def edit_in_editor(content: str, suffix: str = ".txt") -> str | None:
         # group/world-readable regardless of umask or platform.
         os.chmod(temp_path, 0o600)
 
-        result = subprocess.run([editor, temp_path])
+        result = subprocess.run([editor, temp_path])  # nosec B603 - head validated above
 
         if result.returncode != 0:
             return None

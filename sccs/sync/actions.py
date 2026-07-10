@@ -255,74 +255,100 @@ def determine_action(
 
     # Case 2: Only in local (new or deleted from repo)
     if exists_local and not exists_repo:
-        if last_hash is not None:
-            # Was in repo before, now deleted there
-            if sync_mode == "local_to_repo":
-                return SyncAction(
-                    item=item,
-                    action_type=ActionType.NEW_LOCAL,
-                    source_path=item.local_path,
-                    dest_path=item.repo_path,
-                    reason="Re-create in repo (local_to_repo mode)",
-                )
-            else:
-                return SyncAction(
-                    item=item,
-                    action_type=ActionType.DELETED_REPO,
-                    reason="Deleted from repo",
-                )
-        else:
-            # New in local
-            if sync_mode == "repo_to_local":
-                return SyncAction(
-                    item=item,
-                    action_type=ActionType.SKIP,
-                    reason="New local item skipped (repo_to_local mode)",
-                )
+        return _action_local_only(item, last_hash, sync_mode)
+
+    # Case 3: Only in repo (new or deleted locally)
+    if not exists_local and exists_repo:
+        return _action_repo_only(item, last_hash, sync_mode)
+
+    # Case 4: Both exist
+    return _action_both_exist(item, last_hash, sync_mode, local_hash, repo_hash)
+
+
+def _action_local_only(
+    item: SyncItem,
+    last_hash: str | None,
+    sync_mode: str,
+) -> SyncAction:
+    """Determine action when the item exists only locally."""
+    if last_hash is not None:
+        # Was in repo before, now deleted there
+        if sync_mode == "local_to_repo":
             return SyncAction(
                 item=item,
                 action_type=ActionType.NEW_LOCAL,
                 source_path=item.local_path,
                 dest_path=item.repo_path,
-                reason="New item in local",
+                reason="Re-create in repo (local_to_repo mode)",
             )
+        return SyncAction(
+            item=item,
+            action_type=ActionType.DELETED_REPO,
+            reason="Deleted from repo",
+        )
 
-    # Case 3: Only in repo (new or deleted locally)
-    if not exists_local and exists_repo:
-        if last_hash is not None:
-            # Was in local before, now deleted there
-            if sync_mode == "repo_to_local":
-                return SyncAction(
-                    item=item,
-                    action_type=ActionType.NEW_REPO,
-                    source_path=item.repo_path,
-                    dest_path=item.local_path,
-                    reason="Re-create locally (repo_to_local mode)",
-                )
-            else:
-                return SyncAction(
-                    item=item,
-                    action_type=ActionType.DELETED_LOCAL,
-                    reason="Deleted locally",
-                )
-        else:
-            # New in repo
-            if sync_mode == "local_to_repo":
-                return SyncAction(
-                    item=item,
-                    action_type=ActionType.SKIP,
-                    reason="New repo item skipped (local_to_repo mode)",
-                )
+    # New in local
+    if sync_mode == "repo_to_local":
+        return SyncAction(
+            item=item,
+            action_type=ActionType.SKIP,
+            reason="New local item skipped (repo_to_local mode)",
+        )
+    return SyncAction(
+        item=item,
+        action_type=ActionType.NEW_LOCAL,
+        source_path=item.local_path,
+        dest_path=item.repo_path,
+        reason="New item in local",
+    )
+
+
+def _action_repo_only(
+    item: SyncItem,
+    last_hash: str | None,
+    sync_mode: str,
+) -> SyncAction:
+    """Determine action when the item exists only in the repo."""
+    if last_hash is not None:
+        # Was in local before, now deleted there
+        if sync_mode == "repo_to_local":
             return SyncAction(
                 item=item,
                 action_type=ActionType.NEW_REPO,
                 source_path=item.repo_path,
                 dest_path=item.local_path,
-                reason="New item in repo",
+                reason="Re-create locally (repo_to_local mode)",
             )
+        return SyncAction(
+            item=item,
+            action_type=ActionType.DELETED_LOCAL,
+            reason="Deleted locally",
+        )
 
-    # Case 4: Both exist
-    # Check if they're the same
+    # New in repo
+    if sync_mode == "local_to_repo":
+        return SyncAction(
+            item=item,
+            action_type=ActionType.SKIP,
+            reason="New repo item skipped (local_to_repo mode)",
+        )
+    return SyncAction(
+        item=item,
+        action_type=ActionType.NEW_REPO,
+        source_path=item.repo_path,
+        dest_path=item.local_path,
+        reason="New item in repo",
+    )
+
+
+def _action_both_exist(
+    item: SyncItem,
+    last_hash: str | None,
+    sync_mode: str,
+    local_hash: str | None,
+    repo_hash: str | None,
+) -> SyncAction:
+    """Determine action when the item exists in both locations."""
     if local_hash == repo_hash:
         return SyncAction(
             item=item,
@@ -330,34 +356,11 @@ def determine_action(
             reason="Content identical",
         )
 
-    # They're different - determine which changed
     local_changed = last_hash is None or local_hash != last_hash
     repo_changed = last_hash is None or repo_hash != last_hash
 
     if local_changed and repo_changed:
-        # Both changed - conflict
-        if sync_mode == "local_to_repo":
-            return SyncAction(
-                item=item,
-                action_type=ActionType.COPY_TO_REPO,
-                source_path=item.local_path,
-                dest_path=item.repo_path,
-                reason="Both changed, preferring local (local_to_repo mode)",
-            )
-        elif sync_mode == "repo_to_local":
-            return SyncAction(
-                item=item,
-                action_type=ActionType.COPY_TO_LOCAL,
-                source_path=item.repo_path,
-                dest_path=item.local_path,
-                reason="Both changed, preferring repo (repo_to_local mode)",
-            )
-        else:
-            return SyncAction(
-                item=item,
-                action_type=ActionType.CONFLICT,
-                reason="Both local and repo changed",
-            )
+        return _action_both_changed(item, sync_mode)
 
     if local_changed:
         if sync_mode == "repo_to_local":
@@ -389,9 +392,36 @@ def determine_action(
             reason="Repo changed",
         )
 
-    # Should not reach here
     return SyncAction(
         item=item,
         action_type=ActionType.UNCHANGED,
         reason="No changes detected",
+    )
+
+
+def _action_both_changed(
+    item: SyncItem,
+    sync_mode: str,
+) -> SyncAction:
+    """Determine action when both sides changed relative to the last sync."""
+    if sync_mode == "local_to_repo":
+        return SyncAction(
+            item=item,
+            action_type=ActionType.COPY_TO_REPO,
+            source_path=item.local_path,
+            dest_path=item.repo_path,
+            reason="Both changed, preferring local (local_to_repo mode)",
+        )
+    if sync_mode == "repo_to_local":
+        return SyncAction(
+            item=item,
+            action_type=ActionType.COPY_TO_LOCAL,
+            source_path=item.repo_path,
+            dest_path=item.local_path,
+            reason="Both changed, preferring repo (repo_to_local mode)",
+        )
+    return SyncAction(
+        item=item,
+        action_type=ActionType.CONFLICT,
+        reason="Both local and repo changed",
     )

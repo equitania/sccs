@@ -1329,7 +1329,8 @@ def _managed_orphan_cleanup_actions(
             st = fresh[0] if fresh else None
             if st is None or not st.has_orphans:
                 return  # nothing orphaned against the post-install manifest
-            assert spec.managed_file_manifest is not None
+            if spec.managed_file_manifest is None:
+                raise DoctorError(f"Cannot clean up orphans for {spec.name!r}: managed_file_manifest is missing")
             config_root = expand_path(spec.managed_file_manifest).parent
             timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
             backup_root = _orphan_backup_root() / f"gsd-orphans-backup-{timestamp}"
@@ -1730,7 +1731,8 @@ def execute_plan(
                 logger.info("doctor action ok: %s", action.label)
                 continue
 
-            assert action.cmd is not None  # narrowed by is_print_only above
+            if action.cmd is None:
+                raise DoctorError(f"Action {action.label!r} is not print-only but has no command")
             proc = _run(action.cmd, check=True, capture=True, timeout=300)
             detail = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout else ""
             result.outcomes.append(ActionOutcome(label=action.label, status="executed", detail=detail))

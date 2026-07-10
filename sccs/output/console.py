@@ -2,6 +2,7 @@
 # Rich-based console output for user-friendly display
 
 from pathlib import Path
+from typing import Literal
 
 from rich.console import Console as RichConsole
 from rich.panel import Panel
@@ -328,7 +329,9 @@ class Console:
 
         return response in ("y", "yes", "j", "ja")
 
-    def resolve_conflict(self, action: SyncAction, category_name: str) -> str:
+    def resolve_conflict(
+        self, action: SyncAction, category_name: str
+    ) -> Literal["local", "repo", "diff", "merge", "editor", "skip", "abort"]:
         """
         Interactive menu to resolve a conflict.
 

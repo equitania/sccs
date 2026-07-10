@@ -4,6 +4,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from sccs.config.schema import SccsConfig
 from sccs.doctor.managed import get_doctor_managed_excludes
@@ -126,7 +127,9 @@ class SyncEngine:
         category_name: str | None = None,
         dry_run: bool = False,
         force_direction: str | None = None,
-        conflict_resolver: Callable[[SyncAction, str], str] | None = None,
+        conflict_resolver: (
+            Callable[[SyncAction, str], Literal["merged", "local", "repo", "skip", "abort"]] | None
+        ) = None,
     ) -> SyncResult:
         """
         Synchronize categories.

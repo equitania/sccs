@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 2.48.0 (10.07.2026)
+
+### Changed (Project-Audit Follow-up — maintainability hardening)
+- **Refactored oversized functions identified in the project audit.** Four functions exceeded 150 lines and were split into focused helpers:
+  - `sccs/cli.py:sync()` → `_handle_remote_status()`, `_build_conflict_resolver()`, `_resolve_with_editor()`, `_finish_sync()`.
+  - `sccs/doctor/detectors.py:StatusLineDetector._evaluate()` → `_load_settings()`, `_read_statusline()`, `_evaluate_command()`, `_check_stale_cellar()`, `_check_binary()`, `_check_script()`.
+  - `sccs/doctor/reporter.py:render_doctor_report()` → `_print_node_hint()`, `_print_pwsh_hint()`, `_print_permission_remediation()`, `_print_orphan_remediation()`, `_print_winget_path_remediation()`.
+  - `sccs/sync/actions.py:determine_action()` → `_action_local_only()`, `_action_repo_only()`, `_action_both_exist()`, `_action_both_changed()`.
+  No behavior changed; test suite remains green (1139 tests).
+- **Removed all remaining `# type: ignore` comments.** Typed `resolve_conflict()` and `interactive_export_selection()` correctly; updated call sites in `sccs/cli.py`, `sccs/sync/category.py`, `sccs/sync/engine.py` and `tests/test_transfer_ui.py`. `mypy sccs/` now reports 0 issues.
+- **Replaced production `assert` statements with explicit runtime checks.** Replaced three defensive assertions in `sccs/doctor/detectors.py` and `sccs/doctor/installer.py` (×2) with proper `if ...: raise ValueError(...)` checks so builds under `-O` / `PYTHONOPTIMIZE=1` do not silently drop validation.
+- **Hardened external editor invocations.** New `validate_editor()` in `sccs/doctor/runner.py` verifies that an editor executable exists on PATH before `sccs config edit` or the merge editor attempt to spawn it; missing editors now surface a clear error instead of failing inside `subprocess`.
+
+### Notes
+- This release is pure maintainability / audit-close-out: no new user-facing commands, no new config options, no behavior changes. 1139 tests passing; `ruff check`, `ruff format --check`, `mypy sccs/` and `bandit -ll` clean; hatchling wheel build verified.
+
+
 ## Version 2.47.0 (09.07.2026)
 
 ### Fixed (OpenCode agent export — tool permissions were fully broken)

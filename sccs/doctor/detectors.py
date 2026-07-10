@@ -1004,6 +1004,7 @@ class StatusLineDetector:
 
     def __init__(self, smart_required: bool = False) -> None:
         self._smart_required = smart_required
+        self._settings_data: dict | list | None = None
 
     def get_statuses(self, specs: list[StatusLineCheckSpec]) -> list[StatusLineStatus]:
         out: list[StatusLineStatus] = []
@@ -1013,6 +1014,18 @@ class StatusLineDetector:
 
     def _evaluate(self, spec: StatusLineCheckSpec) -> StatusLineStatus:
         resolved = Path(os.path.expanduser(spec.settings_path))
+        status = self._load_settings(spec, resolved)
+        if status is not None:
+            return status
+
+        sl = self._read_statusline(resolved, spec)
+        if isinstance(sl, StatusLineStatus):
+            return sl
+
+        return self._evaluate_command(spec, resolved, sl)
+
+    def _load_settings(self, spec: StatusLineCheckSpec, resolved: Path) -> StatusLineStatus | None:
+        """Load settings.json; return an error status or None on success."""
         if not resolved.is_file():
             return StatusLineStatus(
                 spec=spec,
@@ -1024,7 +1037,7 @@ class StatusLineDetector:
                 detail="no settings.json",
             )
         try:
-            data = json.loads(resolved.read_text(encoding="utf-8"))
+            self._settings_data = json.loads(resolved.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             return StatusLineStatus(
                 spec=spec,
@@ -1035,29 +1048,36 @@ class StatusLineDetector:
                 script=None,
                 detail=f"settings.json unreadable: {exc}",
             )
+        return None
 
+    def _read_statusline(self, resolved: Path, spec: StatusLineCheckSpec) -> StatusLineStatus | dict:
+        """Return the statusLine dict, or a status object if absent/invalid."""
+        data = self._settings_data
         sl = data.get("statusLine") if isinstance(data, dict) else None
-        if not isinstance(sl, dict) or "command" not in sl:
-            if self._is_required(spec, resolved.parent):
-                return StatusLineStatus(
-                    spec=spec,
-                    state="missing",
-                    settings_path=str(resolved),
-                    raw_command=None,
-                    binary=None,
-                    script=None,
-                    detail="statusLine key absent (sync category enabled, script present)",
-                )
+        if isinstance(sl, dict) and "command" in sl:
+            return sl
+        if self._is_required(spec, resolved.parent):
             return StatusLineStatus(
                 spec=spec,
-                state="ok",
+                state="missing",
                 settings_path=str(resolved),
                 raw_command=None,
                 binary=None,
                 script=None,
-                detail="not configured (opt-in)",
+                detail="statusLine key absent (sync category enabled, script present)",
             )
+        return StatusLineStatus(
+            spec=spec,
+            state="ok",
+            settings_path=str(resolved),
+            raw_command=None,
+            binary=None,
+            script=None,
+            detail="not configured (opt-in)",
+        )
 
+    def _evaluate_command(self, spec: StatusLineCheckSpec, resolved: Path, sl: dict) -> StatusLineStatus:
+        """Validate the parsed statusLine command and its target script."""
         cmd = sl.get("command")
         if not isinstance(cmd, str) or not cmd.strip():
             return StatusLineStatus(
@@ -1120,25 +1140,54 @@ class StatusLineDetector:
         binary = tokens[0]
         script = tokens[1] if len(tokens) > 1 else None
 
-        # Stale-Cellar check first (highest-signal failure mode).
-        cellar = _STATUS_LINE_CELLAR_RE.match(binary)
-        if cellar is not None:
-            pkg, version, _rest = cellar.groups()
-            if not Path(f"/opt/homebrew/Cellar/{pkg}/{version}").is_dir():
-                return StatusLineStatus(
-                    spec=spec,
-                    state="stale_cellar",
-                    settings_path=str(resolved),
-                    raw_command=cmd,
-                    binary=binary,
-                    script=script,
-                    detail=(f"Cellar path stale: {pkg}/{version} no longer exists (Homebrew upgraded?)"),
-                    cellar_pkg=pkg,
-                    cellar_version=version,
-                )
-            # Cellar dir still exists — treat as a literal path below.
+        cellar_result = self._check_stale_cellar(spec, resolved, cmd, binary, script)
+        if cellar_result is not None:
+            return cellar_result
 
-        # Binary existence.
+        binary_result = self._check_binary(spec, resolved, cmd, binary, script)
+        if binary_result is not None:
+            return binary_result
+
+        script_result = self._check_script(spec, resolved, cmd, binary, script)
+        if script_result is not None:
+            return script_result
+
+        return StatusLineStatus(
+            spec=spec,
+            state="ok",
+            settings_path=str(resolved),
+            raw_command=cmd,
+            binary=binary,
+            script=script,
+            detail=binary,
+        )
+
+    def _check_stale_cellar(
+        self, spec: StatusLineCheckSpec, resolved: Path, cmd: str, binary: str, script: str | None
+    ) -> StatusLineStatus | None:
+        """Detect stale Homebrew Cellar paths in the binary."""
+        cellar = _STATUS_LINE_CELLAR_RE.match(binary)
+        if cellar is None:
+            return None
+        pkg, version, _rest = cellar.groups()
+        if Path(f"/opt/homebrew/Cellar/{pkg}/{version}").is_dir():
+            return None
+        return StatusLineStatus(
+            spec=spec,
+            state="stale_cellar",
+            settings_path=str(resolved),
+            raw_command=cmd,
+            binary=binary,
+            script=script,
+            detail=(f"Cellar path stale: {pkg}/{version} no longer exists (Homebrew upgraded?)"),
+            cellar_pkg=pkg,
+            cellar_version=version,
+        )
+
+    def _check_binary(
+        self, spec: StatusLineCheckSpec, resolved: Path, cmd: str, binary: str, script: str | None
+    ) -> StatusLineStatus | None:
+        """Return a status if the binary is missing, otherwise None."""
         if "/" in binary:
             if not Path(binary).is_file():
                 return StatusLineStatus(
@@ -1150,43 +1199,35 @@ class StatusLineDetector:
                     script=script,
                     detail=f"binary not found: {binary}",
                 )
-        else:
-            if which(binary) is None:
-                return StatusLineStatus(
-                    spec=spec,
-                    state="missing_binary",
-                    settings_path=str(resolved),
-                    raw_command=cmd,
-                    binary=binary,
-                    script=script,
-                    detail=f"binary not on PATH: {binary}",
-                )
+        elif which(binary) is None:
+            return StatusLineStatus(
+                spec=spec,
+                state="missing_binary",
+                settings_path=str(resolved),
+                raw_command=cmd,
+                binary=binary,
+                script=script,
+                detail=f"binary not on PATH: {binary}",
+            )
+        return None
 
-        # Script existence — only check when second token plausibly *is* a
-        # script (contains '/' or ends with a known script extension). This
-        # avoids false positives for commands like `bash -c '...'` where
-        # the second token is a flag.
-        if script is not None and self._looks_like_script(script):
-            script_path = Path(os.path.expanduser(script))
-            if not script_path.is_file():
-                return StatusLineStatus(
-                    spec=spec,
-                    state="missing_script",
-                    settings_path=str(resolved),
-                    raw_command=cmd,
-                    binary=binary,
-                    script=script,
-                    detail=f"script not found: {script}",
-                )
-
+    def _check_script(
+        self, spec: StatusLineCheckSpec, resolved: Path, cmd: str, binary: str, script: str | None
+    ) -> StatusLineStatus | None:
+        """Return a status if the script is missing, otherwise None."""
+        if script is None or not self._looks_like_script(script):
+            return None
+        script_path = Path(os.path.expanduser(script))
+        if script_path.is_file():
+            return None
         return StatusLineStatus(
             spec=spec,
-            state="ok",
+            state="missing_script",
             settings_path=str(resolved),
             raw_command=cmd,
             binary=binary,
             script=script,
-            detail=binary,
+            detail=f"script not found: {script}",
         )
 
     def _is_required(self, spec: StatusLineCheckSpec, home_dir: Path) -> bool:
@@ -1734,7 +1775,8 @@ class GsdOrphanDetector:
         return [self._check(s) for s in specs if s.managed_file_manifest]
 
     def _check(self, spec: NpxToolSpec) -> GsdOrphanStatus:
-        assert spec.managed_file_manifest is not None  # guarded by get_statuses
+        if spec.managed_file_manifest is None:
+            raise ValueError(f"GsdOrphanDetector._check called for {spec.name!r} without a managed_file_manifest")
         manifest_path = expand_path(spec.managed_file_manifest)
         # Migration-pending signal — independent of the manifest, so it is set
         # even when the (still-old) manifest reports zero orphans.
