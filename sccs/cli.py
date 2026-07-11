@@ -32,6 +32,7 @@ from sccs.git.resolve import (
     prompt_divergence_strategy,
 )
 from sccs.output import Console, show_diff
+from sccs.output.json_emit import emit_json, emit_json_error
 from sccs.output.merge import edit_in_editor, interactive_merge
 from sccs.sync import SyncEngine
 from sccs.sync.actions import SyncAction
@@ -137,6 +138,7 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
     default=False,
     help="Offer newly available default categories during sync (default: off — use `sccs config upgrade`).",
 )
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of Rich output")
 @click.pass_context
 def sync(
     ctx: click.Context,
@@ -152,6 +154,7 @@ def sync(
     no_pull_check: bool,
     do_docs: bool,
     migrate: bool,
+    output_json: bool,
 ) -> None:
     """Synchronize files between local and repository.
 
@@ -182,12 +185,17 @@ def sync(
     try:
         config = load_config()
     except FileNotFoundError as e:
-        console.print_error(str(e))
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
         sys.exit(1)
 
     # New-category check is opt-in (default off): only when --migrate is given.
-    # The dedicated path is `sccs config upgrade`.
-    _run_migration_check(console, migrate, get_config_path())
+    # The dedicated path is `sccs config upgrade`. Skip entirely in JSON mode —
+    # the migration prompt is interactive and a GUI never drives it.
+    if not output_json:
+        _run_migration_check(console, migrate, get_config_path())
 
     repo_path = Path(config.repository.path).expanduser()
 
@@ -196,7 +204,7 @@ def sync(
 
     engine = SyncEngine(config)
 
-    if dry_run:
+    if dry_run and not output_json:
         console.print_info("Dry run - no changes will be made")
 
     conflict_resolver = _build_conflict_resolver(console) if (interactive and not dry_run and not force) else None
@@ -209,13 +217,16 @@ def sync(
         conflict_resolver=conflict_resolver,
     )
 
-    _finish_sync(ctx, console, config, repo_path, result, do_commit, no_commit, do_push, no_push, do_docs, dry_run)
+    _finish_sync(
+        ctx, console, config, repo_path, result, do_commit, no_commit, do_push, no_push, do_docs, dry_run, output_json
+    )
 
 
 @cli.command()
 @click.option("-c", "--category", help="Show status for specific category only")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of Rich tables")
 @click.pass_context
-def status(ctx: click.Context, category: str | None) -> None:
+def status(ctx: click.Context, category: str | None, output_json: bool) -> None:
     """Show synchronization status.
 
     \b
@@ -226,24 +237,35 @@ def status(ctx: click.Context, category: str | None) -> None:
     Examples:
         sccs status                  All enabled categories
         sccs status -c skills        Only skills category
+        sccs status --json           Machine-readable output
     """
     console = ctx.obj["console"]
 
     try:
         config = load_config()
     except FileNotFoundError as e:
-        console.print_error(str(e))
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
         sys.exit(1)
 
     engine = SyncEngine(config)
     statuses = engine.get_status(category_name=category)
 
     if not statuses:
+        if output_json:
+            emit_json({})
+            return
         if category:
             console.print_error(f"Category '{category}' not found or not enabled")
         else:
             console.print_warning("No enabled categories found")
         sys.exit(1)
+
+    if output_json:
+        emit_json(statuses)
+        return
 
     console.print_status(statuses)
 
@@ -257,8 +279,9 @@ def status(ctx: click.Context, category: str | None) -> None:
 @cli.command()
 @click.argument("item_name", required=False)
 @click.option("-c", "--category", help="Category to show diffs for")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of a styled diff")
 @click.pass_context
-def diff(ctx: click.Context, item_name: str | None, category: str | None) -> None:
+def diff(ctx: click.Context, item_name: str | None, category: str | None, output_json: bool) -> None:
     """Show diff for items.
 
     \b
@@ -266,13 +289,17 @@ def diff(ctx: click.Context, item_name: str | None, category: str | None) -> Non
       sccs diff -c claude_skills           Show all diffs in category
       sccs diff my-skill -c claude_skills  Show diff for specific item
       sccs diff                            Show all diffs in all categories
+      sccs diff -c claude_skills --json    Machine-readable diff output
     """
     console = ctx.obj["console"]
 
     try:
         config = load_config()
     except FileNotFoundError as e:
-        console.print_error(str(e))
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
         sys.exit(1)
 
     engine = SyncEngine(config)
@@ -281,7 +308,10 @@ def diff(ctx: click.Context, item_name: str | None, category: str | None) -> Non
     if category:
         handler = engine.get_handler(category)
         if handler is None:
-            console.print_error(f"Category '{category}' not found")
+            if output_json:
+                emit_json_error(f"Category '{category}' not found")
+            else:
+                console.print_error(f"Category '{category}' not found")
             sys.exit(1)
         categories_to_check = [(category, handler)]
     else:
@@ -292,9 +322,23 @@ def diff(ctx: click.Context, item_name: str | None, category: str | None) -> Non
                 categories_to_check.append((name, handler))
 
     if not categories_to_check:
+        if output_json:
+            emit_json({"diffs": []})
+            return
         console.print_warning("No categories to check")
         sys.exit(1)
 
+    # In JSON mode, show_diff() output is routed to a throwaway sink so no styled
+    # Panel leaks to stdout; we keep the returned DiffResult only.
+    sink = None
+    if output_json:
+        import io
+
+        from rich.console import Console as RichConsole
+
+        sink = RichConsole(file=io.StringIO())
+
+    diffs: list[dict] = []
     diff_count = 0
 
     for cat_name, handler in categories_to_check:
@@ -304,25 +348,51 @@ def diff(ctx: click.Context, item_name: str | None, category: str | None) -> Non
         if item_name:
             items = [i for i in items if i.name == item_name]
             if not items and category:
-                console.print_error(f"Item '{item_name}' not found in category '{category}'")
+                if output_json:
+                    emit_json_error(f"Item '{item_name}' not found in category '{category}'")
+                else:
+                    console.print_error(f"Item '{item_name}' not found in category '{category}'")
                 sys.exit(1)
 
         # Show diffs for items that have changes
         for item in items:
             if item.local_path and item.repo_path:
-                # Check if there are actual differences
+                has_change = False
                 if item.local_path.exists() and item.repo_path.exists():
                     local_content = item.local_path.read_text(encoding="utf-8") if item.local_path.is_file() else ""
                     repo_content = item.repo_path.read_text(encoding="utf-8") if item.repo_path.is_file() else ""
-                    if local_content != repo_content:
-                        console.print(f"\n[bold cyan]{cat_name}[/bold cyan] → [yellow]{item.name}[/yellow]")
-                        show_diff(item, console=console._console)
-                        diff_count += 1
+                    has_change = local_content != repo_content
                 elif item.local_path.exists() or item.repo_path.exists():
                     # One side exists, the other doesn't
+                    has_change = True
+
+                if not has_change:
+                    continue
+
+                if output_json:
+                    dr = show_diff(item, console=sink)
+                    diffs.append(
+                        {
+                            "category": cat_name,
+                            "item_name": dr.item_name,
+                            "has_diff": dr.has_diff,
+                            "local_exists": dr.local_exists,
+                            "repo_exists": dr.repo_exists,
+                            "local_content": dr.local_content,
+                            "repo_content": dr.repo_content,
+                            "diff_lines": dr.diff_lines,
+                            "diff_text": "\n".join(dr.diff_lines or []),
+                            "error": dr.error,
+                        }
+                    )
+                else:
                     console.print(f"\n[bold cyan]{cat_name}[/bold cyan] → [yellow]{item.name}[/yellow]")
                     show_diff(item, console=console._console)
-                    diff_count += 1
+                diff_count += 1
+
+    if output_json:
+        emit_json({"diffs": diffs})
+        return
 
     if diff_count == 0:
         console.print_info("No differences found")
@@ -386,15 +456,28 @@ def config() -> None:
 
 
 @config.command("show")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of Rich text")
 @click.pass_context
-def config_show(ctx: click.Context) -> None:
+def config_show(ctx: click.Context, output_json: bool) -> None:
     """Show current configuration."""
     console = ctx.obj["console"]
     config_path = get_config_path()
 
     if not config_path.exists():
+        if output_json:
+            emit_json_error(f"Config file not found: {config_path}", config_path=str(config_path))
+            return
         console.print_warning(f"Config file not found: {config_path}")
         console.print_info("Run 'sccs config init' to create one")
+        return
+
+    if output_json:
+        try:
+            cfg = load_config()
+        except Exception as e:
+            emit_json_error(f"Error loading config: {e}", config_path=str(config_path))
+            return
+        emit_json({"config_path": str(config_path), "config": cfg})
         return
 
     console.print(f"[bold]Config file:[/bold] {config_path}")
@@ -424,23 +507,40 @@ def config_show(ctx: click.Context) -> None:
 
 @config.command("init")
 @click.option("--force", is_flag=True, help="Overwrite existing config")
+@click.option(
+    "--repo-path",
+    "repo_path_opt",
+    default=None,
+    help="Repository path (non-interactive; skips the interactive prompt)",
+)
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of Rich text")
 @click.pass_context
-def config_init(ctx: click.Context, force: bool) -> None:
-    """Initialize configuration file."""
+def config_init(ctx: click.Context, force: bool, repo_path_opt: str | None, output_json: bool) -> None:
+    """Initialize configuration file.
+
+    \b
+    Pass --repo-path to run non-interactively (required for GUI/automation),
+    otherwise the repository path is requested interactively.
+    """
     console = ctx.obj["console"]
     config_path = get_config_path()
 
     if config_path.exists() and not force:
+        if output_json:
+            emit_json_error(f"Config already exists: {config_path}", config_path=str(config_path))
+            return
         console.print_warning(f"Config already exists: {config_path}")
         console.print_info("Use --force to overwrite")
         return
 
-    # Interactive setup
-    console.print("[bold]SCCS Configuration Setup[/bold]\n")
-
-    # Repository path
+    # Repository path: non-interactive when --repo-path is given, else prompt
     default_repo = "~/gitbase/sccs-sync"
-    repo_path = click.prompt("Repository path", default=default_repo)
+    if repo_path_opt is not None:
+        repo_path = repo_path_opt
+    else:
+        if not output_json:
+            console.print("[bold]SCCS Configuration Setup[/bold]\n")
+        repo_path = click.prompt("Repository path", default=default_repo)
 
     # Generate config
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -453,6 +553,11 @@ def config_init(ctx: click.Context, force: bool) -> None:
     )
 
     config_path.write_text(default_yaml, encoding="utf-8")
+
+    if output_json:
+        emit_json({"config_path": str(config_path), "repository_path": repo_path, "created": True})
+        return
+
     console.print_success(f"Config created: {config_path}")
 
     # Ask about enabling/disabling categories
@@ -533,12 +638,19 @@ def config_upgrade(ctx: click.Context) -> None:
 
 
 @config.command("validate")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of Rich text")
 @click.pass_context
-def config_validate(ctx: click.Context) -> None:
+def config_validate(ctx: click.Context, output_json: bool) -> None:
     """Validate configuration file."""
     console = ctx.obj["console"]
 
     is_valid, errors = validate_config_file()
+
+    if output_json:
+        emit_json({"valid": is_valid, "errors": errors})
+        if not is_valid:
+            sys.exit(1)
+        return
 
     if is_valid:
         console.print_success("Configuration is valid")
@@ -569,15 +681,19 @@ def categories() -> None:
 
 @categories.command("list")
 @click.option("--all", "show_all", is_flag=True, help="Show all categories including disabled")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of Rich tables")
 @click.pass_context
-def categories_list(ctx: click.Context, show_all: bool) -> None:
+def categories_list(ctx: click.Context, show_all: bool, output_json: bool) -> None:
     """List all categories."""
     console = ctx.obj["console"]
 
     try:
         config = load_config()
     except FileNotFoundError as e:
-        console.print_error(str(e))
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
         sys.exit(1)
 
     categories_dict = {
@@ -588,6 +704,12 @@ def categories_list(ctx: click.Context, show_all: bool) -> None:
         }
         for name, cat in config.sync_categories.items()
     }
+
+    if output_json:
+        # JSON always returns the full list (all categories with their enabled
+        # flag); --all filtering is a Rich-view concern the GUI does client-side.
+        emit_json(categories_dict)
+        return
 
     console.print_categories_list(categories_dict, show_all=show_all)
 
@@ -1203,9 +1325,15 @@ def _finish_sync(
     no_push: bool,
     do_docs: bool | None,
     dry_run: bool,
+    output_json: bool = False,
 ) -> None:
     """Print results, generate docs, commit/push, and exit with the right code."""
-    console.print_sync_result(result, dry_run=dry_run)
+    if not output_json:
+        console.print_sync_result(result, dry_run=dry_run)
+
+    committed = False
+    pushed = False
+    docs_generated = False
 
     should_commit = (config.repository.auto_commit or do_commit) and not no_commit
     should_generate_docs = do_docs if do_docs is not None else should_commit
@@ -1215,8 +1343,10 @@ def _finish_sync(
         docs_gen = DocsGenerator(config)
         docs_result = docs_gen.generate()
         if docs_result.success:
-            console.print_success(f"Hub README updated ({docs_result.readmes_found} docs linked)")
-        else:
+            docs_generated = True
+            if not output_json:
+                console.print_success(f"Hub README updated ({docs_result.readmes_found} docs linked)")
+        elif not output_json:
             console.print_warning(f"Hub README generation failed: {docs_result.error}")
 
     if not dry_run and result.synced_items > 0:
@@ -1224,14 +1354,30 @@ def _finish_sync(
             stage_all(repo_path)
             commit_msg = f"{config.repository.commit_prefix} Sync {result.synced_items} items"
             commit(commit_msg, repo_path)
-            console.print_success(f"Committed: {commit_msg}")
+            committed = True
+            if not output_json:
+                console.print_success(f"Committed: {commit_msg}")
 
             should_push = (config.repository.auto_push or do_push) and not no_push
             if should_push:
                 if push(repo_path, remote=config.repository.remote):
-                    console.print_success(f"Pushed to {config.repository.remote}")
-                else:
+                    pushed = True
+                    if not output_json:
+                        console.print_success(f"Pushed to {config.repository.remote}")
+                elif not output_json:
                     console.print_warning("Push failed")
+
+    if output_json:
+        emit_json(
+            {
+                "dry_run": dry_run,
+                "committed": committed,
+                "pushed": pushed,
+                "docs_generated": docs_generated,
+                "result": result,
+            }
+        )
+        sys.exit(0 if result.success else 1)
 
     if result.aborted:
         console.print_warning("Sync aborted by user")
@@ -2281,14 +2427,52 @@ def doctor_group() -> None:
         "fully offline status report."
     ),
 )
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of a Rich table")
 @click.pass_context
-def doctor_check(ctx: click.Context, update_check: bool) -> None:
+def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> None:
     """Print a status table of Node.js, claude CLI, plugins and npx tools."""
     from sccs.doctor.reporter import has_problems, has_updates, render_doctor_report
 
     console = ctx.obj["console"]
     doctor_cfg = _load_doctor_config()
     statuses = _collect_doctor_statuses(doctor_cfg, check_updates=update_check)
+
+    if output_json:
+        problems = has_problems(
+            node=statuses["node"],
+            claude_cli=statuses["claude_cli"],
+            plugins=statuses["plugins"],
+            npx_tools=statuses["npx_tools"],
+            permissions=statuses.get("permissions"),
+            path_prefixes=statuses.get("path_prefixes"),
+            marketplaces=statuses.get("marketplaces"),
+            bundled_skills=statuses.get("bundled_skills"),
+            browser_bundles=statuses.get("browser_bundles"),
+            status_lines=statuses.get("status_lines"),
+            gsd_orphans=statuses.get("gsd_orphans"),
+        )
+        updates = has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"])
+        emit_json(
+            {
+                "has_problems": problems,
+                "has_updates": updates,
+                "min_node_major": doctor_cfg.min_node_major,
+                "node": statuses["node"],
+                "powershell": statuses.get("powershell"),
+                "claude_cli": statuses["claude_cli"],
+                "plugins": statuses["plugins"],
+                "npx_tools": statuses["npx_tools"],
+                "permissions": statuses.get("permissions"),
+                "path_prefixes": statuses.get("path_prefixes"),
+                "marketplaces": statuses.get("marketplaces"),
+                "bundled_skills": statuses.get("bundled_skills"),
+                "browser_bundles": statuses.get("browser_bundles"),
+                "status_lines": statuses.get("status_lines"),
+                "gsd_orphans": statuses.get("gsd_orphans"),
+                "cli_tools": statuses.get("cli_tools"),
+            }
+        )
+        sys.exit(1 if problems else 0)
 
     render_doctor_report(
         console,
@@ -2334,8 +2518,9 @@ def doctor_check(ctx: click.Context, update_check: bool) -> None:
 
 @doctor_group.command("install")
 @click.option("--yes", is_flag=True, default=False, help="Skip confirm prompts (CI use only).")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON (implies non-interactive).")
 @click.pass_context
-def doctor_install(ctx: click.Context, yes: bool) -> None:
+def doctor_install(ctx: click.Context, yes: bool, output_json: bool) -> None:
     """Install missing system components after a confirm prompt per action."""
     from sccs.doctor.installer import build_install_plan, execute_plan
     from sccs.doctor.reporter import render_execute_result
@@ -2365,14 +2550,29 @@ def doctor_install(ctx: click.Context, yes: bool) -> None:
     )
 
     if plan.is_empty():
+        if output_json:
+            emit_json({"planned_actions": 0, "assume_yes": yes, "outcomes": []})
+            return
         console.print_success("Nothing to install — system is up to spec.")
         return
 
-    console.print_info(f"Planned actions: {len(plan.actions)}")
-    if yes:
-        console.print_warning("--yes given: confirm prompts will be SKIPPED.")
+    if not output_json:
+        console.print_info(f"Planned actions: {len(plan.actions)}")
+        if yes:
+            console.print_warning("--yes given: confirm prompts will be SKIPPED.")
 
-    result = execute_plan(plan, assume_yes=yes, print_fn=console.print, state_manager=state)
+    # In JSON mode force assume_yes (no interactive confirm is possible) and route
+    # execute_plan's manual-block prints to a no-op so stdout stays pure JSON.
+    assume_yes = yes or output_json
+    print_fn = (lambda *a, **k: None) if output_json else console.print
+    result = execute_plan(plan, assume_yes=assume_yes, print_fn=print_fn, state_manager=state)
+
+    if output_json:
+        emit_json({"planned_actions": len(plan.actions), "assume_yes": assume_yes, "outcomes": result.outcomes})
+        if result.failed:
+            sys.exit(1)
+        return
+
     render_execute_result(console, result)
     if result.failed:
         sys.exit(1)
@@ -2380,8 +2580,9 @@ def doctor_install(ctx: click.Context, yes: bool) -> None:
 
 @doctor_group.command("update")
 @click.option("--yes", is_flag=True, default=False, help="Skip confirm prompts (CI use only).")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON (implies non-interactive).")
 @click.pass_context
-def doctor_update(ctx: click.Context, yes: bool) -> None:
+def doctor_update(ctx: click.Context, yes: bool, output_json: bool) -> None:
     """Update Claude plugins and refresh npx helper tools."""
     from sccs.doctor.installer import build_update_plan, execute_plan
     from sccs.doctor.reporter import render_execute_result
@@ -2411,14 +2612,27 @@ def doctor_update(ctx: click.Context, yes: bool) -> None:
     )
 
     if plan.is_empty():
+        if output_json:
+            emit_json({"planned_actions": 0, "assume_yes": yes, "outcomes": []})
+            return
         console.print_success("Nothing to update.")
         return
 
-    console.print_info(f"Planned actions: {len(plan.actions)}")
-    if yes:
-        console.print_warning("--yes given: confirm prompts will be SKIPPED.")
+    if not output_json:
+        console.print_info(f"Planned actions: {len(plan.actions)}")
+        if yes:
+            console.print_warning("--yes given: confirm prompts will be SKIPPED.")
 
-    result = execute_plan(plan, assume_yes=yes, print_fn=console.print, state_manager=state)
+    assume_yes = yes or output_json
+    print_fn = (lambda *a, **k: None) if output_json else console.print
+    result = execute_plan(plan, assume_yes=assume_yes, print_fn=print_fn, state_manager=state)
+
+    if output_json:
+        emit_json({"planned_actions": len(plan.actions), "assume_yes": assume_yes, "outcomes": result.outcomes})
+        if result.failed:
+            sys.exit(1)
+        return
+
     render_execute_result(console, result)
     if result.failed:
         sys.exit(1)

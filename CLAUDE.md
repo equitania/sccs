@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.49.0
+**Version**: 2.50.0
 
 ### Key Features
 
@@ -48,6 +48,13 @@ sccs categories              # List categories
 sccs categories enable fish  # Enable category
 sccs categories disable fish # Disable category
 ```
+
+**Machine-readable output (v2.50.0)**: the Core-First commands accept `--json`
+for GUI/automation consumption (single-line JSON via `click.echo`, never the
+ANSI-forcing Rich Console): `status`, `categories list`, `config show`,
+`config validate`, `sync` (incl. `--dry-run`), `diff`, `doctor check|install|update`.
+`config init --repo-path PATH` runs non-interactively (bypasses the prompt).
+See `sccs/output/json_emit.py`.
 
 ### Testing
 

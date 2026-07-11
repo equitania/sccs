@@ -1,5 +1,15 @@
 # Release Notes
 
+## Version 2.50.0 (11.07.2026)
+
+### Added (Machine-readable `--json` output layer)
+- **Core-First commands now emit clean, single-line JSON for GUI/automation consumption.** New module `sccs/output/json_emit.py` (`to_jsonable` / `emit_json` / `emit_json_error`) recursively serializes the *existing* result objects — Pydantic models via `model_dump(mode="json")`, dataclasses via declared fields (computed `@property` values are intentionally excluded), enums→`.value`, `Path`→`str`. Driver: a native Tauri desktop GUI (`sccs-gui`) that wraps the CLI as a subprocess needs structured output instead of scraping Rich tables.
+  - **Critical design constraint**: the Rich `Console` defaults to `colored=True` → `force_terminal=True`, so it emits ANSI escapes even when stdout is piped. Every `--json` path therefore bypasses `Console` entirely and writes through `click.echo`, taking an `if output_json:` branch *before* any Rich render call.
+- **`--json` added to**: `status`, `categories list`, `config show`, `config validate`, `sync` (incl. `--dry-run`), `diff`, `doctor check`, `doctor install`, `doctor update`. Each returns the underlying `CategoryStatus` / `SccsConfig` / `SyncResult` / `DiffResult` / doctor status collection / `ExecuteResult` verbatim.
+  - `sync --json` reports `{dry_run, committed, pushed, docs_generated, result}`; `diff --json` routes `show_diff()` to a throwaway sink and emits raw `diff_lines` + a convenience `diff_text`; `doctor install|update --json` force `assume_yes` and route `execute_plan`'s manual-block prints to a no-op so stdout stays pure JSON.
+- **New `sccs config init --repo-path PATH` flag** makes config bootstrap non-interactive (bypasses the blocking `click.prompt`) — required for a GUI's first-run flow; pairs with `--json` to confirm the written path.
+- 17 new tests (`tests/test_cli_json.py`) assert every path parses via `json.loads` with zero ANSI leakage; suite now at **1168 passing**. `ruff`, `mypy sccs/`, `bandit -ll` and the hatchling wheel build are clean.
+
 ## Version 2.49.0 (10.07.2026)
 
 ### Added (Doctor — GSD scope-boundary auto-patch)
