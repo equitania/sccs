@@ -1,4 +1,4 @@
-# Plattformen / Platforms — Windows & PowerShell
+# Plattformen / Platforms — Windows, PowerShell & Zsh
 
 [Deutsch](#deutsch) · [English](#english)
 
@@ -81,6 +81,57 @@ Zusätzlich legt der Converter `conf.d/95-conveniences.ps1` mit den gewohnten Fi
 
 Die Datei lädt **zuletzt** in `conf.d/` und gewinnt damit bewusst über die automatisch konvertierten `ls`/`ll` (die oft GNU/BSD-Flags tragen, die PowerShell nicht versteht). Bearbeiten oder löschen erlaubt; mit `sccs convert fish-to-pwsh --no-conveniences` komplett überspringen.
 
+### Fish → Zsh Konvertierung — ab v2.52.0
+
+Für Rechner **ohne installierte fish-Shell** (z.B. Standard-zsh auf macOS) generiert `sccs convert fish-to-zsh` ein natives zsh-Profil aus der Fish-Konfiguration — Aliase, Env-Vars **und Funktionen** stehen dann direkt in zsh bereit:
+
+```bash
+# Vorschau
+sccs convert fish-to-zsh --dry-run
+
+# Konvertieren ins Sync-Repo
+sccs convert fish-to-zsh
+
+# Ergebnis prüfen
+ls ~/gitbase/sccs-sync/.config/zsh/
+# zshrc  conf.d/  functions/  README.md
+```
+
+**Aktivierung** (einmalig, manuell — SCCS editiert `~/.zshrc` nie selbst):
+
+```zsh
+# in ~/.zshrc:
+source ~/.config/zsh/zshrc
+```
+
+**Verteilung** auf andere Maschinen über die neue (per Default deaktivierte) Kategorie:
+
+```bash
+sccs categories enable zsh_config
+sccs sync --category zsh_config
+```
+
+Was wird konvertiert:
+
+| Fish | Zsh | Hinweis |
+|---|---|---|
+| `alias name=value` / `alias name 'value'` | `alias name='value'` | zsh-Aliase tragen Argumente nativ |
+| `set -gx VAR value` | `export VAR="value"` | unquoted `~` wird zu `$HOME` |
+| `fish_add_path /opt/bin` | duplikatsicheres `PATH`-Prepend | `[[ ":$PATH:" != … ]]`-Guard |
+| `abbr -a name expansion` | `alias name='expansion'` | |
+| `function … end` | echte zsh-Funktion `name() { … }` | Best-Effort inkl. `-d`/`--argument-names` |
+| `if/else if/for/while/switch/begin` | `if/elif/for/while/case/{ }` | auch in conf.d-Dateien |
+| `set -l/-g/-e/-q` | `local`/`typeset -g`/`unset`/`[[ -v ]]` | |
+| `command -q X` | `command -v X >/dev/null 2>&1` | ebenso `type -q`, `functions -q` |
+| `$argv`, `$argv[1]`, `(count $argv)`, `$status` | `"$@"`, `$1`, `$#`, `$?` | |
+| `(cmd)` | `$(cmd)` | Command-Substitution |
+| `*.macos.fish`, `*.linux.fish` | **konvertiert** mit `uname`-Guard | Abweichung zu fish-to-pwsh! |
+| `string`, `math`, `argparse`, `set -U`, `psub` | `# fish-untranslated:`-Kommentar | Manuell portieren |
+
+**Wichtigste Abweichung zu fish-to-pwsh**: Plattform-Dateien werden nicht übersprungen, sondern in einen `[[ "$(uname)" == "Darwin" ]]`- bzw. `"Linux"`-Guard gewickelt — ein generiertes Profil funktioniert damit auf beiden Plattformen. Außerdem werden Funktionen **übersetzt statt gestubbt**; nur zu fish-spezifische Dateien (>30 % unübersetzbare Zeilen, Event-Handler, unbalancierte Blöcke) fallen auf kommentierte Stubs zurück — es wird nie syntaktisch kaputtes zsh erzeugt (`zsh -n`-Gate in der Test-Suite).
+
+`conf.d/95-conveniences.zsh` ergänzt bewusst minimal nur, was zsh fehlt (`..`/`...`/`....`, `mkcd`); Opt-out via `--no-conveniences`. Secret-Dateien (`*secret*`, `*token*`, …) und `*.local.fish` werden weiterhin übersprungen.
+
 Querverweise: [categories.md](categories.md), [sync.md](sync.md), [doctor.md](doctor.md)
 
 ---
@@ -159,5 +210,56 @@ The converter also writes `conf.d/95-conveniences.ps1` with the Fish-style short
 | `which` / `touch` / `mkcd` | Unix helpers (resolve path / create file / make dir + cd) |
 
 This file loads **last** in `conf.d/` and intentionally wins over the auto-converted `ls`/`ll` (which often carry GNU/BSD flags PowerShell rejects). Edit or delete it, or pass `sccs convert fish-to-pwsh --no-conveniences` to skip it entirely.
+
+### Fish → Zsh Conversion — since v2.52.0
+
+For machines **without fish installed** (e.g. stock macOS zsh), `sccs convert fish-to-zsh` generates a native zsh profile from your Fish configuration — aliases, env vars **and functions** become directly available in zsh:
+
+```bash
+# Preview
+sccs convert fish-to-zsh --dry-run
+
+# Convert into the sync repo
+sccs convert fish-to-zsh
+
+# Inspect
+ls ~/gitbase/sccs-sync/.config/zsh/
+# zshrc  conf.d/  functions/  README.md
+```
+
+**Activation** (one-time, manual — SCCS never edits `~/.zshrc` itself):
+
+```zsh
+# in ~/.zshrc:
+source ~/.config/zsh/zshrc
+```
+
+**Distribution** to other machines via the new (disabled-by-default) category:
+
+```bash
+sccs categories enable zsh_config
+sccs sync --category zsh_config
+```
+
+Conversion rules:
+
+| Fish | Zsh | Note |
+|---|---|---|
+| `alias name=value` / `alias name 'value'` | `alias name='value'` | zsh aliases carry arguments natively |
+| `set -gx VAR value` | `export VAR="value"` | unquoted `~` becomes `$HOME` |
+| `fish_add_path /opt/bin` | duplicate-aware `PATH` prepend | `[[ ":$PATH:" != … ]]` guard |
+| `abbr -a name expansion` | `alias name='expansion'` | |
+| `function … end` | real zsh function `name() { … }` | Best-effort incl. `-d`/`--argument-names` |
+| `if/else if/for/while/switch/begin` | `if/elif/for/while/case/{ }` | Also inside conf.d files |
+| `set -l/-g/-e/-q` | `local`/`typeset -g`/`unset`/`[[ -v ]]` | |
+| `command -q X` | `command -v X >/dev/null 2>&1` | Same for `type -q`, `functions -q` |
+| `$argv`, `$argv[1]`, `(count $argv)`, `$status` | `"$@"`, `$1`, `$#`, `$?` | |
+| `(cmd)` | `$(cmd)` | Command substitution |
+| `*.macos.fish`, `*.linux.fish` | **converted** with a `uname` guard | Divergence from fish-to-pwsh! |
+| `string`, `math`, `argparse`, `set -U`, `psub` | `# fish-untranslated:` comment | Port by hand |
+
+**Key divergence from fish-to-pwsh**: platform files are not skipped but wrapped in a `[[ "$(uname)" == "Darwin" ]]` / `"Linux"` guard, so one generated profile works on both platforms. Functions are **translated instead of stubbed**; only overly fish-specific files (>30 % untranslatable lines, event handlers, unbalanced blocks) fall back to commented stubs — the converter never emits syntactically broken zsh (a `zsh -n` gate is part of the test suite).
+
+`conf.d/95-conveniences.zsh` deliberately adds only what zsh genuinely lacks (`..`/`...`/`....`, `mkcd`); opt out via `--no-conveniences`. Secret-like files (`*secret*`, `*token*`, …) and `*.local.fish` remain excluded.
 
 See also: [categories.md](categories.md), [sync.md](sync.md), [doctor.md](doctor.md)

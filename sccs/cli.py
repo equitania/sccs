@@ -756,8 +756,9 @@ def convert_group() -> None:
     """Convert configurations between shell formats.
 
     \b
-    Generates PowerShell-equivalent profile files from your existing
-    Fish shell configuration so the same aliases/env vars work on Windows.
+    Generates PowerShell- or zsh-equivalent profile files from your existing
+    Fish shell configuration so the same aliases/env vars/functions work on
+    Windows (fish-to-pwsh) or on machines without fish (fish-to-zsh).
 
     \b
     Source default depends on platform:
@@ -768,7 +769,8 @@ def convert_group() -> None:
     \b
     Examples:
         sccs convert fish-to-pwsh              Convert default source to repo
-        sccs convert fish-to-pwsh --dry-run    Preview without writing files
+        sccs convert fish-to-zsh               Generate zsh profile in repo
+        sccs convert fish-to-zsh --dry-run     Preview without writing files
         sccs convert fish-to-pwsh --force      Overwrite existing PS files
     """
 
@@ -903,6 +905,140 @@ def convert_fish_to_pwsh(
     console.print_success(f"\nWrote {len(report.written_files)} file(s) to {dst_path}")
     console.print_info(
         "Next: `sccs categories enable powershell_profile` and `sccs sync --category powershell_profile` on Windows"
+    )
+
+
+@convert_group.command("fish-to-zsh")
+@click.option(
+    "--src",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Source Fish config dir (default: ~/.config/fish on macOS/Linux, <repo>/.config/fish on Windows)",
+)
+@click.option(
+    "--dst",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Destination dir (default: <repo>/.config/zsh)",
+)
+@click.option("--force", is_flag=True, help="Overwrite existing zsh files")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview without writing files")
+@click.option(
+    "--conveniences/--no-conveniences",
+    default=True,
+    help=(
+        "Add comfort shortcuts zsh lacks natively (.., ..., ...., mkcd) as conf.d/95-conveniences.zsh (default: on)."
+    ),
+)
+@click.pass_context
+def convert_fish_to_zsh(
+    ctx: click.Context,
+    src: Path | None,
+    dst: Path | None,
+    force: bool,
+    dry_run: bool,
+    conveniences: bool,
+) -> None:
+    """Generate a zsh profile from Fish shell configuration.
+
+    \b
+    Converts:
+      - alias name=value / alias name 'value'  → alias name='value'
+      - set -gx VAR value                      → export VAR="value"
+      - fish_add_path /some/dir                → duplicate-aware PATH prepend
+      - abbr -a name expansion                 → alias
+      - fish functions and if/for/while/switch → best-effort zsh translation
+
+    \b
+    Unlike fish-to-pwsh, function bodies ARE translated (fish is close
+    enough to zsh); files that are too fish-specific fall back to fully
+    commented stubs so no syntactically broken zsh is ever emitted.
+    Lines without a confident equivalent stay as `# fish-untranslated:`.
+
+    \b
+    Platform files (*.macos.fish, *.linux.fish) are converted inside a
+    `[[ "$(uname)" == ... ]]` guard, so one generated profile is safe on
+    both macOS and Linux. *.local.fish and secret-like files are skipped.
+
+    \b
+    Activate by adding `source ~/.config/zsh/zshrc` to your ~/.zshrc —
+    SCCS never edits ~/.zshrc itself.
+    """
+    from sccs.convert import FishToZshConverter
+
+    console = ctx.obj["console"]
+
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        console.print_error(str(e))
+        console.print_info("Run 'sccs config init' first")
+        sys.exit(1)
+
+    repo_path = Path(config.repository.path).expanduser()
+    if src is not None:
+        src_path = src.expanduser()
+    elif get_current_platform() == "windows":
+        # On Windows, Fish is typically not installed locally — fall back to
+        # the synced copy in the repository.
+        src_path = repo_path / ".config" / "fish"
+    else:
+        src_path = Path("~/.config/fish").expanduser()
+    if dst is not None:
+        dst_path = dst.expanduser()
+    else:
+        dst_path = repo_path / ".config" / "zsh"
+
+    if not src_path.exists():
+        console.print_error(f"Source directory not found: {src_path}")
+        if src is None and get_current_platform() == "windows":
+            console.print_info("Run 'sccs sync --pull' first to fetch fish configs from the repo,")
+            console.print_info("or pass --src explicitly if Fish is installed locally.")
+        sys.exit(1)
+
+    # Refuse to clobber an existing destination unless --force or --dry-run.
+    if not dry_run and dst_path.exists() and any(dst_path.iterdir()) and not force:
+        console.print_warning(f"Destination is not empty: {dst_path}")
+        console.print_info("Use --force to overwrite (creates .bak files), or --dry-run to preview")
+        sys.exit(1)
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    console.print(f"[bold]Source:[/bold] {src_path}")
+    console.print(f"[bold]Target:[/bold] {dst_path}\n")
+
+    converter = FishToZshConverter(src_path, dst_path, include_conveniences=conveniences)
+    report = converter.convert_directory(dry_run=dry_run)
+
+    # Summary table
+    console.print("[bold]Conversion summary:[/bold]")
+    console.print(f"  Files processed:       {report.files_processed}")
+    console.print(f"  Files skipped:         {report.files_skipped}")
+    console.print(f"  Aliases:               {report.aliases_converted}")
+    console.print(f"  Env vars:              {report.env_vars_converted}")
+    console.print(f"  PATH lines:            {report.path_lines_converted}")
+    console.print(f"  Functions translated:  {report.functions_translated}")
+    console.print(f"  Functions stubbed:     {report.functions_stubbed}")
+    console.print(f"  Untranslated lines:    {report.lines_untranslated}")
+    if report.conveniences_emitted:
+        console.print("  Conveniences:          enabled (95-conveniences.zsh)")
+    else:
+        console.print("  Conveniences:          skipped (--no-conveniences)")
+
+    if report.warnings:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for warn in report.warnings:
+            console.print(f"  • {warn}")
+
+    if dry_run:
+        console.print(f"\n[dim]Would write {len(report.written_files)} file(s) to {dst_path}[/dim]")
+        return
+
+    console.print_success(f"\nWrote {len(report.written_files)} file(s) to {dst_path}")
+    console.print_info("Activate: add `source ~/.config/zsh/zshrc` to your ~/.zshrc (SCCS never edits it for you)")
+    console.print_info(
+        "Distribute: `sccs categories enable zsh_config` and `sccs sync --category zsh_config` on the target machine"
     )
 
 

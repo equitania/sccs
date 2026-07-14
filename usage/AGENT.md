@@ -25,7 +25,8 @@
 - "Doctor": inspect & repair a Claude Code environment (Node, `claude` CLI, plugins, npx tools,
   bundled skills, Playwright browsers, filesystem permissions, statusline) — CI-friendly.
 - Push Claude agents/commands/MCP servers into OpenCode (`~/.config/opencode/`), with model mapping.
-- Convert a Fish shell config into a PowerShell profile; generate a hub README for the repo.
+- Convert a Fish shell config into a PowerShell profile or a native zsh profile (best-effort
+  function translation, `uname`-guarded platform files); generate a hub README for the repo.
 - Inspect status/history/diffs and manage which categories are enabled.
 
 ## Command reference
@@ -42,6 +43,7 @@
 | `sccs config upgrade` | Check for new default categories and add them to config. | — |
 | `sccs config validate` | Validate configuration file. | --json |
 | `sccs convert fish-to-pwsh` | Generate a PowerShell profile from Fish shell configuration. | --src PATH, --dst PATH, --force, -n/--dry-run, --conveniences/--no-conveniences |
+| `sccs convert fish-to-zsh` | Generate a zsh profile from Fish shell configuration (best-effort function translation; platform files get `uname` guards; never emits broken zsh). | --src PATH, --dst PATH, --force, -n/--dry-run, --conveniences/--no-conveniences |
 | `sccs diff` | Show diff for items. | [ITEM_NAME], -c/--category TEXT, --json |
 | `sccs docs generate` | Generate hub README for the sync repository. | -n/--dry-run, --commit, --push |
 | `sccs doctor check` | Status table of Node.js, claude CLI, plugins, npx tools (+ opt-in CLI tools zoxide/coreutils); live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged); shows Node + CLI-tool install commands inline. | --update-check/--no-update-check, --json |
@@ -137,12 +139,17 @@ sccs integrations pi export-skills -s astro       # one skill only (bypasses gsd
 ```
 One-way (Claude Code is source of truth). Pi has no subagent concept: skills + agents become Pi skills, commands become prompt templates. Format-identical, so copied verbatim (no conversion, no model mapping). `gsd-*` excluded by default.
 
-### Convert Fish config to PowerShell; regenerate hub README
+### Convert Fish config to PowerShell or zsh; regenerate hub README
 ```bash
 sccs convert fish-to-pwsh --dry-run      # source defaults to ~/.config/fish
 sccs convert fish-to-pwsh --src ~/.config/fish --dst ~/profile.ps1 --force
+sccs convert fish-to-zsh --dry-run       # zsh profile → <repo>/.config/zsh (default dst)
+sccs convert fish-to-zsh --force         # activate: `source ~/.config/zsh/zshrc` in ~/.zshrc
 sccs docs generate --commit              # rebuild the repo's navigation README
 ```
+fish-to-zsh translates functions/control flow best-effort (falls back to commented stubs, never
+emits broken zsh); `*.macos.fish`/`*.linux.fish` are converted inside `uname` guards. Distribute
+via the disabled-by-default `zsh_config` category.
 
 ### Inspect & manage
 ```bash

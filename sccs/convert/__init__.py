@@ -14,6 +14,7 @@ from sccs.convert.claude_to_opencode import (
     tools_to_permission,
 )
 from sccs.convert.fish_to_pwsh import ConversionReport, FishToPwshConverter
+from sccs.convert.fish_to_zsh import FishToZshConverter, ZshConversionReport
 from sccs.convert.frontmatter import parse_frontmatter, render_frontmatter
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "TIER_KEYWORDS",
     "ConversionReport",
     "FishToPwshConverter",
+    "FishToZshConverter",
+    "ZshConversionReport",
     "convert_agent_frontmatter",
     "convert_command_frontmatter",
     "convert_mcp_server",

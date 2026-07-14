@@ -1,5 +1,19 @@
 # Release Notes
 
+## Version 2.52.0 (14.07.2026)
+
+### Added (Fish → Zsh conversion)
+- **New `sccs convert fish-to-zsh` command** generates a native zsh profile from the fish configuration — so all fish-defined aliases, env vars and functions are available on machines without fish (e.g. a stock macOS zsh). Options mirror `fish-to-pwsh` (`--src`, `--dst`, `--force`, `-n/--dry-run`, `--conveniences/--no-conveniences`); default destination is `<repo>/.config/zsh/` with an entry point `zshrc` that sources `conf.d/*.zsh` (sorted) and `functions/*.zsh`. Activation is a one-time manual `source ~/.config/zsh/zshrc` line in `~/.zshrc` — SCCS never edits `~/.zshrc` itself (the CLI prints the hint).
+- **Best-effort block translator** (`sccs/convert/zsh_block.py`) — unlike the PowerShell converter, fish function bodies and control flow ARE translated: `function/end` → `name() { }` (incl. `-d` description and `-a/--argument-names` → `local x="$1"`), `if/else if/else` → `if/elif/else/fi`, `for`/`while` → `do/done`, `switch/case` → `case/esac`, `begin/end` → `{ }`, `set -l/-g/-gx/-e/-q` → `local`/`typeset -g`/`export`/`unset`/`[[ -v ]]`, `command -q` → `command -v >/dev/null`, `status is-interactive` → `[[ -o interactive ]]`, `and`/`or` continuation lines, `$argv`→`"$@"`, `$argv[N]`→`$N`, `(count $argv)`→`$#`, `$status`→`$?`, `(cmd)`→`$(cmd)`. Bare `~` tokens expand to `$HOME` (fish expands unquoted tildes; the zsh output lands inside double quotes where `~` would stay literal).
+  - **Hard promise: never emit syntactically broken zsh.** Untranslatable fish builtins (`string`, `math`, `argparse`, `set -U`, `psub`, event handlers) stay as `# fish-untranslated:` comments; files exceeding a 30 % untranslatable threshold, unbalanced block structures, or event-handler functions fall back to fully commented stubs with a warning. A `zsh -n` syntax gate over every generated file is part of the test suite.
+- **Line rules** (`sccs/convert/zsh_rules.py`) share the regex patterns with the PowerShell rules and add the fish space-form `alias name 'value'`: `alias` → `alias name='value'` (verbatim — zsh aliases carry arguments natively, no function wrapping needed), `set -gx` → `export VAR="value"`, `fish_add_path` → duplicate-aware `[[ ":$PATH:" != *":DIR:"* ]] && export PATH=...` prepend, `abbr` → `alias`.
+- **Platform files are converted, not skipped** (divergence from `fish-to-pwsh`): `*.macos.fish` / `*.linux.fish` are translated and wrapped in a `[[ "$(uname)" == "Darwin"|"Linux" ]]` guard, so one generated profile is safe on both platforms. Secret guards (`*secret*`, `*token*`, `*credential*`, `*password*`), `*.local.fish`, `fish_history` and `fish_variables` remain excluded.
+- **Minimal conveniences block** `conf.d/95-conveniences.zsh` (opt-out via `--no-conveniences`): only what zsh genuinely lacks — `..`/`...`/`....` navigation aliases and `mkcd`. The converted `ll`/`ls` aliases work natively in zsh, so no override layer like the PowerShell variant is needed.
+- **New disabled-by-default sync category `zsh_config`** (`~/.config/zsh` ↔ `.config/zsh`, platforms macos/linux; includes `zshrc`, `conf.d/*.zsh`, `functions/*.zsh`, `README.md`; excludes `*.local.zsh`, `*secret*`, `*.bak`, `*credential*`). Adopt via `sccs config upgrade` or `sccs sync --migrate`, enable with `sccs categories enable zsh_config`.
+
+### Tests
+- New `tests/test_convert_zsh.py` (77 tests): line rules, fish-token rewrites, expression translation, block translator (incl. nesting, stub fallbacks, unbalanced structures), uname guards, directory conversion (secrets skip, dry-run, 0600 `.bak`, README preservation), CLI wiring, and a `zsh -n` syntax-validity gate (skipped when zsh is absent, e.g. on CI runners without zsh). Suite now at **1257 passing**.
+
 ## Version 2.51.0 (14.07.2026)
 
 ### Added (Self-serve capability card)
