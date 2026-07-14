@@ -11,8 +11,9 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.49.0  ·  **Python:** ≥3.10
+- **Version:** 2.51.0  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
+- **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
 ## Capabilities at a glance
 - Two-way sync of Claude Code skills/commands/hooks/agents/scripts and shell config between
@@ -31,21 +32,22 @@
 
 | Command | Purpose | Args / Flags |
 |---|---|---|
+| `sccs capability-card` | Print this capability card to stdout (raw Markdown, live version injected) — primary self-description surface for agents. | — |
 | `sccs categories disable` | Disable a category. | CATEGORY_NAME |
 | `sccs categories enable` | Enable a category. | CATEGORY_NAME |
-| `sccs categories list` | List all categories. | --all |
+| `sccs categories list` | List all categories. | --all, --json |
 | `sccs config edit` | Open configuration in editor. | — |
-| `sccs config init` | Initialize configuration file. | --force |
-| `sccs config show` | Show current configuration. | — |
+| `sccs config init` | Initialize configuration file. | --force, --repo-path PATH (non-interactive) |
+| `sccs config show` | Show current configuration. | --json |
 | `sccs config upgrade` | Check for new default categories and add them to config. | — |
-| `sccs config validate` | Validate configuration file. | — |
+| `sccs config validate` | Validate configuration file. | --json |
 | `sccs convert fish-to-pwsh` | Generate a PowerShell profile from Fish shell configuration. | --src PATH, --dst PATH, --force, -n/--dry-run, --conveniences/--no-conveniences |
-| `sccs diff` | Show diff for items. | [ITEM_NAME], -c/--category TEXT |
+| `sccs diff` | Show diff for items. | [ITEM_NAME], -c/--category TEXT, --json |
 | `sccs docs generate` | Generate hub README for the sync repository. | -n/--dry-run, --commit, --push |
-| `sccs doctor check` | Status table of Node.js, claude CLI, plugins, npx tools (+ opt-in CLI tools zoxide/coreutils); live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged); shows Node + CLI-tool install commands inline. | --update-check/--no-update-check |
-| `sccs doctor install` | Install missing system components after a confirm prompt per action; also pins scope boundaries in externally-delivered `gsd-*` prompts (idempotent, directive-prepend). | --yes |
+| `sccs doctor check` | Status table of Node.js, claude CLI, plugins, npx tools (+ opt-in CLI tools zoxide/coreutils); live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged); shows Node + CLI-tool install commands inline. | --update-check/--no-update-check, --json |
+| `sccs doctor install` | Install missing system components after a confirm prompt per action; also pins scope boundaries in externally-delivered `gsd-*` prompts (idempotent, directive-prepend). | --yes, --json |
 | `sccs doctor optimize` | Bring the local Claude environment in line with the spec. | --strict, --yes |
-| `sccs doctor update` | Update Claude plugins and refresh npx helper tools; re-pins scope boundaries in `gsd-*` prompts after the refresh. | --yes |
+| `sccs doctor update` | Update Claude plugins and refresh npx helper tools; re-pins scope boundaries in `gsd-*` prompts after the refresh. | --yes, --json |
 | `sccs export` | Export selected items as ZIP archive. | -o/--output PATH, --all, -c/--category TEXT |
 | `sccs import` | Import items from an SCCS export archive. | ZIP_PATH, -n/--dry-run, --overwrite, --no-backup, --all |
 | `sccs integrations migrate-skills` | Migrate Claude Code skills to Antigravity prompts. | -n/--dry-run, --overwrite/--no-overwrite, -s/--skill TEXT |
@@ -62,8 +64,8 @@
 | `sccs integrations status` | Show detailed integration status. | — |
 | `sccs integrations trust-repo` | Register SCCS repository as trusted in Claude Desktop. | -n/--dry-run |
 | `sccs log` | Show sync history. | --last INTEGER |
-| `sccs status` | Show synchronization status. | -c/--category TEXT |
-| `sccs sync` | Synchronize files between local and repository. | -c/--category TEXT, -n/--dry-run, -f/--force local\|repo\|newer, -i/--interactive, --commit, --no-commit, --push, --no-push, --pull, --no-pull-check, --docs/--no-docs, --migrate/--no-migrate |
+| `sccs status` | Show synchronization status. | -c/--category TEXT, --json |
+| `sccs sync` | Synchronize files between local and repository. | -c/--category TEXT, -n/--dry-run, -f/--force local\|repo\|newer, -i/--interactive, --commit, --no-commit, --push, --no-push, --pull, --no-pull-check, --docs/--no-docs, --migrate/--no-migrate, --json |
 
 Notation: `[ARG]` optional positional · `ARG` required positional · `a|b` choice · `--flag` boolean.
 
@@ -96,6 +98,8 @@ sccs diff my-skill -c claude_skills   # inspect a single item's diff first
 ```bash
 sccs export -c claude_skills -o customer.zip   # selective export (omit -c/--all for interactive picker)
 sccs export --all -o full-setup.zip            # everything, no prompt
+# Interactive picker (no --all): per detail view (groups >5 items) you first choose whether items
+# start all-selected or none-selected, then toggle individually. Same prompt on interactive import.
 # on the target machine:
 sccs import full-setup.zip --dry-run           # preview
 sccs import full-setup.zip --overwrite         # apply, with automatic backup of replaced files
@@ -171,11 +175,18 @@ sccs config show               # current config; also: validate | edit | init [-
 - **Platforms:** categories can be platform-gated (e.g. `fish_config` is macOS-only by default).
 
 ## Machine-readable outputs
-- **None.** All output is human-oriented Rich console text — there are no `--json`/`--format` flags.
-  For programmatic use, rely on **exit codes**: `sccs doctor check` exits non-zero when problems exist
-  (an *available update* is informational only and does NOT affect the exit code — pass `--no-update-check`
-  in CI to skip the network call entirely); config/sync errors also exit non-zero. State persists as YAML under `~/.config/sccs/`
-  (`.sync_state.yaml`, doctor state) — read those files directly if you need structured state.
+- **`--json`** (Core-First commands, single-line JSON on stdout via `click.echo`, never the ANSI Rich
+  console): `status`, `categories list`, `config show`, `config validate`, `sync` (incl. `--dry-run`),
+  `diff`, `doctor check|install|update`. Implementation: `sccs/output/json_emit.py`. Use these for
+  GUI/automation consumption instead of scraping the Rich text.
+- **Self-serve card:** `sccs capability-card` → this card as raw Markdown (self-description; version
+  always live-injected).
+- **Non-interactive escapes:** `config init --repo-path PATH` bypasses the interactive prompt.
+- **Exit codes:** `sccs doctor check` exits non-zero when problems exist (an *available update* is
+  informational only and does NOT affect the exit code — pass `--no-update-check` in CI to skip the
+  network call entirely); config/sync errors also exit non-zero.
+- **State:** persists as YAML under `~/.config/sccs/` (`.sync_state.yaml`, doctor state) — read those
+  files directly if you need structured state.
 
 ## Deeper docs
 - `docs/usage/sync.md` — workflows, conflict resolution, backups, config schema.

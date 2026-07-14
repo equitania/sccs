@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.50.0
+**Version**: 2.51.0
 
 ### Key Features
 
@@ -16,6 +16,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Git Integration**: Auto-commit and push after sync operations
 - **Doctor Update-Check** (v2.42.0): `sccs doctor check` flags OUTDATED plugins/npx tools when a newer version exists upstream (`npm view` for npm-backed tools, marketplace manifest for plugins); informational only, `--no-update-check` for offline mode
 - **GSD Scope-Boundary Auto-Patch** (v2.49.0): `sccs doctor install/update` prepends a SCOPE BOUNDARY directive to externally-delivered `gsd-*` prompts that run unbounded `find`/`grep -r` scans not pinned to the git project root. Idempotent (versioned sentinel), directive-prepend only (vendor snippets untouched), gated by `NpxToolSpec.patch_scope_boundary`
+- **Self-serve Capability Card** (v2.51.0): `sccs capability-card` prints the agent capability card (`usage/AGENT.md`) as raw Markdown to stdout with the live `__version__` injected into the header. Card is bundled into the wheel via hatchling `force-include` (`sccs/data/AGENT.md`), with a repo-checkout fallback for editable installs. See `_find_capability_card()` in `sccs/cli.py`
+- **Export/Import Pre-selection Prompt** (v2.51.0): the interactive two-stage export/import asks, per detail view (groups with >5 items), whether items start all-selected or all-deselected — so users can pick just a few without deselecting each entry. `prompt_default_checked()` threads a `default_checked` flag into the item-choice builders in `sccs/transfer/ui.py`
 
 ## Commands
 

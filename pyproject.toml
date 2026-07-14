@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sccs"
-version = "2.50.0"
+version = "2.51.0"
 description = "SkillsCommandsConfigsSync - Unified YAML-configured synchronization for Claude Code files"
 readme = "README.md"
 license = "AGPL-3.0"
@@ -71,6 +71,11 @@ Issues = "https://github.com/equitania/sccs/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["sccs"]
+
+# Bundle the agent capability card into the wheel so `sccs capability-card`
+# can serve it from an installed (non-editable) package.
+[tool.hatch.build.targets.wheel.force-include]
+"usage/AGENT.md" = "sccs/data/AGENT.md"
 
 [tool.ruff]
 line-length = 120

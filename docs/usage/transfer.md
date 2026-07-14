@@ -44,6 +44,12 @@ Die interaktive Auswahl zeigt alle verfügbaren Items gruppiert nach Kategorie m
   [✔] config.fish  (macos only)
 ```
 
+**Vorauswahl pro Detailansicht** *(ab v2.51.0)*: Bevor die Item-Checkbox einer Gruppe mit mehr als
+5 Items erscheint, fragt SCCS, ob die Items **alle vorausgewählt** (bisheriges Verhalten) oder
+**alle abgewählt** starten sollen. So lassen sich gezielt wenige Items anklicken, ohne jeden Eintrag
+einzeln abzuwählen. Gilt gleichermaßen für Export und Import; Gruppen mit ≤5 Items werden weiterhin
+automatisch komplett übernommen.
+
 ### Import
 
 ```bash
@@ -114,6 +120,11 @@ The interactive selection shows all available items grouped by category with che
   ── Fish Shell (macos only) ──
   [✔] config.fish  (macos only)
 ```
+
+**Per-detail-view pre-selection** *(since v2.51.0)*: before the item checkbox of any group with more
+than 5 items appears, SCCS asks whether items start **all pre-selected** (legacy behaviour) or
+**all deselected**, so you can cherry-pick a few items without deselecting every entry. Applies to
+both export and import; groups with ≤5 items are still auto-included in full.
 
 ### Import
 

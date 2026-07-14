@@ -87,6 +87,32 @@ def checkbox_with_separators(
     return list(result)
 
 
+def prompt_default_checked(group_name: str, total: int) -> bool:
+    """Ask whether stage-2 items start all-selected or all-deselected.
+
+    Shown once per detail view (per group entering the item-level checkbox),
+    so the user can pre-select all items or start from an empty selection and
+    pick only the desired ones.
+
+    Returns:
+        True to pre-check every item (legacy behaviour), False to start empty.
+
+    Raises:
+        SystemExit: On Ctrl-C (user abort).
+    """
+    choice = questionary.select(
+        f"{group_name}: how should the {total} items start?",
+        choices=[
+            questionary.Choice("All pre-selected — deselect the ones you don't want", value=True),
+            questionary.Choice("None pre-selected — pick only the ones you want", value=False),
+        ],
+        style=_sccs_style(),
+    ).ask()
+    if choice is None:
+        raise SystemExit(0)
+    return bool(choice)
+
+
 # ── Category Grouping ──────────────────────────────────────────
 
 
@@ -228,8 +254,9 @@ def interactive_export_selection(
             for cat_name, items in group_scanned.items():
                 all_selections[cat_name] = [item.name for item in items]
         else:
-            # Large group: show item-level checkbox
-            choices = _build_group_item_choices(group_scanned, config)
+            # Large group: ask the initial selection state, then show item-level checkbox
+            default_checked = prompt_default_checked(group.name, total)
+            choices = _build_group_item_choices(group_scanned, config, default_checked)
             selected_values = checkbox_with_separators(
                 f"Select {group.name} items to export ({total} available):",
                 choices=choices,
@@ -299,7 +326,8 @@ def interactive_import_selection(
             for cat_name, data in group_cats.items():
                 all_selections[cat_name] = [item.name for item in data.items]
         else:
-            choices = _build_import_item_choices(group_cats)
+            default_checked = prompt_default_checked(group.name, total)
+            choices = _build_import_item_choices(group_cats, default_checked)
             selected_values = checkbox_with_separators(
                 f"Select {group.name} items to import ({total} available):",
                 choices=choices,
@@ -317,8 +345,13 @@ def interactive_import_selection(
 def _build_group_item_choices(
     group_scanned: dict[str, list[SyncItem]],
     config: SccsConfig,
+    default_checked: bool = True,
 ) -> list[questionary.Choice | questionary.Separator]:
-    """Build item-level checkbox choices for a single group."""
+    """Build item-level checkbox choices for a single group.
+
+    Args:
+        default_checked: Initial checkbox state for every item (True pre-selects all).
+    """
     choices: list[questionary.Choice | questionary.Separator] = []
 
     for cat_name, items in sorted(group_scanned.items()):
@@ -331,15 +364,20 @@ def _build_group_item_choices(
 
         for item in sorted(items, key=lambda i: i.name):
             value = f"{cat_name}::{item.name}"
-            choices.append(questionary.Choice(title=item.name, value=value, checked=True))
+            choices.append(questionary.Choice(title=item.name, value=value, checked=default_checked))
 
     return choices
 
 
 def _build_import_item_choices(
     group_cats: dict[str, ManifestCategory],
+    default_checked: bool = True,
 ) -> list[questionary.Choice | questionary.Separator]:
-    """Build item-level checkbox choices for import within a group."""
+    """Build item-level checkbox choices for import within a group.
+
+    Args:
+        default_checked: Initial checkbox state for every item (True pre-selects all).
+    """
     choices: list[questionary.Choice | questionary.Separator] = []
 
     for cat_name, cat_data in sorted(group_cats.items()):
@@ -353,7 +391,7 @@ def _build_import_item_choices(
             if item.platform_hint:
                 label += f"  ({item.platform_hint} only)"
             value = f"{cat_name}::{item.name}"
-            choices.append(questionary.Choice(title=label, value=value, checked=True))
+            choices.append(questionary.Choice(title=label, value=value, checked=default_checked))
 
     return choices
 

@@ -1,5 +1,21 @@
 # Release Notes
 
+## Version 2.51.0 (14.07.2026)
+
+### Added (Self-serve capability card)
+- **New `sccs capability-card` command** prints the agent capability card (`usage/AGENT.md`) as raw Markdown to stdout — the primary self-description surface for LLMs/agents that want to *use* the tool without repo or website access. Output goes through `click.echo` (never the Rich `Console`) so the Markdown arrives byte-for-byte; no options.
+  - **Live version injection**: `_CARD_VERSION_RE` rewrites the card's `**Version:** X.Y.Z` header line to the running `__version__` at print time, so the header can never go stale.
+  - **Bundling & fallback**: the card is force-included into the wheel (`[tool.hatch.build.targets.wheel.force-include]` → `sccs/data/AGENT.md`). `_find_capability_card()` resolves bundled package data first, then falls back to the repo `usage/AGENT.md` for editable installs, then a clean `SystemExit(1)` error.
+  - The card itself was refreshed: added the `**Self-serve:**` header bullet and a `capability-card` table row, corrected the now-outdated "Machine-readable outputs: None" section to document the v2.50.0 `--json` layer, and tagged the `--json`/`--repo-path` flags onto the relevant command rows.
+
+### Added (Export/Import pre-selection prompt)
+- **The interactive two-stage export/import now asks, per detail view, whether items start all-selected or all-deselected.** For any group with more than `SMALL_GROUP_THRESHOLD` (5) items, `prompt_default_checked()` shows a two-option `questionary.select` before the item checkbox — "All pre-selected" (legacy behaviour, default) or "None pre-selected". This lets a user pick just a few items without deselecting every other entry.
+  - Implementation threads a `default_checked` flag through `_build_group_item_choices()` / `_build_import_item_choices()` in `sccs/transfer/ui.py`, replacing the previously hard-coded `checked=True`. Applies to both `sccs export` and `sccs import`. Stage-1 group selection and the ≤5-item auto-include path are unchanged.
+
+### Tests
+- New `tests/test_cli_capability_card.py` (prints card, live-version injection, command surface, `--help` listing, missing-card error path, stale-version replacement).
+- `tests/test_transfer_ui.py` extended: `prompt_default_checked` behaviour (True/False/Ctrl-C), builder `default_checked` state, and an export flow where "None pre-selected" + no toggle yields an empty selection.
+
 ## Version 2.50.0 (11.07.2026)
 
 ### Added (Machine-readable `--json` output layer)

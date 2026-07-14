@@ -27,6 +27,7 @@ from sccs.transfer.ui import (
     interactive_export_selection,
     interactive_import_selection,
     parse_selections,
+    prompt_default_checked,
 )
 
 # ── Helpers ─────────────────────────────────────────────────────
@@ -208,9 +209,13 @@ class TestInteractiveExportSelection:
         scanned = {"claude_skills": [_item(f"s{i}") for i in range(6)]}  # 6 > threshold
         # Stage 1 selects the group; Stage 2 selects two items.
         side = [["Claude Code"], ["claude_skills::s0", "claude_skills::s3"]]
-        with patch("sccs.transfer.ui.checkbox_with_separators", side_effect=side):
+        with (
+            patch("sccs.transfer.ui.prompt_default_checked", return_value=True) as pdc,
+            patch("sccs.transfer.ui.checkbox_with_separators", side_effect=side),
+        ):
             result = interactive_export_selection(scanned, export_config, {})
         assert result == {"claude_skills": ["s0", "s3"]}
+        pdc.assert_called_once()  # detail-view pre-selection prompt shown once for the large group
 
 
 # ── interactive_import_selection ────────────────────────────────
@@ -250,9 +255,13 @@ class TestInteractiveImportSelection:
     def test_large_group_shows_item_checkbox(self):
         manifest = _import_manifest(6)
         side = [["Claude Code"], ["claude_skills::s1", "claude_skills::s4"]]
-        with patch("sccs.transfer.ui.checkbox_with_separators", side_effect=side):
+        with (
+            patch("sccs.transfer.ui.prompt_default_checked", return_value=True) as pdc,
+            patch("sccs.transfer.ui.checkbox_with_separators", side_effect=side),
+        ):
             result = interactive_import_selection(manifest)
         assert result == {"claude_skills": ["s1", "s4"]}
+        pdc.assert_called_once()
 
 
 # ── Choice builders ─────────────────────────────────────────────
@@ -262,8 +271,67 @@ def test_build_group_item_choices(export_config):
     scanned = {"claude_skills": [_item("b"), _item("a")], "empty_cat": []}
     choices = _build_group_item_choices(scanned, export_config)
     # One separator + two item choices (empty_cat skipped)
-    values = [c.value for c in choices if not isinstance(c, questionary.Separator)]
+    items = [c for c in choices if not isinstance(c, questionary.Separator)]
+    values = [c.value for c in items]
     assert values == ["claude_skills::a", "claude_skills::b"]  # sorted by name
+    assert all(c.checked for c in items)  # default_checked defaults to True
+
+
+def test_build_group_item_choices_default_unchecked(export_config):
+    scanned = {"claude_skills": [_item("a"), _item("b")]}
+    choices = _build_group_item_choices(scanned, export_config, default_checked=False)
+    items = [c for c in choices if not isinstance(c, questionary.Separator)]
+    assert items and all(not c.checked for c in items)
+
+
+def test_build_import_item_choices_respects_default_checked():
+    cats = {
+        "claude_skills": ManifestCategory(
+            description="Skills",
+            item_type="directory",
+            local_path="~/.claude/skills",
+            items=[_manifest_item("a"), _manifest_item("b")],
+        ),
+    }
+    checked = _build_import_item_choices(cats, default_checked=True)
+    unchecked = _build_import_item_choices(cats, default_checked=False)
+    assert all(c.checked for c in checked if not isinstance(c, questionary.Separator))
+    assert all(not c.checked for c in unchecked if not isinstance(c, questionary.Separator))
+
+
+# ── prompt_default_checked ──────────────────────────────────────
+
+
+class TestPromptDefaultChecked:
+    def test_returns_true_when_all_preselected(self):
+        fake = MagicMock()
+        fake.ask.return_value = True
+        with patch("sccs.transfer.ui.questionary.select", return_value=fake):
+            assert prompt_default_checked("Claude Code", 6) is True
+
+    def test_returns_false_when_none_preselected(self):
+        fake = MagicMock()
+        fake.ask.return_value = False
+        with patch("sccs.transfer.ui.questionary.select", return_value=fake):
+            assert prompt_default_checked("Claude Code", 6) is False
+
+    def test_none_result_raises_systemexit(self):
+        fake = MagicMock()
+        fake.ask.return_value = None  # Ctrl-C
+        with patch("sccs.transfer.ui.questionary.select", return_value=fake), pytest.raises(SystemExit):
+            prompt_default_checked("Claude Code", 6)
+
+
+def test_export_none_preselected_yields_empty_selection(export_config):
+    """When the user picks 'None pre-selected' and toggles nothing, the group is empty."""
+    scanned = {"claude_skills": [_item(f"s{i}") for i in range(6)]}
+    side = [["Claude Code"], []]  # Stage 1 picks group; Stage 2 confirms with nothing toggled
+    with (
+        patch("sccs.transfer.ui.prompt_default_checked", return_value=False),
+        patch("sccs.transfer.ui.checkbox_with_separators", side_effect=side),
+    ):
+        result = interactive_export_selection(scanned, export_config, {})
+    assert result == {}
 
 
 def test_build_import_item_choices_with_platform_hint():
