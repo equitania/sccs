@@ -97,11 +97,10 @@ ls ~/gitbase/sccs-sync/.config/zsh/
 # zshrc  conf.d/  functions/  README.md
 ```
 
-**Aktivierung** (einmalig, manuell — SCCS editiert `~/.zshrc` nie selbst):
+**Aktivierung** (einmalig — SCCS editiert `~/.zshrc` nie selbst, daher als fertiger Copy-Paste-Einzeiler; idempotent, mehrfaches Ausführen erzeugt keine Duplikate):
 
 ```zsh
-# in ~/.zshrc:
-source ~/.config/zsh/zshrc
+grep -qxF 'source ~/.config/zsh/zshrc' ~/.zshrc 2>/dev/null || echo 'source ~/.config/zsh/zshrc' >> ~/.zshrc
 ```
 
 **Verteilung** auf andere Maschinen über die neue (per Default deaktivierte) Kategorie:
@@ -227,11 +226,10 @@ ls ~/gitbase/sccs-sync/.config/zsh/
 # zshrc  conf.d/  functions/  README.md
 ```
 
-**Activation** (one-time, manual — SCCS never edits `~/.zshrc` itself):
+**Activation** (one-time — SCCS never edits `~/.zshrc` itself, so it ships as a ready copy-paste one-liner; idempotent, re-running never duplicates the line):
 
 ```zsh
-# in ~/.zshrc:
-source ~/.config/zsh/zshrc
+grep -qxF 'source ~/.config/zsh/zshrc' ~/.zshrc 2>/dev/null || echo 'source ~/.config/zsh/zshrc' >> ~/.zshrc
 ```
 
 **Distribution** to other machines via the new (disabled-by-default) category:

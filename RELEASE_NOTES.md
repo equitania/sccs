@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.52.1 (15.07.2026)
+
+### Changed (zsh activation UX)
+- **Ready copy-paste one-liner instead of prose instructions** for activating the generated zsh profile. The hard rule stays untouched — SCCS never edits `~/.zshrc` itself — but everywhere the user was told to "add `source ~/.config/zsh/zshrc` to your ~/.zshrc" they now get a ready, idempotent one-liner: `grep -qxF 'source ~/.config/zsh/zshrc' ~/.zshrc 2>/dev/null || echo 'source ~/.config/zsh/zshrc' >> ~/.zshrc` (exact-line match — re-running never duplicates; `>>` creates a missing `~/.zshrc`). Single source of truth is the new `ACTIVATION_ONE_LINER` constant in `sccs/convert/zsh_templates.py`, used by the CLI success output of `sccs convert fish-to-zsh`, the generated `zshrc` header comment and the generated `README.md` (activation section + target-machine note). Docs updated accordingly (`docs/usage/platforms.md` DE+EN, `usage/AGENT.md`, `README.md`).
+
+### Tests
+- `tests/test_convert_zsh.py`: new assertions that the `grep -qxF` one-liner appears in the generated `zshrc` header, the generated `README.md` and the (ANSI-stripped) CLI success output.
+
 ## Version 2.52.0 (14.07.2026)
 
 ### Added (Fish → Zsh conversion)

@@ -961,7 +961,8 @@ def convert_fish_to_zsh(
     both macOS and Linux. *.local.fish and secret-like files are skipped.
 
     \b
-    Activate by adding `source ~/.config/zsh/zshrc` to your ~/.zshrc —
+    Activate by running the idempotent one-liner printed after conversion
+    (adds `source ~/.config/zsh/zshrc` to ~/.zshrc exactly once) —
     SCCS never edits ~/.zshrc itself.
     """
     from sccs.convert import FishToZshConverter
@@ -1035,8 +1036,13 @@ def convert_fish_to_zsh(
         console.print(f"\n[dim]Would write {len(report.written_files)} file(s) to {dst_path}[/dim]")
         return
 
+    from sccs.convert.zsh_templates import ACTIVATION_ONE_LINER
+
     console.print_success(f"\nWrote {len(report.written_files)} file(s) to {dst_path}")
-    console.print_info("Activate: add `source ~/.config/zsh/zshrc` to your ~/.zshrc (SCCS never edits it for you)")
+    console.print_info("Activate — copy & paste once (idempotent; SCCS never edits ~/.zshrc for you):")
+    # click.echo, not Rich: the one-liner must never be soft-wrapped or
+    # syntax-highlighted, or copy-paste would break mid-string.
+    click.echo(f"  {ACTIVATION_ONE_LINER}")
     console.print_info(
         "Distribute: `sccs categories enable zsh_config` and `sccs sync --category zsh_config` on the target machine"
     )

@@ -144,7 +144,7 @@ One-way (Claude Code is source of truth). Pi has no subagent concept: skills + a
 sccs convert fish-to-pwsh --dry-run      # source defaults to ~/.config/fish
 sccs convert fish-to-pwsh --src ~/.config/fish --dst ~/profile.ps1 --force
 sccs convert fish-to-zsh --dry-run       # zsh profile → <repo>/.config/zsh (default dst)
-sccs convert fish-to-zsh --force         # activate: `source ~/.config/zsh/zshrc` in ~/.zshrc
+sccs convert fish-to-zsh --force         # prints idempotent copy-paste activation one-liner
 sccs docs generate --commit              # rebuild the repo's navigation README
 ```
 fish-to-zsh translates functions/control flow best-effort (falls back to commented stubs, never

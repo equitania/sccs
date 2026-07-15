@@ -581,6 +581,14 @@ class TestZshConverterDirectory:
         assert "conf.d" in content
         assert "functions" in content
         assert "source ~/.config/zsh/zshrc" in content  # activation hint
+        assert "grep -qxF" in content  # idempotent copy-paste one-liner (v2.52.1)
+
+    def test_readme_contains_activation_one_liner(self, fish_tree: Path, tmp_path: Path) -> None:
+        dst = tmp_path / "zsh"
+        FishToZshConverter(fish_tree, dst).convert_directory()
+        readme = (dst / "README.md").read_text(encoding="utf-8")
+        assert "grep -qxF 'source ~/.config/zsh/zshrc'" in readme
+        assert ">> ~/.zshrc" in readme
 
 
 class TestZshConveniences:
@@ -685,6 +693,7 @@ class TestFishToZshCli:
         assert result.exit_code == 0, result.output
         cleaned = _ANSI_RE.sub("", result.output)
         assert "source ~/.config/zsh/zshrc" in cleaned
+        assert "grep -qxF" in cleaned  # idempotent copy-paste one-liner (v2.52.1)
         assert "zsh_config" in cleaned
 
     def test_no_conveniences_flag(self, fish_tree: Path, tmp_path: Path) -> None:
