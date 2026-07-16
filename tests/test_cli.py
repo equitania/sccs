@@ -963,6 +963,7 @@ class TestIntegrationsCommand:
             patch("sccs.integrations.detectors.ClaudeDesktopDetector") as mock_cd_cls,
             patch("sccs.integrations.opencode.OpenCodeDetector") as mock_oc_cls,
             patch("sccs.integrations.pi.PiDetector") as mock_pi_cls,
+            patch("sccs.integrations.codex.CodexDetector") as mock_codex_cls,
         ):
             mock_ag = MagicMock()
             mock_ag.get_info.return_value = None
@@ -983,6 +984,11 @@ class TestIntegrationsCommand:
             mock_pi.get_info.return_value = None
             mock_pi.is_installed.return_value = False
             mock_pi_cls.return_value = mock_pi
+
+            mock_codex = MagicMock()
+            mock_codex.get_info.return_value = None
+            mock_codex.is_installed.return_value = False
+            mock_codex_cls.return_value = mock_codex
 
             result = runner.invoke(cli, ["integrations", "status"])
         assert result.exit_code == 0

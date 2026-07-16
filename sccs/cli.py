@@ -1659,7 +1659,7 @@ def integrations_group() -> None:
 
     \b
     Detect and manage integrations with Antigravity IDE, Claude Desktop,
-    OpenCode and Pi.
+    OpenCode, Pi and OpenAI Codex.
 
     \b
     Examples:
@@ -1668,6 +1668,7 @@ def integrations_group() -> None:
         sccs integrations trust-repo        Register SCCS repo as trusted
         sccs integrations opencode status   OpenCode export status
         sccs integrations pi status         Pi export status
+        sccs integrations codex status      Codex export status
     """
 
 
@@ -1702,7 +1703,10 @@ def integrations_status(ctx: click.Context) -> None:
     pi_detector = _make_pi_detector()
     pi_info = pi_detector.get_info()
 
-    if ag_info is None and cd_info is None and oc_info is None and pi_info is None:
+    codex_detector = _make_codex_detector()
+    codex_info = codex_detector.get_info()
+
+    if ag_info is None and cd_info is None and oc_info is None and pi_info is None and codex_info is None:
         console.print("[dim]No integrations detected[/dim]")
         return
 
@@ -1741,6 +1745,19 @@ def integrations_status(ctx: click.Context) -> None:
             f"  skills to export: {len(pi_skill_gaps)} · "
             f"agents to export: {len(pi_agent_gaps)} · "
             f"commands to export: {len(pi_command_gaps)}"
+        )
+
+    # Codex section
+    if codex_info is not None:
+        console.print(f"\n[bold]Codex[/bold] detected at {codex_info.codex_dir}")
+        codex_exclude = _resolve_codex_excludes()
+        codex_skill_gaps = codex_detector.get_skill_gaps(exclude_patterns=codex_exclude)
+        codex_agent_gaps = codex_detector.get_agent_gaps(exclude_patterns=codex_exclude)
+        codex_command_gaps = codex_detector.get_command_gaps(exclude_patterns=codex_exclude)
+        console.print(
+            f"  skills to export: {len(codex_skill_gaps)} · "
+            f"agents to export: {len(codex_agent_gaps)} · "
+            f"commands to export: {len(codex_command_gaps)}"
         )
 
 
@@ -2421,6 +2438,212 @@ def pi_export_all(ctx: click.Context, dry_run: bool, overwrite: bool) -> None:
     for kind in ("skills", "agents", "commands"):
         console.print(f"[bold]Exporting {kind}…[/bold]")
         _run_pi_export(ctx, kind, dry_run, overwrite, ())
+
+
+# --- Codex integration sub-group ---
+
+
+@integrations_group.group("codex")
+def codex_group() -> None:
+    """Export Claude Code artefacts to OpenAI Codex (codex CLI).
+
+    \b
+    Codex reads skills in the agentskills.io SKILL.md format from
+    ~/.agents/skills/, so Claude skills are copied verbatim. Claude agents are
+    converted into Codex agent TOML files (~/.codex/agents/), and Claude
+    commands are wrapped as Codex skills (Codex custom prompts are deprecated;
+    skills are the official migration target).
+
+    \b
+    Examples:
+        sccs integrations codex status            Show Codex integration status
+        sccs integrations codex export-skills     Copy CC skills -> Codex skills
+        sccs integrations codex export-agents     Convert CC agents -> Codex TOML
+        sccs integrations codex export-commands   Wrap CC commands as Codex skills
+        sccs integrations codex export-all        Export skills, agents and commands
+    """
+
+
+def _resolve_codex_excludes() -> list[str]:
+    """Glob patterns to skip on Codex export.
+
+    Combines the doctor-managed patterns (gsd-*, playwright-cli — same registry
+    the sync engine excludes) with the user's optional ``codex.exclude``. Falls
+    back to the bundled doctor defaults when no config file exists, so
+    plugin-managed artefacts stay excluded out of the box.
+    """
+    from sccs.doctor.managed import get_doctor_managed_excludes
+    from sccs.doctor.schema import DoctorConfig
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        return get_doctor_managed_excludes(DoctorConfig())
+
+    patterns = get_doctor_managed_excludes(config.doctor)
+    user_extra = getattr(config.codex, "exclude", None) or []
+    return patterns + list(user_extra)
+
+
+def _make_codex_detector():
+    """Build a CodexDetector honouring the configured dir overrides."""
+    from sccs.integrations.codex import CodexDetector
+    from sccs.utils.paths import expand_path
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        return CodexDetector()
+
+    base = getattr(config.codex, "base_dir", None)
+    skills = getattr(config.codex, "skills_dir", None)
+    return CodexDetector(
+        codex_dir=expand_path(base) if base else None,
+        skills_dir=expand_path(skills) if skills else None,
+    )
+
+
+def _resolve_codex_model_maps() -> tuple[dict, dict]:
+    """Effective (model_map, reasoning_effort_map) for a CLI run.
+
+    Codex has no live model discovery, so this is static defaults + the user's
+    config override only (codex.model_map / extra_model_map /
+    reasoning_effort_map).
+    """
+    from sccs.convert.claude_to_codex import (
+        DEFAULT_CODEX_MODEL_MAP,
+        DEFAULT_CODEX_REASONING_EFFORT_MAP,
+    )
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        return dict(DEFAULT_CODEX_MODEL_MAP), dict(DEFAULT_CODEX_REASONING_EFFORT_MAP)
+    return config.codex.effective_model_map, config.codex.effective_reasoning_effort_map
+
+
+@codex_group.command("status")
+@click.pass_context
+def codex_status(ctx: click.Context) -> None:
+    """Show Codex installation and export gaps."""
+    console = ctx.obj["console"]
+    detector = _make_codex_detector()
+    info = detector.get_info()
+
+    if info is None:
+        console.print("[dim]Codex is not installed (~/.codex/ not found)[/dim]")
+        return
+
+    console.print(f"[bold]Codex[/bold] detected at {info.codex_dir}")
+    console.print(f"  skills target: {info.skills_dir} · agents target: {info.agents_dir}")
+
+    exclude = _resolve_codex_excludes()
+    model_map, reasoning_map = _resolve_codex_model_maps()
+    skill_gaps = detector.get_skill_gaps(exclude_patterns=exclude)
+    agent_gaps = detector.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude)
+    command_gaps = detector.get_command_gaps(exclude_patterns=exclude)
+
+    for title, gaps in (
+        ("Skills to export", skill_gaps),
+        ("Agents to export (as TOML)", agent_gaps),
+        ("Commands to export (as skills)", command_gaps),
+    ):
+        console.print(f"\n[bold]{title} ({len(gaps)}):[/bold]")
+        for gap in gaps:
+            if getattr(gap, "collision", False):
+                label = "[red]collision — skipped[/red]"
+            elif gap.needs_update:
+                label = "[yellow]outdated[/yellow]"
+            else:
+                label = "[red]missing[/red]"
+            console.print(f"  {gap.name} — {label}")
+
+
+def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
+    """Shared body for the three Codex export commands.
+
+    kind is one of 'skills', 'agents', 'commands'. Prints the result and exits
+    non-zero on errors via _print_conversion_result.
+    """
+    from sccs.integrations.codex import (
+        convert_agents_to_codex,
+        convert_commands_to_codex,
+        export_skills_to_codex,
+    )
+
+    console = ctx.obj["console"]
+    detector = _make_codex_detector()
+    if not detector.is_installed():
+        console.print_error("Codex is not installed (~/.codex/ not found)")
+        sys.exit(1)
+
+    # Explicit name selection overrides the default exclude (the user asked for
+    # a specific artefact by name, even a doctor-managed one).
+    exclude = None if selected_names else _resolve_codex_excludes()
+    selected = list(selected_names) if selected_names else None
+
+    if kind == "agents":
+        model_map, reasoning_map = _resolve_codex_model_maps()
+        gaps = detector.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude)
+        export_fn, unit = convert_agents_to_codex, "agents"
+    elif kind == "commands":
+        gaps = detector.get_command_gaps(exclude_patterns=exclude)
+        export_fn, unit = convert_commands_to_codex, "commands"
+    else:
+        gaps = detector.get_skill_gaps(exclude_patterns=exclude)
+        export_fn, unit = export_skills_to_codex, "skills"
+
+    if not gaps:
+        console.print_success(f"All {unit} are already up to date in Codex")
+        return
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    result = export_fn(gaps, dry_run=dry_run, overwrite_existing=overwrite, selected=selected)
+    _print_conversion_result(console, result, dry_run=dry_run, verbose=ctx.obj["verbose"], unit=unit)
+
+
+@codex_group.command("export-skills")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing skills (default: yes)")
+@click.option("-s", "--skill", "skills", multiple=True, help="Limit to specific skill (repeatable)")
+@click.pass_context
+def codex_export_skills(ctx: click.Context, dry_run: bool, overwrite: bool, skills: tuple[str, ...]) -> None:
+    """Copy Claude skills into Codex skills (~/.agents/skills/)."""
+    _run_codex_export(ctx, "skills", dry_run, overwrite, skills)
+
+
+@codex_group.command("export-agents")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing agents (default: yes)")
+@click.option("-a", "--agent", "agents", multiple=True, help="Limit to specific agent (repeatable)")
+@click.pass_context
+def codex_export_agents(ctx: click.Context, dry_run: bool, overwrite: bool, agents: tuple[str, ...]) -> None:
+    """Convert Claude agents into Codex agent TOML files (~/.codex/agents/)."""
+    _run_codex_export(ctx, "agents", dry_run, overwrite, agents)
+
+
+@codex_group.command("export-commands")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing commands (default: yes)")
+@click.option("-c", "--command", "commands", multiple=True, help="Limit to specific command (repeatable)")
+@click.pass_context
+def codex_export_commands(ctx: click.Context, dry_run: bool, overwrite: bool, commands: tuple[str, ...]) -> None:
+    """Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md)."""
+    _run_codex_export(ctx, "commands", dry_run, overwrite, commands)
+
+
+@codex_group.command("export-all")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.option("--overwrite/--no-overwrite", default=True, help="Update existing artefacts (default: yes)")
+@click.pass_context
+def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool) -> None:
+    """Export skills, agents and commands to Codex in one run."""
+    console = ctx.obj["console"]
+    for kind in ("skills", "agents", "commands"):
+        console.print(f"[bold]Exporting {kind}…[/bold]")
+        _run_codex_export(ctx, kind, dry_run, overwrite, ())
 
 
 # --- Doctor command group ---

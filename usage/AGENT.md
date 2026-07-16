@@ -25,6 +25,8 @@
 - "Doctor": inspect & repair a Claude Code environment (Node, `claude` CLI, plugins, npx tools,
   bundled skills, Playwright browsers, filesystem permissions, statusline) — CI-friendly.
 - Push Claude agents/commands/MCP servers into OpenCode (`~/.config/opencode/`), with model mapping.
+- Push Claude skills/agents/commands one-way into Pi (`~/.pi/agent/`) and OpenAI Codex
+  (skills verbatim → `~/.agents/skills/`, agents → `~/.codex/agents/*.toml`, commands wrapped as skills).
 - Convert a Fish shell config into a PowerShell profile or a native zsh profile (best-effort
   function translation, `uname`-guarded platform files); generate a hub README for the repo.
 - Inspect status/history/diffs and manage which categories are enabled.
@@ -63,6 +65,11 @@
 | `sccs integrations pi export-commands` | Copy Claude commands into Pi prompt templates (~/.pi/agent/prompts/). | -n/--dry-run, --overwrite/--no-overwrite, -c/--command TEXT |
 | `sccs integrations pi export-all` | Export skills, agents and commands to Pi in one run. | -n/--dry-run, --overwrite/--no-overwrite |
 | `sccs integrations pi status` | Show Pi installation and export gaps. | — |
+| `sccs integrations codex export-skills` | Copy Claude skills into Codex skills (~/.agents/skills/). | -n/--dry-run, --overwrite/--no-overwrite, -s/--skill TEXT |
+| `sccs integrations codex export-agents` | Convert Claude agents into Codex agent TOML files (~/.codex/agents/). | -n/--dry-run, --overwrite/--no-overwrite, -a/--agent TEXT |
+| `sccs integrations codex export-commands` | Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md). | -n/--dry-run, --overwrite/--no-overwrite, -c/--command TEXT |
+| `sccs integrations codex export-all` | Export skills, agents and commands to Codex in one run. | -n/--dry-run, --overwrite/--no-overwrite |
+| `sccs integrations codex status` | Show Codex installation and export gaps. | — |
 | `sccs integrations status` | Show detailed integration status. | — |
 | `sccs integrations trust-repo` | Register SCCS repository as trusted in Claude Desktop. | -n/--dry-run |
 | `sccs log` | Show sync history. | --last INTEGER |
@@ -138,6 +145,20 @@ sccs integrations pi export-all                   # skills + agents → ~/.pi/ag
 sccs integrations pi export-skills -s astro       # one skill only (bypasses gsd-* exclude)
 ```
 One-way (Claude Code is source of truth). Pi has no subagent concept: skills + agents become Pi skills, commands become prompt templates. Format-identical, so copied verbatim (no conversion, no model mapping). `gsd-*` excluded by default.
+
+### Push artefacts to OpenAI Codex (codex CLI)
+```bash
+sccs integrations codex status                    # skills/agents/commands still to export
+sccs integrations codex export-skills --dry-run
+sccs integrations codex export-all                # skills verbatim → ~/.agents/skills/, agents → ~/.codex/agents/*.toml
+sccs integrations codex export-agents -a reviewer # one agent only (bypasses gsd-* exclude)
+```
+One-way (Claude Code is source of truth). Skills copy verbatim (identical agentskills.io format);
+agents become Codex agent TOML (body → `developer_instructions`, model alias → Codex model +
+reasoning effort, read-only tool sets → `sandbox_mode = "read-only"`); commands are wrapped as
+skills (Codex prompts are deprecated). The bundled model map is static — override via
+`codex.model_map` in config. Name collisions: a real skill always wins over a same-named command
+(skipped with a warning). `gsd-*` excluded by default. No MCP merge / no CLAUDE.md→AGENTS.md (v1).
 
 ### Convert Fish config to PowerShell or zsh; regenerate hub README
 ```bash

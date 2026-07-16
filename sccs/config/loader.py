@@ -337,6 +337,17 @@ def _merge_with_defaults(data: dict) -> dict:
     if "opencode" in data:
         result["opencode"] = data["opencode"]
 
+    # `pi` and `codex` follow the same rule as `doctor`/`opencode` above: both
+    # are absent from DEFAULT_CONFIG and rely on their Pydantic default_factory,
+    # so a user-supplied block must be passed through verbatim. The `pi` branch
+    # was missing until v2.53.0 — pi.base_dir/pi.exclude overrides in
+    # config.yaml were silently dropped.
+    if "pi" in data:
+        result["pi"] = data["pi"]
+
+    if "codex" in data:
+        result["codex"] = data["codex"]
+
     return result
 
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sccs"
-version = "2.52.1"
+version = "2.53.0"
 description = "SkillsCommandsConfigsSync - Unified YAML-configured synchronization for Claude Code files"
 readme = "README.md"
 license = "AGPL-3.0"
@@ -58,6 +58,9 @@ dev = [
     "types-PyYAML>=6.0.0",
     "pre-commit>=4.0.0",
     "bandit>=1.9.0",
+    # Test-only TOML parser for round-tripping the hand-rolled Codex agent
+    # TOML emitter (Python 3.11+ uses stdlib tomllib instead).
+    "tomli>=2.0.0,<3.0.0; python_version < '3.11'",
 ]
 
 [project.scripts]

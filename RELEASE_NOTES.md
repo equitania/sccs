@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 2.53.0 (16.07.2026)
+
+### Added (OpenAI Codex integration)
+- **New `sccs integrations codex` sub-group** exports Claude Code artefacts one-way into the [OpenAI Codex CLI](https://developers.openai.com/codex/): `status`, `export-skills`, `export-agents`, `export-commands`, `export-all` (all with `-n/--dry-run`, `--overwrite/--no-overwrite` and selective `-s`/`-a`/`-c`). Doctor-managed artefacts (`gsd-*`, `playwright-cli`) are excluded by default; extend via `codex.exclude`, bypass per run with explicit name selection.
+  - **Skills → `~/.agents/skills/<name>/` (verbatim)**: Codex reads skills in the open agentskills.io standard — the `SKILL.md` format is identical to Claude Code, so the whole directory is copied via `safe_copy` (symlink-rejecting), no conversion. Note the target: Codex's *user* skills live in `~/.agents/skills/`, NOT `~/.codex/skills/` (reserved for OpenAI-bundled system skills).
+  - **Agents → `~/.codex/agents/<name>.toml`**: Markdown+frontmatter is converted to a Codex agent TOML file (`name`/`description`/`developer_instructions` = body). The Claude model alias maps to a Codex model **plus `model_reasoning_effort`** (opus→high, sonnet→medium, haiku→low); a `tools:` allowlist containing only read-only tools becomes `sandbox_mode = "read-only"`, anything else is dropped with ONE collected warning (Codex governs access via sandbox/approval policy, not per tool). The bundled model map is a static offline default (Codex has no discovery command) — override via `codex.model_map`/`extra_model_map`/`reasoning_effort_map`.
+  - **Commands → wrapped as Codex skills** (`~/.agents/skills/<name>/SKILL.md`): Codex custom prompts (`~/.codex/prompts/`) are officially deprecated; skills are the documented migration target. Body stays verbatim; `$ARGUMENTS`/`$1` placeholders and dropped frontmatter fields produce warnings. **Collision protection**: a command whose name is claimed by a real skill (a Claude skill of the same name, or an on-disk skill directory carrying more than the wrapped SKILL.md) is never written — the skill wins, the command is skipped with a warning; previously wrapped commands stay idempotently re-exportable.
+  - New hand-rolled minimal TOML emitter `sccs/convert/toml_write.py` (strings only — the one shape we emit; multi-line literal `'''` blocks preferred, escaped `"""` fallback). No runtime dependency added; every emitted document is round-trip-verified through a real TOML parser in the tests (dev-only `tomli` for Python 3.10).
+  - New modules `sccs/convert/claude_to_codex.py` (pure conversion rules) and `sccs/integrations/codex.py` (`CodexDetector` + writers, hybrid of the Pi verbatim-copy and OpenCode converted-content patterns). New optional `CodexConfig` block (`base_dir`, `skills_dir`, `model_map`, `extra_model_map`, `reasoning_effort_map`, `exclude`) — backwards-compatible. `integrations status` gained a Codex section. Out of scope for v1 (deliberate): MCP merge into `~/.codex/config.toml`, CLAUDE.md → AGENTS.md.
+  - New bilingual doc `docs/usage/codex.md`; README, CLI reference and the agent capability card updated.
+
+### Fixed
+- **`pi:` config block was silently dropped by the loader**: `_merge_with_defaults` had no passthrough branch for `pi` (unlike `doctor`/`opencode`), so `pi.base_dir`/`pi.exclude` overrides in `config.yaml` never reached the Pydantic model and the bundled defaults always won. Added the passthrough (plus the equivalent branch for the new `codex` block) with regression tests.
+
+### Tests
+- New `tests/test_codex_convert.py` (37 — model/tool mapping, command wrapping, TOML emitter round-trips incl. `'''`-runs, quotes/backslashes, CRLF, unicode), `tests/test_codex_detector.py` (16 — install marker, skill/agent/command gaps, collisions, re-export idempotency), `tests/test_codex_export.py` (12 — dir copy, TOML/SKILL.md materialisation, dry-run, overwrite, collision never writes), `tests/test_codex_config.py` (8 — CodexConfig defaults/overrides, loader passthrough incl. `pi` regression), `tests/test_codex_cli.py` (5 — help, not-installed exits, dry-run happy path). Suite now at **1347 passing**.
+
 ## Version 2.52.1 (15.07.2026)
 
 ### Changed (zsh activation UX)

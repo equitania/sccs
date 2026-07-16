@@ -63,13 +63,20 @@ sccs doctor install              # Installiert fehlende Komponenten (Confirm pro
 sccs doctor install --yes        # Skip Confirms (CI use only)
 sccs doctor update               # Plugins + npx-Tools aktualisieren
 
-# Integrationen (Antigravity, Claude Desktop, OpenCode)
+# Integrationen (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
 sccs integrations status                       # Integrations-Report
 sccs integrations opencode status              # OpenCode: Installation + offene Konvertierungen
 sccs integrations opencode map-models          # CC-Modelle den OpenCode-Modellen zuweisen
 sccs integrations opencode export-agents -n    # Agents konvertieren (Vorschau)
 sccs integrations opencode export-commands -n  # Commands konvertieren (Vorschau)
 sccs integrations opencode merge-mcp -n        # MCP-Server in opencode.json mergen (Vorschau)
+sccs integrations pi status                    # Pi: Installation + offene Exporte
+sccs integrations pi export-all -n             # Skills/Agents/Commands nach Pi (Vorschau)
+sccs integrations codex status                 # Codex: Installation + offene Exporte
+sccs integrations codex export-skills -n       # Skills verbatim nach ~/.agents/skills (Vorschau)
+sccs integrations codex export-agents -n       # Agents -> Codex-TOML (Vorschau)
+sccs integrations codex export-commands -n     # Commands als Codex-Skills verpacken (Vorschau)
+sccs integrations codex export-all -n          # Alles in einem Lauf (Vorschau)
 ```
 
 ---
@@ -131,11 +138,18 @@ sccs doctor install              # Install missing components (confirm per actio
 sccs doctor install --yes        # Skip confirms (CI use only)
 sccs doctor update               # Update plugins + refresh npx tools
 
-# Integrations (Antigravity, Claude Desktop, OpenCode)
+# Integrations (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
 sccs integrations status                       # Integration report
 sccs integrations opencode status              # OpenCode: install + outstanding conversions
 sccs integrations opencode map-models          # Assign CC models to OpenCode models
 sccs integrations opencode export-agents -n    # Convert agents (preview)
 sccs integrations opencode export-commands -n  # Convert commands (preview)
 sccs integrations opencode merge-mcp -n        # Merge MCP servers into opencode.json (preview)
+sccs integrations pi status                    # Pi: install + outstanding exports
+sccs integrations pi export-all -n             # Skills/agents/commands to Pi (preview)
+sccs integrations codex status                 # Codex: install + outstanding exports
+sccs integrations codex export-skills -n       # Copy skills verbatim to ~/.agents/skills (preview)
+sccs integrations codex export-agents -n       # Agents -> Codex TOML (preview)
+sccs integrations codex export-commands -n     # Wrap commands as Codex skills (preview)
+sccs integrations codex export-all -n          # Everything in one run (preview)
 ```

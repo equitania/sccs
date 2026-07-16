@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.52.1
+**Version**: 2.53.0
 
 ### Key Features
 
@@ -18,6 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **GSD Scope-Boundary Auto-Patch** (v2.49.0): `sccs doctor install/update` prepends a SCOPE BOUNDARY directive to externally-delivered `gsd-*` prompts that run unbounded `find`/`grep -r` scans not pinned to the git project root. Idempotent (versioned sentinel), directive-prepend only (vendor snippets untouched), gated by `NpxToolSpec.patch_scope_boundary`
 - **Self-serve Capability Card** (v2.51.0): `sccs capability-card` prints the agent capability card (`usage/AGENT.md`) as raw Markdown to stdout with the live `__version__` injected into the header. Card is bundled into the wheel via hatchling `force-include` (`sccs/data/AGENT.md`), with a repo-checkout fallback for editable installs. See `_find_capability_card()` in `sccs/cli.py`
 - **Export/Import Pre-selection Prompt** (v2.51.0): the interactive two-stage export/import asks, per detail view (groups with >5 items), whether items start all-selected or all-deselected — so users can pick just a few without deselecting each entry. `prompt_default_checked()` threads a `default_checked` flag into the item-choice builders in `sccs/transfer/ui.py`
+- **OpenAI Codex Integration** (v2.53.0): `sccs integrations codex` exports Claude artefacts one-way to the Codex CLI. Skills verbatim → `~/.agents/skills/` (identical agentskills.io SKILL.md format; NOT `~/.codex/skills/`, which is reserved for system skills); agents → `~/.codex/agents/*.toml` (body → `developer_instructions`, model alias → Codex model + `model_reasoning_effort`, read-only tool sets → `sandbox_mode`); commands wrapped as Codex skills (Codex prompts are deprecated). Collision rule: real skills always win over same-named commands. Hand-rolled TOML emitter in `sccs/convert/toml_write.py` (round-trip-tested); static model map (no discovery in Codex), override via `CodexConfig`. No MCP merge / no CLAUDE.md→AGENTS.md in v1
 - **Fish → Zsh Conversion** (v2.52.0): `sccs convert fish-to-zsh` generates a native zsh profile from the fish config for machines without fish. Best-effort translation of functions AND control flow (`sccs/convert/zsh_block.py`); platform files converted inside `uname` guards; every generated file validated with `zsh -n` (fallback to commented stubs — never emits broken zsh). New disabled-by-default category `zsh_config`; activation via idempotent copy-paste one-liner printed after conversion and shown in the generated README (v2.52.1; SCCS never edits `~/.zshrc` itself — `ACTIVATION_ONE_LINER` in `sccs/convert/zsh_templates.py`)
 
 ## Commands
@@ -111,12 +112,13 @@ sccs/
 │   ├── exporter.py       # Scan + ZIP creation
 │   ├── importer.py       # ZIP extraction (zip-slip + symlink rejection)
 │   └── ui.py             # questionary checkbox helpers
-├── integrations/         # Antigravity IDE + Claude Desktop + OpenCode + Pi
+├── integrations/         # Antigravity IDE + Claude Desktop + OpenCode + Pi + Codex
 │   ├── detectors.py      # AntigravityDetector, ClaudeDesktopDetector
 │   ├── antigravity.py    # Skill→Prompt migration logic
 │   ├── claude_desktop.py # Trusted-folder registration
 │   ├── opencode.py       # OpenCodeDetector, agent/command convert, MCP merge
-│   └── pi.py             # PiDetector, skill/agent/command export (pi.dev, verbatim copy)
+│   ├── pi.py             # PiDetector, skill/agent/command export (pi.dev, verbatim copy)
+│   └── codex.py          # CodexDetector, skill copy + agent TOML + command skill-wrap
 ├── convert/              # Fish → PowerShell / Fish → Zsh profile conversion
 │   ├── fish_to_pwsh.py   # PS converter entry (function stubs)
 │   ├── rules.py          # alias/set/fish_add_path translation rules (shared regexes)
@@ -124,7 +126,9 @@ sccs/
 │   ├── fish_to_zsh.py    # Zsh converter entry (zsh -n gate, uname guards)
 │   ├── zsh_block.py      # Best-effort fish→zsh block translator
 │   ├── zsh_rules.py      # Zsh line rules
-│   └── zsh_templates.py  # zshrc/conveniences/README templates
+│   ├── zsh_templates.py  # zshrc/conveniences/README templates
+│   ├── claude_to_codex.py # CC → Codex conversion rules (model/effort map, sandbox_mode)
+│   └── toml_write.py     # Minimal TOML emitter for Codex agent files
 ├── docs/
 │   └── generator.py      # Hub README auto-generation
 ├── git/
