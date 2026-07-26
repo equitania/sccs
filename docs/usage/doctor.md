@@ -55,6 +55,12 @@ doctor:
 | **PATH-Prefixes** (v2.28.0) | npm-Global-Bin auf `$PATH` der aktuellen Shell — unter Windows = `<npm config get prefix>` (Prefix selbst, kein `\bin`, v2.43.2), sonst `<prefix>/bin` | Manual-Block: **PowerShell** unter Windows (`SetEnvironmentVariable`/`$env:Path`, v2.43.2), sonst bash/zsh/fish — neue Shell starten und `sccs doctor install` erneut ausführen |
 | **Statusline** (v2.29.0) | `~/.claude/settings.json` → `statusLine.command` zeigt auf existierende Binary + Skript; Apple-Silicon-Homebrew-Cellar-Pfade nicht stale | Auto-Fix für `stale_cellar` (rewrite zu `/opt/homebrew/bin/<binary>` mit Backup); Manual-Block für `missing_binary`/`missing_script`/`missing`; `opaque` (Pipes/Env-Prefix) wird informativ angezeigt aber nicht eskaliert |
 
+### Plugin-Baseline (v2.54.0)
+
+Die mitgelieferte Baseline (`DEFAULT_CLAUDE_PLUGINS`) enthält als **required** Plugins `skill-creator`, `superpowers`, `frontend-design`, `context-mode` sowie neu `claude-security` (tiefer Vulnerability-Scan des eigenen Codes) und `claude-md-management` (Audit/Pflege von `CLAUDE.md`-Dateien). Die LSP-Plugins und Zweit-Marketplace-Einträge sind `allowlist_only` — sie werden nie installiert oder als fehlend gemeldet, gelten aber nicht als fremd bei `optimize --strict`.
+
+⚠️ **Scope-Falle**: `/plugin install` aus einem Projekt heraus schreibt `<projekt>/.claude/settings.json` — **Projekt-Scope**, der weder auf andere Projekte noch auf andere Rechner mitreist. `doctor install` setzt dagegen ein schlichtes `claude plugin install <name>@<marketplace>` ab, also **User-Scope** — der richtige Ort für eine doctor-verwaltete Baseline. Ein nur projekt-scoped installiertes Plugin erscheint überall sonst als `MISSING`; genau diese Drift soll der Doctor aufdecken.
+
 ### Beispiel-Tabelle (`sccs doctor check`)
 
 ```
@@ -278,6 +284,12 @@ PowerShell 7+ not found — install (Windows 11):
 | **Filesystem permissions** | `~/.npm`, `~/.claude`, `~/.config/sccs`, `npm root -g` (lib) **and** `<npm prefix>/bin` (v2.32.1) writable | manual block — SCCS never invokes `sudo`; system prefix → user-local prefix only |
 | **PATH prefixes** (v2.28.0) | npm global bin on `$PATH` for the current shell — on Windows = `<npm config get prefix>` (the prefix itself, no `\bin`, v2.43.2), otherwise `<prefix>/bin` | manual block: **PowerShell** on Windows (`SetEnvironmentVariable`/`$env:Path`, v2.43.2), otherwise bash/zsh/fish — start a new shell and re-run `sccs doctor install` |
 | **Statusline** (v2.29.0) | `~/.claude/settings.json` → `statusLine.command` resolves to existing binary + script; Apple-Silicon Homebrew Cellar paths are not stale | auto-fix for `stale_cellar` (rewrite to `/opt/homebrew/bin/<binary>` with backup); manual block for `missing_binary`/`missing_script`/`missing`; `opaque` (pipelines/env-prefix) shown as info but not escalated |
+
+### Plugin baseline (v2.54.0)
+
+The bundled baseline (`DEFAULT_CLAUDE_PLUGINS`) treats `skill-creator`, `superpowers`, `frontend-design`, `context-mode` and — new — `claude-security` (deep vulnerability scanning of your own code) and `claude-md-management` (audits and maintains `CLAUDE.md` files) as **required**. The LSP plugins and second-marketplace entries are `allowlist_only`: never installed, never reported missing, but not counted as foreign by `optimize --strict`.
+
+⚠️ **Scope pitfall**: running `/plugin install` from inside a project writes `<project>/.claude/settings.json` — **project scope**, which travels neither to other projects nor to other machines. `doctor install` instead issues a plain `claude plugin install <name>@<marketplace>`, i.e. **user scope** — the correct home for a doctor-managed baseline. A plugin that exists only at project scope shows up as `MISSING` everywhere else; that drift is exactly what the doctor is meant to surface.
 
 ### Sample `sccs doctor check` table
 

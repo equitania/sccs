@@ -32,6 +32,21 @@ DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
     PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
     PluginSpec(name="superpowers", marketplace="claude-plugins-official"),
     PluginSpec(name="frontend-design", marketplace="claude-plugins-official"),
+    # Anthropic's own deep vulnerability scanner (`/security-review`, run inside
+    # the session at a chosen effort level). Required rather than allowlist_only:
+    # a security scanner is only useful if it is present on EVERY host, not just
+    # wherever it happened to be installed first.
+    #
+    # Scope caveat: `/plugin install` from inside a project writes
+    # `<project>/.claude/settings.json` (project scope), which does NOT travel to
+    # other projects or machines. `doctor install` runs a plain
+    # `claude plugin install claude-security@claude-plugins-official`, i.e. user
+    # scope — the correct home for a doctor-managed baseline.
+    PluginSpec(name="claude-security", marketplace="claude-plugins-official"),
+    # Keeps CLAUDE.md files auditable and consistent. Relevant on every host: the
+    # monorepo carries a global ~/.claude/CLAUDE.md plus one per project, and they
+    # drift independently.
+    PluginSpec(name="claude-md-management", marketplace="claude-plugins-official"),
     # frontend-design also ships from the anthropics/claude-code marketplace.
     # allowlist_only: keeps a locally-installed `@claude-code-plugins` copy from
     # being flagged foreign by `optimize --strict`, WITHOUT producing an "ewig

@@ -5447,3 +5447,36 @@ class TestScopePatch:
     def test_schema_field_defaults_false(self):
         spec = NpxToolSpec(name="x", invocation=["npx", "x"])
         assert spec.patch_scope_boundary is False
+
+
+class TestDefaultPluginBaseline:
+    """Guard the hardcoded plugin baseline (v2.54.0).
+
+    These plugins are what `doctor check/install/update` treats as "should be
+    on every host", so a silent drop or a stray `allowlist_only=True` would
+    quietly stop installing them without failing anything else.
+    """
+
+    def _find(self, name: str) -> list[PluginSpec]:
+        return [p for p in DEFAULT_CLAUDE_PLUGINS if p.name == name]
+
+    @pytest.mark.parametrize("name", ["claude-security", "claude-md-management"])
+    def test_plugin_is_a_required_default(self, name):
+        matches = self._find(name)
+        assert len(matches) == 1, f"expected exactly one {name} entry"
+        spec = matches[0]
+        assert spec.marketplace == "claude-plugins-official"
+        # Required, not allowlist_only: must actually be installed everywhere.
+        assert spec.allowlist_only is False
+        assert spec.install_target == f"{name}@claude-plugins-official"
+
+    @pytest.mark.parametrize("name", ["claude-security", "claude-md-management"])
+    def test_plugin_is_checkable(self, name):
+        """`checkable_plugins()` feeds the check + install plan — must include these."""
+        checkable = {p.name for p in DoctorConfig().checkable_plugins()}
+        assert name in checkable
+
+    def test_baseline_has_no_duplicate_identifiers(self):
+        """A duplicate name@marketplace would emit the same install action twice."""
+        pairs = [(p.name, p.marketplace) for p in DEFAULT_CLAUDE_PLUGINS]
+        assert len(pairs) == len(set(pairs))

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.53.0
+**Version**: 2.54.0
 
 ### Key Features
 
@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Flexible Categories**: Claude skills, commands, hooks, scripts, fish config, etc.
 - **Bidirectional Sync**: Full two-way synchronization with conflict detection
 - **Git Integration**: Auto-commit and push after sync operations
+- **Doctor Plugin-Baseline** (v2.54.0): `claude-security` and `claude-md-management` (both `@claude-plugins-official`) joined `DEFAULT_CLAUDE_PLUGINS` as *required* entries — checked, installed and updated on every host. Scope caveat documented in `docs/usage/doctor.md`: `/plugin install` from inside a project writes project-scoped `<project>/.claude/settings.json`, while `doctor install` installs user-scoped
 - **Doctor Update-Check** (v2.42.0): `sccs doctor check` flags OUTDATED plugins/npx tools when a newer version exists upstream (`npm view` for npm-backed tools, marketplace manifest for plugins); informational only, `--no-update-check` for offline mode
 - **GSD Scope-Boundary Auto-Patch** (v2.49.0): `sccs doctor install/update` prepends a SCOPE BOUNDARY directive to externally-delivered `gsd-*` prompts that run unbounded `find`/`grep -r` scans not pinned to the git project root. Idempotent (versioned sentinel), directive-prepend only (vendor snippets untouched), gated by `NpxToolSpec.patch_scope_boundary`
 - **Self-serve Capability Card** (v2.51.0): `sccs capability-card` prints the agent capability card (`usage/AGENT.md`) as raw Markdown to stdout with the live `__version__` injected into the header. Card is bundled into the wheel via hatchling `force-include` (`sccs/data/AGENT.md`), with a repo-checkout fallback for editable installs. See `_find_capability_card()` in `sccs/cli.py`

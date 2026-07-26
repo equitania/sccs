@@ -1,5 +1,16 @@
 # Release Notes
 
+## Version 2.54.0 (26.07.2026)
+
+### Added (doctor baseline)
+- **Two Anthropic-authored plugins joined the doctor baseline** (`DEFAULT_CLAUDE_PLUGINS` in `sccs/doctor/defaults.py`), so `doctor check` reports them, `doctor install` installs them and `doctor update` keeps them current on every host:
+  - **`claude-security@claude-plugins-official`** — deep vulnerability scanning of your own code, run inside the session at a chosen effort level. Entered as a *required* plugin rather than `allowlist_only`: a security scanner only helps if it is present everywhere, not just wherever it happened to be installed first.
+  - **`claude-md-management@claude-plugins-official`** — audits and maintains `CLAUDE.md` files. Relevant on every host: a global `~/.claude/CLAUDE.md` plus one per project drift independently.
+- **Scope note** (why this matters in practice): installing a plugin with `/plugin install` from inside a project writes `<project>/.claude/settings.json` — **project scope**, which does not travel to other projects or machines. `doctor install` issues a plain `claude plugin install <name>@<marketplace>`, i.e. **user scope** — the correct home for a doctor-managed baseline. A plugin that only exists at project scope will therefore show up as `MISSING` everywhere else, which is exactly the drift the doctor is meant to catch.
+
+### Tests
+- `tests/test_doctor.py`: `TestDefaultPluginBaseline` — asserts both new plugins are present in the defaults, are required (not `allowlist_only`), resolve to the official marketplace, and that the baseline carries no duplicate `name@marketplace` pairs.
+
 ## Version 2.53.0 (16.07.2026)
 
 ### Added (OpenAI Codex integration)
