@@ -46,9 +46,11 @@ sccs config validate             # Konfiguration prüfen
 sccs export                      # Interaktive Auswahl + ZIP erstellen
 sccs export --all -o config.zip  # Alles exportieren
 sccs export -c claude_skills     # Nur bestimmte Kategorie
+sccs export --include-managed    # Auch doctor-verwaltete Items (gsd-*, playwright-cli)
 sccs import config.zip           # Interaktive Auswahl + importieren
 sccs import config.zip --dry-run # Vorschau ohne Schreiben
 sccs import config.zip --all     # Alles importieren
+sccs import config.zip --include-managed  # Auch doctor-verwaltete Items schreiben
 
 # Kategorien
 sccs categories list             # Aktivierte Kategorien
@@ -121,9 +123,11 @@ sccs config validate             # Validate configuration
 sccs export                      # Interactive selection + create ZIP
 sccs export --all -o config.zip  # Export everything
 sccs export -c claude_skills     # Specific category only
+sccs export --include-managed    # Include doctor-managed items (gsd-*, playwright-cli)
 sccs import config.zip           # Interactive selection + import
 sccs import config.zip --dry-run # Preview without writing
 sccs import config.zip --all     # Import everything
+sccs import config.zip --include-managed  # Write doctor-managed items too
 
 # Categories
 sccs categories list             # List enabled categories

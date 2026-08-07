@@ -52,8 +52,8 @@
 | `sccs doctor install` | Install missing system components after a confirm prompt per action; also pins scope boundaries in externally-delivered `gsd-*` prompts (idempotent, directive-prepend). | --yes, --json |
 | `sccs doctor optimize` | Bring the local Claude environment in line with the spec. | --strict, --yes |
 | `sccs doctor update` | Update Claude plugins and refresh npx helper tools; re-pins scope boundaries in `gsd-*` prompts after the refresh. | --yes, --json |
-| `sccs export` | Export selected items as ZIP archive. | -o/--output PATH, --all, -c/--category TEXT |
-| `sccs import` | Import items from an SCCS export archive. | ZIP_PATH, -n/--dry-run, --overwrite, --no-backup, --all |
+| `sccs export` | Export selected items as ZIP archive. | -o/--output PATH, --all, -c/--category TEXT, --include-managed |
+| `sccs import` | Import items from an SCCS export archive. | ZIP_PATH, -n/--dry-run, --overwrite, --no-backup, --all, --include-managed |
 | `sccs integrations migrate-skills` | Migrate Claude Code skills to Antigravity prompts. | -n/--dry-run, --overwrite/--no-overwrite, -s/--skill TEXT |
 | `sccs integrations opencode export-agents` | Convert Claude agents into OpenCode agents (~/.config/opencode/agent/). | -n/--dry-run, --overwrite/--no-overwrite, -a/--agent TEXT |
 | `sccs integrations opencode export-commands` | Convert Claude commands into OpenCode commands (~/.config/opencode/command/). | -n/--dry-run, --overwrite/--no-overwrite, -c/--command TEXT |
@@ -107,6 +107,9 @@ sccs diff my-skill -c claude_skills   # inspect a single item's diff first
 ```bash
 sccs export -c claude_skills -o customer.zip   # selective export (omit -c/--all for interactive picker)
 sccs export --all -o full-setup.zip            # everything, no prompt
+# Doctor-managed items (gsd-*, playwright-cli) are excluded from export AND import;
+# the target machine reproduces them via `sccs doctor install`. Override: --include-managed
+# (pre-2.55.0 archives still contain them — the import skips them and says how many)
 # Interactive picker (no --all): per detail view (groups >5 items) you first choose whether items
 # start all-selected or none-selected, then toggle individually. Same prompt on interactive import.
 # on the target machine:

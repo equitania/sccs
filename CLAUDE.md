@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.54.0
+**Version**: 2.55.0
 
 ### Key Features
 
@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Flexible Categories**: Claude skills, commands, hooks, scripts, fish config, etc.
 - **Bidirectional Sync**: Full two-way synchronization with conflict detection
 - **Git Integration**: Auto-commit and push after sync operations
+- **Transfer excludes doctor-managed items** (v2.55.0): `Exporter` mirrors `SyncEngine.effective_global_exclude` and filters `get_doctor_managed_excludes()` (`gsd-*`, `playwright-cli`) out of the selection UI and the ZIP; `Importer` filters symmetrically (`importable_manifest()`, `--all` and parsed selections) so pre-2.55.0 archives cannot write them back. The target machine reproduces those via `sccs doctor install`. Filter applies to items only (a `gsd-*.md` file *inside* your own skill survives); `--include-managed` on both commands is the escape hatch
 - **Doctor Plugin-Baseline** (v2.54.0): `claude-security` and `claude-md-management` (both `@claude-plugins-official`) joined `DEFAULT_CLAUDE_PLUGINS` as *required* entries — checked, installed and updated on every host. Scope caveat documented in `docs/usage/doctor.md`: `/plugin install` from inside a project writes project-scoped `<project>/.claude/settings.json`, while `doctor install` installs user-scoped
 - **Doctor Update-Check** (v2.42.0): `sccs doctor check` flags OUTDATED plugins/npx tools when a newer version exists upstream (`npm view` for npm-backed tools, marketplace manifest for plugins); informational only, `--no-update-check` for offline mode
 - **GSD Scope-Boundary Auto-Patch** (v2.49.0): `sccs doctor install/update` prepends a SCOPE BOUNDARY directive to externally-delivered `gsd-*` prompts that run unbounded `find`/`grep -r` scans not pinned to the git project root. Idempotent (versioned sentinel), directive-prepend only (vendor snippets untouched), gated by `NpxToolSpec.patch_scope_boundary`

@@ -1128,13 +1128,29 @@ def docs_generate(ctx: click.Context, dry_run: bool, do_commit: bool, do_push: b
 @click.option("-o", "--output", "output_path", type=click.Path(path_type=Path), default=None, help="Output ZIP path")
 @click.option("--all", "select_all", is_flag=True, help="Export all enabled categories without prompting")
 @click.option("-c", "--category", "categories", multiple=True, help="Limit to specific categories (repeatable)")
+@click.option(
+    "--include-managed",
+    is_flag=True,
+    help="Also export doctor-managed items (gsd-*, playwright-cli); excluded by default",
+)
 @click.pass_context
-def export_cmd(ctx: click.Context, output_path: Path | None, select_all: bool, categories: tuple[str, ...]) -> None:
+def export_cmd(
+    ctx: click.Context,
+    output_path: Path | None,
+    select_all: bool,
+    categories: tuple[str, ...],
+    include_managed: bool,
+) -> None:
     """Export selected items as ZIP archive.
 
     \b
     Creates a portable ZIP archive with selected skills, commands,
     hooks, and other configurations for deployment to other systems.
+
+    \b
+    Items installed by `sccs doctor` (gsd-* skills/agents/hooks,
+    playwright-cli) are excluded — the target machine reproduces them
+    with its own `sccs doctor install`. Use --include-managed to keep them.
 
     \b
     Examples:
@@ -1143,6 +1159,7 @@ def export_cmd(ctx: click.Context, output_path: Path | None, select_all: bool, c
         sccs export -c claude_skills         Export only skills
         sccs export -o my-config.zip         Custom output path
         sccs export -c skills -c agents      Multiple categories
+        sccs export --include-managed        Keep doctor-managed items
     """
     console = ctx.obj["console"]
 
@@ -1156,7 +1173,7 @@ def export_cmd(ctx: click.Context, output_path: Path | None, select_all: bool, c
     from sccs.transfer.ui import interactive_export_selection
 
     raw_config = load_raw_user_data()
-    exporter = Exporter(config)
+    exporter = Exporter(config, include_managed=include_managed)
 
     # Scan available items
     scanned = exporter.scan_available_items()
@@ -1213,9 +1230,20 @@ def export_cmd(ctx: click.Context, output_path: Path | None, select_all: bool, c
 @click.option("--overwrite", is_flag=True, help="Overwrite existing files without prompting")
 @click.option("--no-backup", is_flag=True, help="Skip backup before overwriting")
 @click.option("--all", "select_all", is_flag=True, help="Import all items without prompting")
+@click.option(
+    "--include-managed",
+    is_flag=True,
+    help="Also import doctor-managed items (gsd-*, playwright-cli); excluded by default",
+)
 @click.pass_context
 def import_cmd(
-    ctx: click.Context, zip_path: Path, dry_run: bool, overwrite: bool, no_backup: bool, select_all: bool
+    ctx: click.Context,
+    zip_path: Path,
+    dry_run: bool,
+    overwrite: bool,
+    no_backup: bool,
+    select_all: bool,
+    include_managed: bool,
 ) -> None:
     """Import items from an SCCS export archive.
 
@@ -1224,11 +1252,17 @@ def import_cmd(
     in the appropriate local paths.
 
     \b
+    Doctor-managed items (gsd-* skills/agents/hooks, playwright-cli) are
+    skipped — `sccs doctor install` maintains those locally. Older archives
+    still carry them; use --include-managed to write them anyway.
+
+    \b
     Examples:
         sccs import config.zip               Interactive selection
         sccs import config.zip --all         Import everything
         sccs import config.zip --dry-run     Preview only
         sccs import config.zip --overwrite   Overwrite existing files
+        sccs import config.zip --include-managed   Keep doctor-managed items
     """
     console = ctx.obj["console"]
 
@@ -1242,7 +1276,7 @@ def import_cmd(
         console.print_info("Run 'sccs config init' before importing — a local config is required for path validation")
         sys.exit(1)
 
-    importer = Importer(zip_path, config=config)
+    importer = Importer(zip_path, config=config, include_managed=include_managed)
 
     try:
         manifest = importer.load_manifest()
@@ -1250,13 +1284,29 @@ def import_cmd(
         console.print_error(str(e))
         sys.exit(1)
 
-    # Show manifest summary
+    # Show manifest summary — deliberately the RAW manifest: this reports what
+    # the archive actually contains, not what we are willing to write.
     console.print("\n[bold]SCCS Export Archive[/bold]")
     console.print(f"  Created: {manifest.created_at}")
     console.print(f"  Platform: {manifest.created_on}")
     console.print(f"  SCCS version: {manifest.sccs_version}")
     console.print(f"  Categories: {manifest.total_categories}")
     console.print(f"  Items: {manifest.total_items}\n")
+
+    excluded = importer.excluded_items()
+    if excluded:
+        console.print_info(
+            f"Skipping {len(excluded)} doctor-managed items (gsd-*, playwright-cli) — "
+            "'sccs doctor install' maintains those locally"
+        )
+        console.print_info("  Use --include-managed to import them anyway\n")
+
+    importable = importer.importable_manifest()
+
+    if not importable.categories:
+        console.print_warning("Archive contains only doctor-managed items — nothing to import")
+        console.print_info("Run 'sccs doctor install' to get them, or re-run with --include-managed")
+        sys.exit(0)
 
     if select_all:
         selections = importer.build_selections_all()
@@ -1265,7 +1315,7 @@ def import_cmd(
             console.print_error("Interactive mode requires a TTY. Use --all for non-interactive import.")
             sys.exit(1)
 
-        parsed = interactive_import_selection(manifest, console=console)
+        parsed = interactive_import_selection(importable, console=console)
 
         if not parsed:
             console.print_warning("No items selected")

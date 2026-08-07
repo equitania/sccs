@@ -1,5 +1,27 @@
 # Release Notes
 
+## Version 2.55.0 (07.08.2026)
+
+### Fixed (transfer carries only your own artefacts)
+
+- **`sccs export` no longer offers or ships doctor-managed items.** The selection list for `claude_skills` showed 141 entries on a normal host, of which 71 were not the user's work at all: the ~70 `gsd-*` skills dropped by `npx @opengsd/gsd-core` plus the npm-managed `playwright-cli`. Same picture for `claude_agents` (41 → 7) and `claude_hooks` (28 → 5). Exporting them is pointless — the receiving machine reproduces them at the *then-current* version with its own `sccs doctor install`, so the archive only ever carried a snapshot destined to go stale.
+- **Root cause**: `SyncEngine` merges `get_doctor_managed_excludes(config.doctor)` into its effective exclude list (`sync/engine.py`), which is why the Git repository stays clean. `Exporter` read the raw `config.global_exclude` and never consulted that registry. It now mirrors the engine via `Exporter.effective_global_exclude`, so sync, export and the OpenCode/Pi/Codex exports all filter through the single registry in `sccs/doctor/managed.py`.
+- **Scope of the filter is the item, not its contents**: `_add_directory_to_zip` deliberately keeps using the raw `global_exclude`. A reference file named `gsd-notes.md` inside one of your own skills stays in the archive — only whole doctor-managed items disappear.
+- User-supplied `doctor.managed_excludes` patterns from `config.yaml` apply to the export as well, so additional vendor-installed artefacts can be filtered without a code change.
+- **`sccs import` is symmetric.** Filtering only the export would have left the other direction open: every archive written *before* this release still carries those items, and importing them writes a frozen snapshot next to whatever `sccs doctor install` maintains — which the sync engine then ignores, so the drift never surfaces again. `Importer` now takes the same registry and drops managed items from the selection UI (`importable_manifest()`), from `--all` and from an explicit parsed selection alike. Measured against a real pre-fix archive: 327 items in the ZIP, 198 written, 129 skipped.
+  - The archive **summary keeps reporting the raw manifest** — it states what the ZIP contains, not what SCCS is willing to write. The skipped count is printed separately, with the `--include-managed` hint.
+  - A category left empty by the filter is dropped from the picker instead of showing as an empty group; an archive consisting *only* of managed items exits cleanly with "nothing to import" rather than an empty checkbox list.
+
+### Added
+
+- **`sccs export --include-managed` / `sccs import --include-managed`** — escape hatch that disables the filter for a single run and restores the pre-2.55.0 behaviour (e.g. seeding an air-gapped machine that cannot run `sccs doctor install`).
+
+### Tests
+
+- `tests/test_transfer.py`: new `TestExporterManagedExcludes` (5) — managed items absent from the scan, `include_managed=True` restores them, end-to-end absence from the ZIP payload, inner files named `gsd-*` survive, user `doctor.managed_excludes` honoured.
+- `tests/test_transfer.py`: new `TestImporterManagedExcludes` (7) — `--all` and parsed selections both drop managed items, escape hatch restores them, raw manifest still reports the full archive while `importable_manifest()` does not, categories emptied by the filter disappear, end-to-end nothing managed lands on disk, user `doctor.managed_excludes` honoured.
+- Two CLI tests asserting `export --all` / `import --all` omit them and `--include-managed` keeps them. 1366 total; ruff/format/mypy clean.
+
 ## Version 2.54.0 (26.07.2026)
 
 ### Added (doctor baseline)

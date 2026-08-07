@@ -28,7 +28,21 @@ sccs export -c claude_skills -c claude_agents
 
 # Kombiniert: Nur Skills, ohne Interaktion
 sccs export -c claude_skills --all -o skills.zip
+
+# Ausnahmsweise auch doctor-verwaltete Items mitnehmen
+sccs export --include-managed
 ```
+
+**Doctor-verwaltete Items sind ausgeschlossen** *(ab v2.55.0)*: Alles, was `sccs doctor install`
+selbst installiert — die `gsd-*`-Skills/Agents/Hooks aus `@opengsd/gsd-core` sowie `playwright-cli` —
+erscheint weder in der Auswahlliste noch im Archiv. Der Zielrechner erzeugt diese Dateien mit seinem
+eigenen `sccs doctor install` in der jeweils aktuellen Version; ein eingefrorener Schnappschuss im
+ZIP würde nur veralten. Dieselbe Registry (`sccs/doctor/managed.py`) filtert bereits den Sync und die
+OpenCode-/Pi-/Codex-Exporte. Erweitern lässt sie sich über `doctor.managed_excludes` in der
+`config.yaml`; `--include-managed` schaltet den Filter für einen Lauf komplett ab.
+
+Der Filter greift auf **Item**-Ebene: eine eigene Datei namens `gsd-notizen.md` *innerhalb* eines
+selbst geschriebenen Skills bleibt erhalten.
 
 Die interaktive Auswahl zeigt alle verfügbaren Items gruppiert nach Kategorie mit Checkboxen:
 
@@ -67,6 +81,24 @@ sccs import config.zip --overwrite
 
 # Ohne Backup überschreiben
 sccs import config.zip --overwrite --no-backup
+
+# Ausnahmsweise auch doctor-verwaltete Items schreiben
+sccs import config.zip --include-managed
+```
+
+**Der Import filtert symmetrisch** *(ab v2.55.0)*: Archive, die vor v2.55.0 erzeugt wurden, enthalten
+die `gsd-*`-Items und `playwright-cli` noch. Sie werden weder zur Auswahl angeboten noch geschrieben —
+sonst läge ein eingefrorener Schnappschuss neben dem, was `sccs doctor install` lokal pflegt, und der
+Sync ignoriert genau diese Pfade, sodass die Drift nie wieder auffällt. Die Archiv-Zusammenfassung
+meldet weiterhin den **rohen** Inhalt des ZIPs (ehrlich darüber, was drin ist); die Zahl der
+übersprungenen Items steht separat darunter:
+
+```
+  Categories: 16
+  Items: 327
+
+Skipping 129 doctor-managed items (gsd-*, playwright-cli) — 'sccs doctor install' maintains those locally
+  Use --include-managed to import them anyway
 ```
 
 ### Einsatzbereiche
@@ -105,7 +137,21 @@ sccs export -c claude_skills -c claude_agents
 
 # Combined: only skills, non-interactive
 sccs export -c claude_skills --all -o skills.zip
+
+# Exceptionally include doctor-managed items too
+sccs export --include-managed
 ```
+
+**Doctor-managed items are excluded** *(since v2.55.0)*: anything `sccs doctor install` installs
+itself — the `gsd-*` skills/agents/hooks from `@opengsd/gsd-core` plus `playwright-cli` — appears
+neither in the selection list nor in the archive. The target machine reproduces those files with its
+own `sccs doctor install` at the then-current version; a frozen snapshot inside the ZIP would only
+go stale. The same registry (`sccs/doctor/managed.py`) already filters sync and the OpenCode/Pi/Codex
+exports. Extend it via `doctor.managed_excludes` in `config.yaml`; `--include-managed` disables the
+filter for a single run.
+
+The filter works at **item** level: your own file named `gsd-notes.md` *inside* a skill you wrote
+stays in the archive.
 
 The interactive selection shows all available items grouped by category with checkboxes:
 
@@ -143,6 +189,24 @@ sccs import config.zip --overwrite
 
 # Overwrite without backup
 sccs import config.zip --overwrite --no-backup
+
+# Exceptionally write doctor-managed items too
+sccs import config.zip --include-managed
+```
+
+**Import filters symmetrically** *(since v2.55.0)*: archives created before v2.55.0 still carry the
+`gsd-*` items and `playwright-cli`. They are neither offered for selection nor written — otherwise a
+frozen snapshot would sit next to whatever `sccs doctor install` maintains locally, and since sync
+ignores exactly those paths the drift would never surface again. The archive summary still reports the
+**raw** ZIP contents (honest about what is inside); the number of skipped items is printed separately
+below it:
+
+```
+  Categories: 16
+  Items: 327
+
+Skipping 129 doctor-managed items (gsd-*, playwright-cli) — 'sccs doctor install' maintains those locally
+  Use --include-managed to import them anyway
 ```
 
 ### Use Cases

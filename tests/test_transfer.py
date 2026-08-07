@@ -232,6 +232,97 @@ class TestExporter:
         assert selections[0].items[0].name == "test-skill"
 
 
+class TestExporterManagedExcludes:
+    """Doctor-managed items must not end up in an export archive.
+
+    `sccs doctor install` drops gsd-* skills/agents/hooks and playwright-cli
+    into ~/.claude/. The sync engine already skips them; the exporter has to
+    apply the same registry, otherwise a transfer ZIP ships a frozen snapshot
+    of files the recipient's own doctor run reproduces.
+    """
+
+    @staticmethod
+    def _make_managed_skills(mock_claude_dir: Path) -> None:
+        """Create two doctor-managed skills next to the user's own skill."""
+        for name in ("gsd-manager", "playwright-cli"):
+            skill_dir = mock_claude_dir / "skills" / name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    def test_scan_excludes_doctor_managed_items(self, sample_config, mock_claude_dir):
+        """gsd-* and playwright-cli never reach the selection UI."""
+        self._make_managed_skills(mock_claude_dir)
+
+        config = SccsConfig.model_validate(sample_config)
+        exporter = Exporter(config)
+        names = {item.name for item in exporter.scan_available_items().get("claude_skills", [])}
+
+        assert "test-skill" in names, "user's own skill must survive"
+        assert "gsd-manager" not in names
+        assert "playwright-cli" not in names
+
+    def test_include_managed_keeps_them(self, sample_config, mock_claude_dir):
+        """The --include-managed escape hatch restores the old behaviour."""
+        self._make_managed_skills(mock_claude_dir)
+
+        config = SccsConfig.model_validate(sample_config)
+        exporter = Exporter(config, include_managed=True)
+        names = {item.name for item in exporter.scan_available_items().get("claude_skills", [])}
+
+        assert {"test-skill", "gsd-manager", "playwright-cli"} <= names
+
+    def test_managed_items_absent_from_zip(self, sample_config, mock_claude_dir, temp_dir):
+        """End-to-end: the archive itself carries no managed payload."""
+        self._make_managed_skills(mock_claude_dir)
+
+        config = SccsConfig.model_validate(sample_config)
+        exporter = Exporter(config)
+        selections = exporter.build_selections_all(exporter.scan_available_items())
+
+        output = temp_dir / "no-managed.zip"
+        assert exporter.export_to_zip(selections, output, sample_config).success is True
+
+        with zipfile.ZipFile(output, "r") as zf:
+            names = zf.namelist()
+        assert not [n for n in names if "gsd-" in n or "playwright-cli" in n], names
+
+    def test_inner_files_are_not_filtered_by_managed_patterns(self, sample_config, mock_claude_dir, temp_dir):
+        """A user skill may legitimately contain a file named `gsd-*`.
+
+        The managed patterns filter *items*, not files inside them — otherwise
+        a reference doc would silently vanish from an otherwise valid skill.
+        """
+        skill_dir = mock_claude_dir / "skills" / "test-skill"
+        (skill_dir / "gsd-notes.md").write_text("own notes about gsd\n", encoding="utf-8")
+
+        config = SccsConfig.model_validate(sample_config)
+        exporter = Exporter(config)
+        selections = exporter.build_selections_all(exporter.scan_available_items())
+
+        output = temp_dir / "inner-file.zip"
+        assert exporter.export_to_zip(selections, output, sample_config).success is True
+
+        with zipfile.ZipFile(output, "r") as zf:
+            names = zf.namelist()
+        assert "claude_skills/test-skill/gsd-notes.md" in names, names
+
+    def test_user_managed_excludes_are_honoured(self, sample_config, mock_claude_dir):
+        """`doctor.managed_excludes` from the user config also applies."""
+        skill_dir = mock_claude_dir / "skills" / "vendor-thing"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("# vendor\n", encoding="utf-8")
+
+        cfg = dict(sample_config)
+        cfg["doctor"] = {"managed_excludes": ["vendor-*"]}
+
+        config = SccsConfig.model_validate(cfg)
+        exporter = Exporter(config)
+        names = {item.name for item in exporter.scan_available_items().get("claude_skills", [])}
+
+        assert "vendor-thing" not in names
+        assert "test-skill" in names
+
+
 # ── Importer Tests ──────────────────────────────────────────────
 
 
@@ -266,6 +357,179 @@ def _create_test_zip(zip_path: Path, items: dict[str, str] | None = None, manife
         zf.writestr(MANIFEST_FILENAME, manifest_yaml)
         for arc_name, content in items.items():
             zf.writestr(arc_name, content)
+
+
+class TestImporterManagedExcludes:
+    """Doctor-managed items in an archive must not be written locally.
+
+    Archives written before v2.55.0 still carry the ~70 gsd-* items plus
+    playwright-cli. Importing them would place a frozen snapshot next to
+    whatever `sccs doctor install` maintains — and the sync engine ignores
+    those paths, so the drift would never surface again.
+    """
+
+    @staticmethod
+    def _managed_archive(zip_path: Path, target_dir: Path) -> None:
+        """Build an archive mixing one own command with two managed items."""
+        manifest = ExportManifest(
+            sccs_version="2.54.0",
+            created_at="2026-03-26T12:00:00Z",
+            created_on="macos",
+            categories={
+                "claude_commands": ManifestCategory(
+                    description="Test",
+                    item_type="file",
+                    local_path=str(target_dir),
+                    items=[
+                        ManifestItem(name=name, zip_path=f"claude_commands/{name}", item_type="file")
+                        for name in ("my-cmd.md", "gsd-ship.md", "playwright-cli")
+                    ],
+                ),
+            },
+        )
+        _create_test_zip(
+            zip_path,
+            items={
+                "claude_commands/my-cmd.md": "# mine\n",
+                "claude_commands/gsd-ship.md": "# gsd\n",
+                "claude_commands/playwright-cli": "# pw\n",
+            },
+            manifest=manifest,
+        )
+
+    def test_build_selections_all_drops_managed(self, temp_dir, temp_home):
+        """--all mode never selects doctor-managed items."""
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = temp_dir / "managed.zip"
+        self._managed_archive(zip_path, target_dir)
+
+        importer = Importer(zip_path)
+        importer.load_manifest()
+        names = [item.name for _cat, item in importer.build_selections_all()]
+
+        assert names == ["my-cmd.md"]
+
+    def test_build_selections_from_parsed_drops_managed(self, temp_dir, temp_home):
+        """Even an explicit selection cannot smuggle a managed item through."""
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = temp_dir / "managed-parsed.zip"
+        self._managed_archive(zip_path, target_dir)
+
+        importer = Importer(zip_path)
+        importer.load_manifest()
+        parsed = {"claude_commands": ["my-cmd.md", "gsd-ship.md", "playwright-cli"]}
+        names = [item.name for _cat, item in importer.build_selections_from_parsed(parsed)]
+
+        assert names == ["my-cmd.md"]
+
+    def test_include_managed_keeps_them(self, temp_dir, temp_home):
+        """The escape hatch restores the pre-2.55.0 behaviour."""
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = temp_dir / "managed-included.zip"
+        self._managed_archive(zip_path, target_dir)
+
+        importer = Importer(zip_path, include_managed=True)
+        importer.load_manifest()
+        names = {item.name for _cat, item in importer.build_selections_all()}
+
+        assert names == {"my-cmd.md", "gsd-ship.md", "playwright-cli"}
+        assert importer.excluded_items() == []
+
+    def test_raw_manifest_still_reports_full_archive(self, temp_dir, temp_home):
+        """The summary must stay honest about what the ZIP contains."""
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = temp_dir / "managed-summary.zip"
+        self._managed_archive(zip_path, target_dir)
+
+        importer = Importer(zip_path)
+        manifest = importer.load_manifest()
+
+        assert manifest.total_items == 3
+        assert importer.importable_manifest().total_items == 1
+        assert sorted(name for _cat, name in importer.excluded_items()) == ["gsd-ship.md", "playwright-cli"]
+
+    def test_importable_manifest_drops_empty_categories(self, temp_dir, temp_home):
+        """A category consisting only of managed items disappears entirely."""
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        manifest = ExportManifest(
+            sccs_version="2.54.0",
+            created_at="2026-03-26T12:00:00Z",
+            created_on="macos",
+            categories={
+                "claude_commands": ManifestCategory(
+                    description="Test",
+                    item_type="file",
+                    local_path=str(target_dir),
+                    items=[ManifestItem(name="gsd-ship.md", zip_path="claude_commands/gsd-ship.md", item_type="file")],
+                ),
+            },
+        )
+        zip_path = temp_dir / "only-managed.zip"
+        _create_test_zip(zip_path, items={"claude_commands/gsd-ship.md": "# gsd\n"}, manifest=manifest)
+
+        importer = Importer(zip_path)
+        importer.load_manifest()
+
+        assert importer.importable_manifest().categories == {}
+
+    def test_apply_writes_no_managed_files(self, temp_dir, temp_home):
+        """End-to-end: nothing doctor-managed lands on disk."""
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = temp_dir / "managed-apply.zip"
+        self._managed_archive(zip_path, target_dir)
+
+        importer = Importer(zip_path)
+        importer.load_manifest()
+        result = importer.apply(importer.build_selections_all(), overwrite=True)
+
+        assert result.success is True
+        assert result.written == 1
+        assert (target_dir / "my-cmd.md").exists()
+        assert not (target_dir / "gsd-ship.md").exists()
+        assert not (target_dir / "playwright-cli").exists()
+
+    def test_user_managed_excludes_are_honoured(self, temp_dir, temp_home, sample_config):
+        """`doctor.managed_excludes` from the local config also filters imports."""
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = temp_dir / "vendor.zip"
+        manifest = ExportManifest(
+            sccs_version="2.54.0",
+            created_at="2026-03-26T12:00:00Z",
+            created_on="macos",
+            categories={
+                "claude_commands": ManifestCategory(
+                    description="Test",
+                    item_type="file",
+                    local_path=str(target_dir),
+                    items=[
+                        ManifestItem(name=name, zip_path=f"claude_commands/{name}", item_type="file")
+                        for name in ("my-cmd.md", "vendor-thing.md")
+                    ],
+                ),
+            },
+        )
+        _create_test_zip(
+            zip_path,
+            items={"claude_commands/my-cmd.md": "# mine\n", "claude_commands/vendor-thing.md": "# vendor\n"},
+            manifest=manifest,
+        )
+
+        cfg = dict(sample_config)
+        cfg["doctor"] = {"managed_excludes": ["vendor-*"]}
+        config = SccsConfig.model_validate(cfg)
+
+        importer = Importer(zip_path, config=config)
+        importer.load_manifest()
+        names = [item.name for _cat, item in importer.build_selections_all()]
+
+        assert names == ["my-cmd.md"]
 
 
 class TestImporter:
@@ -760,6 +1024,33 @@ class TestExportCLI:
         assert result.exit_code == 0, f"Output: {result.output}"
         assert output_path.exists()
 
+    def test_export_all_skips_doctor_managed_items(
+        self, sample_config, mock_claude_dir, temp_dir, config_file, monkeypatch
+    ):
+        """`export --all` must not ship gsd-* items; --include-managed does."""
+        from click.testing import CliRunner
+
+        from sccs.cli import cli
+
+        gsd_skill = mock_claude_dir / "skills" / "gsd-manager"
+        gsd_skill.mkdir(parents=True, exist_ok=True)
+        (gsd_skill / "SKILL.md").write_text("# gsd-manager\n", encoding="utf-8")
+
+        monkeypatch.setenv("SCCS_CONFIG", str(config_file))
+        runner = CliRunner()
+
+        default_zip = temp_dir / "cli-default.zip"
+        result = runner.invoke(cli, ["export", "--all", "-o", str(default_zip)])
+        assert result.exit_code == 0, f"Output: {result.output}"
+        with zipfile.ZipFile(default_zip, "r") as zf:
+            assert not [n for n in zf.namelist() if "gsd-manager" in n]
+
+        managed_zip = temp_dir / "cli-managed.zip"
+        result = runner.invoke(cli, ["export", "--all", "--include-managed", "-o", str(managed_zip)])
+        assert result.exit_code == 0, f"Output: {result.output}"
+        with zipfile.ZipFile(managed_zip, "r") as zf:
+            assert [n for n in zf.namelist() if "gsd-manager" in n]
+
 
 class TestImportCLI:
     """Test import CLI command."""
@@ -819,3 +1110,54 @@ class TestImportCLI:
 
         assert result.exit_code == 0, f"Output: {result.output}"
         assert not (target_dir / "dry-run.md").exists()
+
+    def test_import_all_skips_doctor_managed_items(self, temp_dir, temp_home, config_file, monkeypatch):
+        """A legacy archive carrying gsd-* items writes only the user's own."""
+        import re
+
+        from click.testing import CliRunner
+
+        from sccs.cli import cli
+
+        monkeypatch.setenv("SCCS_CONFIG", str(config_file))
+
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        manifest = ExportManifest(
+            sccs_version="2.54.0",
+            created_at="2026-03-26T12:00:00Z",
+            created_on="macos",
+            categories={
+                "claude_commands": ManifestCategory(
+                    description="Test",
+                    item_type="file",
+                    local_path=str(target_dir),
+                    items=[
+                        ManifestItem(name=name, zip_path=f"claude_commands/{name}", item_type="file")
+                        for name in ("my-cmd.md", "gsd-ship.md")
+                    ],
+                ),
+            },
+        )
+        zip_path = temp_dir / "legacy-managed.zip"
+        _create_test_zip(
+            zip_path,
+            items={"claude_commands/my-cmd.md": "# mine\n", "claude_commands/gsd-ship.md": "# gsd\n"},
+            manifest=manifest,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["import", str(zip_path), "--all", "--overwrite"])
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert (target_dir / "my-cmd.md").exists()
+        assert not (target_dir / "gsd-ship.md").exists()
+        # Console output is Rich-coloured in CI (FORCE_COLOR) but not in a pipe.
+        cleaned = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+        assert "Skipping 1 doctor-managed items" in cleaned
+
+        # ... and the escape hatch writes it after all.
+        result = runner.invoke(cli, ["import", str(zip_path), "--all", "--overwrite", "--include-managed"])
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert (target_dir / "gsd-ship.md").exists()

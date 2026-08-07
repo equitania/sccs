@@ -13,13 +13,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from sccs.config.schema import SccsConfig
+from sccs.doctor.managed import get_doctor_managed_excludes
+from sccs.doctor.schema import DoctorConfig
 from sccs.transfer.manifest import (
     MANIFEST_FILENAME,
     ExportManifest,
     ManifestItem,
     deserialize_manifest,
 )
-from sccs.utils.paths import create_backup, safe_copy
+from sccs.utils.paths import create_backup, matches_any_pattern, safe_copy
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,13 @@ class ImportResult:
 class Importer:
     """Extracts ZIP archives and places items on the target system."""
 
-    def __init__(self, zip_path: Path, config: SccsConfig | None = None) -> None:
+    def __init__(
+        self,
+        zip_path: Path,
+        config: SccsConfig | None = None,
+        *,
+        include_managed: bool = False,
+    ) -> None:
         """
         Args:
             zip_path: Path to the ZIP archive to import.
@@ -49,10 +57,65 @@ class Importer:
                 must resolve underneath that path. Without a config, the
                 importer operates in legacy mode — recommended only for tests
                 and scripted use.
+            include_managed: When True, doctor-managed items (`gsd-*`,
+                `playwright-cli`, …) carried by the archive are imported too.
+                Off by default, mirroring `Exporter`: archives written before
+                v2.55.0 still contain them, and writing that frozen snapshot
+                would shadow whatever `sccs doctor install` maintains locally.
         """
         self._zip_path = zip_path
         self._config = config
         self._manifest: ExportManifest | None = None
+        # Same registry the sync engine and the exporter use, so an item that
+        # cannot leave a machine cannot enter one either.
+        self._managed_excludes: list[str] = []
+        if not include_managed:
+            doctor_config = config.doctor if config is not None else DoctorConfig()
+            self._managed_excludes = get_doctor_managed_excludes(doctor_config)
+
+    def _is_managed(self, item_name: str) -> bool:
+        """Return True if the item is reproducible via `sccs doctor install`."""
+        return matches_any_pattern(item_name, self._managed_excludes)
+
+    def excluded_items(self) -> list[tuple[str, str]]:
+        """Return (category, item name) pairs dropped as doctor-managed.
+
+        Purely informational — lets the CLI tell the user why an archive with
+        141 skills only offers 69 of them.
+        """
+        if self._manifest is None:
+            raise RuntimeError("Manifest not loaded — call load_manifest() first")
+
+        return [
+            (cat_name, item.name)
+            for cat_name, cat_data in self._manifest.categories.items()
+            for item in cat_data.items
+            if self._is_managed(item.name)
+        ]
+
+    def importable_manifest(self) -> ExportManifest:
+        """Return a manifest copy without doctor-managed items.
+
+        This is what feeds the selection UI. The raw manifest stays untouched
+        so the archive summary keeps reporting what the ZIP actually contains
+        rather than a filtered count.
+        """
+        if self._manifest is None:
+            raise RuntimeError("Manifest not loaded — call load_manifest() first")
+
+        if not self._managed_excludes:
+            return self._manifest
+
+        filtered = self._manifest.model_copy(deep=True)
+        kept = {}
+        for cat_name, cat_data in filtered.categories.items():
+            cat_data.items = [item for item in cat_data.items if not self._is_managed(item.name)]
+            # Drop categories that consisted only of managed items — an empty
+            # group in the two-stage picker is noise, not information.
+            if cat_data.items:
+                kept[cat_name] = cat_data
+        filtered.categories = kept
+        return filtered
 
     def load_manifest(self) -> ExportManifest:
         """Read and validate manifest from ZIP.
@@ -100,7 +163,7 @@ class Importer:
             if cat_data is None:
                 continue
             for item in cat_data.items:
-                if item.name in item_names:
+                if item.name in item_names and not self._is_managed(item.name):
                     selections.append((cat_name, item))
         return selections
 
@@ -112,7 +175,8 @@ class Importer:
         selections: list[tuple[str, ManifestItem]] = []
         for cat_name, cat_data in self._manifest.categories.items():
             for item in cat_data.items:
-                selections.append((cat_name, item))
+                if not self._is_managed(item.name):
+                    selections.append((cat_name, item))
         return selections
 
     def apply(

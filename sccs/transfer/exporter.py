@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sccs.config.schema import ItemType, SccsConfig, SyncCategory
+from sccs.doctor.managed import get_doctor_managed_excludes
 from sccs.sync.item import SyncItem, scan_items_for_category
 from sccs.transfer.manifest import (
     MANIFEST_FILENAME,
@@ -49,8 +50,26 @@ class ExportResult:
 class Exporter:
     """Scans local items and creates ZIP export archives."""
 
-    def __init__(self, config: SccsConfig) -> None:
+    def __init__(self, config: SccsConfig, *, include_managed: bool = False) -> None:
+        """Initialize the exporter.
+
+        Args:
+            config: Loaded SCCS configuration.
+            include_managed: When True, doctor-managed items (`gsd-*`,
+                `playwright-cli`, …) are kept in the export. Off by default —
+                those files are reproducible via `sccs doctor install` on the
+                target machine, so shipping a frozen snapshot of them just
+                creates drift (see `sccs/doctor/managed.py`).
+        """
         self._config = config
+        # Mirror SyncEngine.effective_global_exclude: the sync engine already
+        # skips doctor-managed files, which is why they never reach the repo.
+        # The exporter has to apply the same registry — otherwise the ZIP
+        # ships 70 gsd-* skills the recipient's own doctor run would install.
+        self._doctor_excludes: list[str] = []
+        if not include_managed:
+            self._doctor_excludes = get_doctor_managed_excludes(config.doctor)
+        self.effective_global_exclude = list(config.global_exclude) + self._doctor_excludes
 
     def scan_available_items(self) -> dict[str, list[SyncItem]]:
         """Scan all enabled categories for locally available items.
@@ -74,7 +93,7 @@ class Exporter:
                 category=category,
                 local_base=local_path.parent,
                 repo_base=repo_base,
-                global_exclude=self._config.global_exclude,
+                global_exclude=self.effective_global_exclude,
             )
 
             # Only include items that exist locally. Symlink items are dropped
@@ -247,6 +266,12 @@ class Exporter:
             Number of items added.
         """
         count = 0
+        # Deliberately the RAW global_exclude, not `effective_global_exclude`:
+        # this filter runs against files *inside* an item directory. Applying
+        # the doctor patterns here would silently drop a legitimate reference
+        # file named e.g. `gsd-notes.md` from one of the user's own skills.
+        # Doctor-managed *items* are already dropped in `scan_available_items`,
+        # which every selection path goes through.
         global_exclude = self._config.global_exclude or []
 
         for item in selection.items:
