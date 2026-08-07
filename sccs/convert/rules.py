@@ -149,6 +149,21 @@ def convert_alias(line: str) -> ConversionResult | None:
     return ConversionResult(powershell=ps, kind="function")
 
 
+def _ps_dq_escape(value: str) -> str:
+    """Escape a value for embedding in a PowerShell DOUBLE-quoted string.
+
+    PowerShell expands `$(...)` subexpressions inside double quotes and uses
+    the backtick as its escape character. Fish produces neither as syntax, so
+    both are literal at the source and must stay literal in the output.
+
+    A bare `$` is left alone: `_rewrite_vars` emits `$env:VAR` references that
+    are meant to expand. Only the executing `$(` form is neutralised. The
+    backtick is doubled first so the backticks inserted below are not escaped
+    a second time.
+    """
+    return value.replace("`", "``").replace('"', '`"').replace("$(", "`$(")
+
+
 def convert_set_gx(line: str) -> ConversionResult | None:
     """Convert `set -gx VAR value` to `$env:VAR = "value"`."""
     match = SET_GX_PATTERN.match(line)
@@ -156,12 +171,17 @@ def convert_set_gx(line: str) -> ConversionResult | None:
         return None
 
     name = match.group("name")
-    value = _extract_value(match)
-    rewritten = _rewrite_vars(value)
 
-    # Quote the value; escape any inner double quotes for safety.
-    escaped = rewritten.replace('"', '`"')
-    ps = f'$env:{name} = "{escaped}"'
+    # A fish SINGLE-quoted value is fully literal — see the zsh converter for
+    # the full rationale. PowerShell single-quoted strings are literal too, so
+    # this is both the faithful and the safe rendering.
+    sq_value = match.group("sq")
+    if sq_value is not None:
+        literal = sq_value.replace("'", "''")
+        return ConversionResult(powershell=f"$env:{name} = '{literal}'", kind="env")
+
+    rewritten = _rewrite_vars(_extract_value(match))
+    ps = f'$env:{name} = "{_ps_dq_escape(rewritten)}"'
     return ConversionResult(powershell=ps, kind="env")
 
 

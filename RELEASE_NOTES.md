@@ -1,5 +1,33 @@
 # Release Notes
 
+## Version 2.56.0 (07.08.2026)
+
+### Security (shell-profile converters)
+
+- **A fish value that is inert must not become live shell code.** `convert_set_gx` discarded the source quoting: `_extract_value()` returned the inner text of `'…'`, `"…"` and bare tokens identically, after which `rewrite_fish_tokens()` and embedding into a **double**-quoted target string ran unconditionally. Two consequences, both verified against a live `fish` and a live `zsh`:
+  - Fish single quotes suppress every expansion, so `set -gx B 'text (whoami) literal'` is plain data in fish — but it was emitted as `export B="text $(whoami) literal"`, which executes when the generated profile is sourced.
+  - Fish has **no backtick command substitution at all**, in any quoting. A backtick is therefore always literal at the source, yet `set -gx C "has \`id\` inside"` became `export C="has \`id\` inside"` — live in zsh.
+- **Fix, quoting-aware rather than blanket escaping.** `rewrite_fish_tokens` converts an unquoted `(cmd)` into `$(cmd)` *on purpose*, so escaping `$` wholesale would have destroyed a real feature:
+  - `sq` values are now emitted as literal single-quoted strings via the existing `_sq()` helper — the same rendering `convert_alias` has always used, which is why aliases were never vulnerable.
+  - `dq`/`bare` values keep their intended `$var` expansion and `$(cmd)` rewrite; only the backtick is escaped, via the new `_dq_escape()` (`sccs/convert/zsh_rules.py`).
+  - `fish_add_path` / `_path_guard` use the same helper — `$HOME` survives, backticks do not.
+  - The PowerShell converter had the same class of bug (`$(…)` executes inside PS double quotes). New `_ps_dq_escape()` (`sccs/convert/rules.py`) doubles the backtick and escapes `$(`, leaving the `$env:VAR` references `_rewrite_vars()` emits intact. Unlike zsh there is no intended substitution rewrite here, so this is loss-free.
+- **Practical reach**: the input is normally the user's own trusted dotfiles, which is why this is Medium and not High. It matters because SCCS exists to move configs between machines and to customers — an imported or team-synced `config.fish` is a realistic path for foreign content, and the `zsh -n` gate cannot catch it (the generated line is syntactically valid, just semantically different).
+- **No behaviour change on real configs**: regenerating the maintainer's actual fish config produced 61 files byte-identical to the previous output. The fix only closes the hole.
+
+### Changed (dependencies)
+
+- `uv lock --upgrade` cleared three advisories reported by `pip-audit` against the previous lock: **click 8.3.1 → 8.4.2** (PYSEC-2026-2132, command injection in `click.edit()` — the relevant one, since SCCS is a Click CLI that launches an editor for merges), **pytest 9.0.2 → 9.1.1** (PYSEC-2026-1845, dev-only) and the transitive **pygments 2.19.2 → 2.20.0** (PYSEC-2026-2987, ReDoS, pulled in via rich). `pip-audit` now reports no known vulnerabilities.
+- Routine minor bumps in the same relock: rich 14.3.3 → 15.0.0, pydantic 2.12.5 → 2.13.4, mypy 1.19.1 → 1.20.2, ruff 0.15.6 → 0.16.1, pytest-cov 7.0.0 → 7.1.0, pre-commit 4.5.1 → 4.6.1, tomli 2.4.0 → 2.4.1, types-PyYAML. No specifier changes were needed — an audit of every upper cap confirmed none currently excludes the latest release.
+- **The `mypy<2.0.0` cap stays.** mypy 2.0 did ship (May 2026, now at 2.3.0), exactly as the inline comment anticipated. Lifting the cap means dealing with the changed defaults (`--local-partial-types`, `--strict-bytes`, PEP 688) and is a deliberate follow-up task, not a relock side effect.
+
+### Tests
+
+- `tests/test_convert_zsh.py`: new `TestZshLiteralValueSafety` (9) — single-quoted `(cmd)`/`$`/backtick stay literal, double-quoted and bare backticks are escaped, the intended `(date)` → `$(date)` rewrite and `$HOME` expansion still work, `fish_add_path` backtick escaped while `$HOME` survives — plus `TestZshAliasRuleUnchanged` guarding that aliases keep their already-safe single-quoted rendering.
+- `tests/test_convert.py`: new `TestPowerShellLiteralValueSafety` (5) — literal `$(…)` and backticks in single-quoted values, escaping in double-quoted values, and proof that the `$env:VAR` rewrite still expands.
+- One existing assertion updated (`test_quoted_value`): `set -gx GREETING 'hello world'` now yields `export GREETING='hello world'` instead of double quotes — the intended behaviour change.
+- 1381 total; ruff/format/mypy/bandit clean, `pip-audit` clean.
+
 ## Version 2.55.0 (07.08.2026)
 
 ### Fixed (transfer carries only your own artefacts)

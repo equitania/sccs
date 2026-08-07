@@ -104,6 +104,41 @@ class TestSetGxConversion:
         assert result.powershell == '$env:X = "$HOME/foo"'
 
 
+class TestPowerShellLiteralValueSafety:
+    """PowerShell expands `$(...)` in double quotes; fish never does.
+
+    Unlike the zsh converter there is no intended `(cmd)` -> substitution
+    rewrite here, so neutralising the executing form is loss-free.
+    """
+
+    def test_single_quoted_subexpression_stays_literal(self) -> None:
+        result = convert_set_gx("set -gx A 'literal $(whoami) in fish'")
+        assert result is not None
+        assert result.powershell == "$env:A = 'literal $(whoami) in fish'"
+
+    def test_single_quoted_backtick_stays_literal(self) -> None:
+        result = convert_set_gx("set -gx C 'back`tick'")
+        assert result is not None
+        assert result.powershell == "$env:C = 'back`tick'"
+
+    def test_double_quoted_subexpression_is_escaped(self) -> None:
+        result = convert_set_gx('set -gx D "dq $(id) here"')
+        assert result is not None
+        assert result.powershell == '$env:D = "dq `$(id) here"'
+
+    def test_double_quoted_backtick_is_doubled(self) -> None:
+        result = convert_set_gx('set -gx E "a `b c"')
+        assert result is not None
+        assert result.powershell == '$env:E = "a ``b c"'
+
+    def test_env_var_rewrite_still_expands(self) -> None:
+        # The escape must not neutralise the $env: references _rewrite_vars
+        # deliberately emits.
+        result = convert_set_gx('set -gx F "$GITBASE_PATH/sub"')
+        assert result is not None
+        assert result.powershell == '$env:F = "$env:GITBASE_PATH/sub"'
+
+
 class TestFishAddPath:
     def test_add_path_emits_dedupe_check(self) -> None:
         result = convert_fish_add_path("fish_add_path /opt/homebrew/bin")

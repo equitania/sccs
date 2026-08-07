@@ -116,6 +116,7 @@ Was wird konvertiert:
 |---|---|---|
 | `alias name=value` / `alias name 'value'` | `alias name='value'` | zsh-Aliase tragen Argumente nativ |
 | `set -gx VAR value` | `export VAR="value"` | unquoted `~` wird zu `$HOME` |
+| `set -gx VAR 'value'` | `export VAR='value'` | einfach gequotet = literal, siehe unten |
 | `fish_add_path /opt/bin` | duplikatsicheres `PATH`-Prepend | `[[ ":$PATH:" != … ]]`-Guard |
 | `abbr -a name expansion` | `alias name='expansion'` | |
 | `function … end` | echte zsh-Funktion `name() { … }` | Best-Effort inkl. `-d`/`--argument-names` |
@@ -130,6 +131,8 @@ Was wird konvertiert:
 **Wichtigste Abweichung zu fish-to-pwsh**: Plattform-Dateien werden nicht übersprungen, sondern in einen `[[ "$(uname)" == "Darwin" ]]`- bzw. `"Linux"`-Guard gewickelt — ein generiertes Profil funktioniert damit auf beiden Plattformen. Außerdem werden Funktionen **übersetzt statt gestubbt**; nur zu fish-spezifische Dateien (>30 % unübersetzbare Zeilen, Event-Handler, unbalancierte Blöcke) fallen auf kommentierte Stubs zurück — es wird nie syntaktisch kaputtes zsh erzeugt (`zsh -n`-Gate in der Test-Suite).
 
 `conf.d/95-conveniences.zsh` ergänzt bewusst minimal nur, was zsh fehlt (`..`/`...`/`....`, `mkcd`); Opt-out via `--no-conveniences`. Secret-Dateien (`*secret*`, `*token*`, …) und `*.local.fish` werden weiterhin übersprungen.
+
+**Literale Werte bleiben literal** *(ab v2.56.0)*: In fish unterdrücken einfache Quotes jede Expansion, und Backticks kennt fish überhaupt nicht als Command-Substitution. Beides wird jetzt respektiert — `set -gx B 'text (whoami)'` wird zu `export B='text (whoami)'` (nicht `"$(whoami)"`), und ein Backtick wird in doppelt gequoteten Werten escaped. Die gewollten Umwandlungen bleiben unangetastet: ein **unquoted** `(cmd)` wird weiter zu `$(cmd)`, und `$var` expandiert weiter. Der PowerShell-Konverter verhält sich analog (dort `$(…)` und Backtick). Ohne diese Unterscheidung konnte eine importierte fremde `config.fish` inerten Text in ausführbaren Code verwandeln — das `zsh -n`-Gate erkennt das nicht, weil die Zeile syntaktisch korrekt ist.
 
 Querverweise: [categories.md](categories.md), [sync.md](sync.md), [doctor.md](doctor.md)
 
@@ -245,6 +248,7 @@ Conversion rules:
 |---|---|---|
 | `alias name=value` / `alias name 'value'` | `alias name='value'` | zsh aliases carry arguments natively |
 | `set -gx VAR value` | `export VAR="value"` | unquoted `~` becomes `$HOME` |
+| `set -gx VAR 'value'` | `export VAR='value'` | single-quoted = literal, see below |
 | `fish_add_path /opt/bin` | duplicate-aware `PATH` prepend | `[[ ":$PATH:" != … ]]` guard |
 | `abbr -a name expansion` | `alias name='expansion'` | |
 | `function … end` | real zsh function `name() { … }` | Best-effort incl. `-d`/`--argument-names` |
@@ -259,5 +263,7 @@ Conversion rules:
 **Key divergence from fish-to-pwsh**: platform files are not skipped but wrapped in a `[[ "$(uname)" == "Darwin" ]]` / `"Linux"` guard, so one generated profile works on both platforms. Functions are **translated instead of stubbed**; only overly fish-specific files (>30 % untranslatable lines, event handlers, unbalanced blocks) fall back to commented stubs — the converter never emits syntactically broken zsh (a `zsh -n` gate is part of the test suite).
 
 `conf.d/95-conveniences.zsh` deliberately adds only what zsh genuinely lacks (`..`/`...`/`....`, `mkcd`); opt out via `--no-conveniences`. Secret-like files (`*secret*`, `*token*`, …) and `*.local.fish` remain excluded.
+
+**Literal values stay literal** *(since v2.56.0)*: fish single quotes suppress every expansion, and fish has no backtick command substitution whatsoever. Both are now honoured — `set -gx B 'text (whoami)'` becomes `export B='text (whoami)'` (not `"$(whoami)"`), and backticks are escaped inside double-quoted values. The intended conversions are untouched: an **unquoted** `(cmd)` still becomes `$(cmd)`, and `$var` still expands. The PowerShell converter behaves analogously (there: `$(…)` and the backtick). Without that distinction an imported foreign `config.fish` could turn inert text into executable code — the `zsh -n` gate cannot catch it, because the generated line is syntactically valid.
 
 See also: [categories.md](categories.md), [sync.md](sync.md), [doctor.md](doctor.md)

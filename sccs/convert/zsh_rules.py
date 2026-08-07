@@ -94,6 +94,21 @@ def _sq(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
+def _dq_escape(value: str) -> str:
+    """Escape a value for embedding in a zsh DOUBLE-quoted string.
+
+    `"` and the backtick are neutralised. `$` deliberately is NOT: a `$var`
+    coming from a fish double-quoted or bare token is meant to expand, and
+    `rewrite_fish_tokens` turns fish's `(cmd)` into an intentional `$(cmd)`.
+
+    The backtick is the interesting one. Fish has no backtick command
+    substitution at all, so a backtick in a fish value is *always* literal
+    text — but zsh would execute it inside double quotes. Escaping it is
+    therefore both the safe and the faithful rendering.
+    """
+    return value.replace('"', '\\"').replace("`", "\\`")
+
+
 @dataclass
 class ZshConversionResult:
     """Result of converting a single fish line to zsh."""
@@ -132,9 +147,19 @@ def convert_set_gx(line: str) -> ZshConversionResult | None:
         return None
 
     name = match.group("name")
+
+    # A fish SINGLE-quoted value is fully literal: no variable expansion, no
+    # command substitution, no escapes. Running it through
+    # `rewrite_fish_tokens` and dropping it into a zsh double-quoted string
+    # would turn inert text into live code — `'text (whoami)'` became
+    # `"text $(whoami)"`. Emit a literal zsh single-quoted string instead,
+    # exactly like `convert_alias` already does.
+    sq_value = match.group("sq")
+    if sq_value is not None:
+        return ZshConversionResult(zsh=f"export {name}={_sq(sq_value)}", kind="env")
+
     value = rewrite_fish_tokens(_extract_value(match))
-    escaped = value.replace('"', '\\"')
-    return ZshConversionResult(zsh=f'export {name}="{escaped}"', kind="env")
+    return ZshConversionResult(zsh=f'export {name}="{_dq_escape(value)}"', kind="env")
 
 
 # fish_add_path accepts flags (--path, -g, -m, ...) and MULTIPLE directories;
@@ -166,7 +191,9 @@ def convert_fish_add_path(line: str) -> ZshConversionResult | None:
             value = "$HOME/" + value[2:]
         elif value == "~":
             value = "$HOME"
-        value = rewrite_fish_tokens(value).replace('"', '\\"')
+        # `$HOME` is intentional here (substituted for `~` above); a backtick
+        # never is — see _dq_escape.
+        value = _dq_escape(rewrite_fish_tokens(value))
         guards.append(_path_guard(value))
 
     if not guards:

@@ -70,9 +70,10 @@ class TestZshSetGx:
         assert result.kind == "env"
 
     def test_quoted_value(self):
+        # Single-quoted in fish means literal, so it stays literal in zsh.
         result = convert_set_gx("set -gx GREETING 'hello world'")
         assert result is not None
-        assert result.zsh == 'export GREETING="hello world"'
+        assert result.zsh == "export GREETING='hello world'"
 
     def test_variable_reference_kept(self):
         result = convert_set_gx('set -gx GOPATH "$HOME/go"')
@@ -83,6 +84,76 @@ class TestZshSetGx:
         result = convert_set_gx("set -gx CARGO_HOME ~/.cargo")
         assert result is not None
         assert result.zsh == 'export CARGO_HOME="$HOME/.cargo"'
+
+
+class TestZshLiteralValueSafety:
+    """A fish value that is inert must not become live zsh code.
+
+    Fish single quotes suppress every expansion, and fish has no backtick
+    command substitution at all — so text that merely *looks* like code is
+    plain data at the source. Emitting it into a zsh double-quoted string
+    used to execute it on the next shell start.
+    """
+
+    def test_single_quoted_command_substitution_stays_literal(self):
+        result = convert_set_gx("set -gx B 'text (whoami) literal'")
+        assert result is not None
+        assert result.zsh == "export B='text (whoami) literal'"
+        assert "$(whoami)" not in result.zsh
+
+    def test_single_quoted_dollar_stays_literal(self):
+        result = convert_set_gx("set -gx A 'literal $HOME stays'")
+        assert result is not None
+        assert result.zsh == "export A='literal $HOME stays'"
+
+    def test_single_quoted_backtick_stays_literal(self):
+        result = convert_set_gx("set -gx C 'back`id`tick'")
+        assert result is not None
+        assert result.zsh == "export C='back`id`tick'"
+
+    def test_double_quoted_backtick_is_escaped(self):
+        # Fish double quotes expand $var but never backticks.
+        result = convert_set_gx('set -gx C "has `id` inside"')
+        assert result is not None
+        assert result.zsh == 'export C="has \\`id\\` inside"'
+
+    def test_bare_backtick_is_escaped(self):
+        result = convert_set_gx("set -gx C pre`id`post")
+        assert result is not None
+        assert result.zsh == 'export C="pre\\`id\\`post"'
+
+    def test_intended_command_substitution_survives(self):
+        # An UNQUOTED `(cmd)` is real fish command substitution — it must
+        # still become `$(cmd)`. The fix must not break this feature.
+        result = convert_set_gx("set -gx D (date)")
+        assert result is not None
+        assert result.zsh == 'export D="$(date)"'
+
+    def test_intended_variable_expansion_survives(self):
+        result = convert_set_gx('set -gx E "expand $HOME here"')
+        assert result is not None
+        assert result.zsh == 'export E="expand $HOME here"'
+
+    def test_add_path_backtick_is_escaped(self):
+        result = convert_fish_add_path("fish_add_path /opt/`id`/bin")
+        assert result is not None
+        assert "\\`id\\`" in result.zsh
+        assert "/opt/`id`/bin" not in result.zsh
+
+    def test_add_path_home_substitution_survives(self):
+        result = convert_fish_add_path("fish_add_path ~/bin")
+        assert result is not None
+        assert '"$HOME/bin:$PATH"' in result.zsh
+
+
+class TestZshAliasRuleUnchanged:
+    def test_alias_was_already_single_quoted(self):
+        """Regression guard: aliases were never vulnerable — keep it that way."""
+        from sccs.convert.zsh_rules import convert_alias
+
+        result = convert_alias("alias danger 'echo `id`'")
+        assert result is not None
+        assert result.zsh == "alias danger='echo `id`'"
 
 
 class TestZshAddPath:
