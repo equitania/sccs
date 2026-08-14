@@ -2838,7 +2838,9 @@ def _collect_statusline_preset_statuses():
     from sccs.doctor.statusline import StatusLineError
 
     try:
-        return _statusline_manager().all_status()
+        # detect_version=True: the doctor's Version column is the one place
+        # where paying for a subprocess per installed preset is worth it.
+        return _statusline_manager().all_status(detect_version=True)
     except (StatusLineError, OSError):
         return []
 
@@ -3452,7 +3454,7 @@ def statusline_list(ctx: click.Context, output_json: bool) -> None:
     console = ctx.obj["console"]
     manager = _statusline_manager()
     try:
-        statuses = manager.all_status()
+        statuses = manager.all_status(detect_version=True)
         current = manager.current_command()
         matched = manager.match_current()
     except StatusLineError as exc:
@@ -3469,8 +3471,19 @@ def statusline_list(ctx: click.Context, output_json: bool) -> None:
     console.print("\n[bold]Statusline presets[/bold]")
     for st in statuses:
         marker = "[green]●[/green]" if st.is_active else " "
-        state = "[green]installed[/green]" if st.installed else "[yellow]not installed[/yellow]"
-        console.print(f"  {marker} [bold]{st.name}[/bold] — {state}")
+        if st.installed:
+            state = "[green]installed[/green]" + (f" [cyan]{st.version}[/cyan]" if st.version else "")
+        else:
+            state = "[yellow]not installed[/yellow]"
+            if st.installable:
+                state += f" [dim]— `sccs statusline install {st.name}`[/dim]"
+        tags = []
+        if st.is_active:
+            tags.append("in use")
+        if st.is_configured:
+            tags.append("configured")
+        suffix = f"  [dim]({', '.join(tags)})[/dim]" if tags else ""
+        console.print(f"  {marker} [bold]{st.name}[/bold] — {state}{suffix}")
         if st.description:
             console.print(f"      [dim]{st.description}[/dim]")
         console.print(f"      [dim]{st.command}[/dim]")

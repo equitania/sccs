@@ -138,11 +138,28 @@ statusline:
 | `command` | Wert für `statusLine.command`; Claude Code führt ihn über eine Shell aus, `~` und `$HOME` expandieren |
 | `padding` | Optionales `statusLine.padding`; bei `null` wird der Schlüssel weggelassen |
 | `marker_path` | Pfad (relativ zu `~/.claude/` oder absolut), dessen Existenz „installiert" beweist |
+| `version_arg` | Flag, mit dem das Binary seine Version ausgibt (z.B. `--version`); erscheint in der Version-Spalte des Doctors |
 | `install_url` | https-URL eines POSIX-Installers, Host aus der Allowlist |
 | `install_url_windows` | https-URL des PowerShell-Installers, wird als Hinweis angezeigt |
 | `managed_paths` | Bloße Dateinamen, die das Preset in `~/.claude/` ablegt — landen in den Sync-Excludes |
 
-`active` ist rein deklarativ: SCCS schreibt `statusLine` nur bei `sccs statusline use` oder beim Abschalten eines Profils. Der Doctor meldet lediglich, wenn das unter `active` genannte Preset fehlt.
+`active` ist rein deklarativ: SCCS schreibt `statusLine` nur bei `sccs statusline use` oder beim Abschalten eines Profils.
+
+### Im Doctor-Bericht
+
+`sccs doctor check` zeigt eine Zeile für jedes Preset, das entweder unter `active` konfiguriert ist **oder** gerade läuft — in beiden Zuständen, nicht nur wenn etwas fehlt:
+
+```
+statusline-preset: claude-code-statusline │ OK      │ statusline 1.0.0 │ installed · in use — ~/.claude/statusline
+statusline-preset: claude-code-statusline │ OK      │ statusline 1.0.0 │ installed · not in use — `sccs statusline use claude-code-statusline`
+statusline-preset: claude-code-statusline │ MISSING │ -                │ configured but not installed — `sccs statusline install claude-code-statusline`
+```
+
+`installed · not in use` ist der interessante Fall: das Preset ist gewählt und vorhanden, aber etwas anderes besitzt gerade `statusLine` — normalerweise eine Extension wie GSD, solange deren Profil an ist.
+
+Presets, die weder konfiguriert noch aktiv sind, erscheinen nicht — der Bericht ist ein Status, kein Katalog. Alle bekannten Presets zeigt `sccs statusline list`.
+
+Eine fehlende Statusleiste ist wie bei `cli_tools` nur ein Hinweis und ändert den Exit-Code **nicht**.
 
 ---
 
@@ -278,8 +295,25 @@ statusline:
 | `command` | Value for `statusLine.command`; Claude Code runs it through a shell, so `~` and `$HOME` expand |
 | `padding` | Optional `statusLine.padding`; omitted from settings.json when null |
 | `marker_path` | Path (relative to `~/.claude/`, or absolute) whose existence proves it is installed |
+| `version_arg` | Flag that makes the binary print its version (e.g. `--version`); shown in the doctor's Version column |
 | `install_url` | https URL of a POSIX installer, host from the allowlist |
 | `install_url_windows` | https URL of the PowerShell installer, shown as a hint |
 | `managed_paths` | Bare file names the preset drops into `~/.claude/` — added to the sync excludes |
 
-`active` is purely declarative: SCCS writes `statusLine` only on `sccs statusline use` or when a profile is switched off. The doctor merely reports when the preset named by `active` is missing.
+`active` is purely declarative: SCCS writes `statusLine` only on `sccs statusline use` or when a profile is switched off.
+
+### In the doctor report
+
+`sccs doctor check` prints a row for every preset that is either configured as `active` **or** currently live — in both states, not only when something is missing:
+
+```
+statusline-preset: claude-code-statusline │ OK      │ statusline 1.0.0 │ installed · in use — ~/.claude/statusline
+statusline-preset: claude-code-statusline │ OK      │ statusline 1.0.0 │ installed · not in use — `sccs statusline use claude-code-statusline`
+statusline-preset: claude-code-statusline │ MISSING │ -                │ configured but not installed — `sccs statusline install claude-code-statusline`
+```
+
+`installed · not in use` is the interesting one: the preset is chosen and present, but something else currently owns `statusLine` — normally an extension like GSD while its profile is on.
+
+Presets that are neither configured nor active do not appear — the report is a status, not a catalogue. `sccs statusline list` shows every known preset.
+
+Like `cli_tools`, a missing statusline is informational and does **not** change the exit code.

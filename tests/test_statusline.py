@@ -215,6 +215,121 @@ def test_missing_settings_file_raises(tmp_path: Path):
 # --------------------------------------------------------------------- #
 
 
+# --------------------------------------------------------------------- #
+# Version detection                                                      #
+# --------------------------------------------------------------------- #
+
+
+def test_version_arg_must_be_a_single_flag():
+    for bad in ["version", "--version --extra", "/etc/passwd"]:
+        with pytest.raises(ValueError):
+            StatusLinePreset(command="x", version_arg=bad)
+
+
+def test_detect_version_reads_the_first_line(tmp_path: Path):
+    marker = tmp_path / "bar"
+    marker.write_text("#!/bin/sh\necho 'bar 2.1.0'\necho 'second line'\n", encoding="utf-8")
+    marker.chmod(0o755)
+    preset = StatusLinePreset(command="x", marker_path="bar", version_arg="--version")
+    assert preset.detect_version(tmp_path) == "bar 2.1.0"
+
+
+def test_detect_version_is_none_without_version_arg(tmp_path: Path):
+    (tmp_path / "bar").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    (tmp_path / "bar").chmod(0o755)
+    assert StatusLinePreset(command="x", marker_path="bar").detect_version(tmp_path) is None
+
+
+def test_detect_version_degrades_when_not_executable(tmp_path: Path):
+    (tmp_path / "bar").write_text("not a program", encoding="utf-8")
+    preset = StatusLinePreset(command="x", marker_path="bar", version_arg="--version")
+    assert preset.detect_version(tmp_path) is None
+
+
+def test_detect_version_rejects_a_paragraph(tmp_path: Path):
+    """A binary that answers with prose must not blow up the Version column."""
+    marker = tmp_path / "bar"
+    marker.write_text("#!/bin/sh\necho '" + "x" * 80 + "'\n", encoding="utf-8")
+    marker.chmod(0o755)
+    preset = StatusLinePreset(command="x", marker_path="bar", version_arg="--version")
+    assert preset.detect_version(tmp_path) is None
+
+
+def test_status_only_detects_version_when_asked(claude_dir: Path, manager: StatusLineManager):
+    (claude_dir / "statusline").write_text("#!/bin/sh\necho 'sl 9.9'\n", encoding="utf-8")
+    (claude_dir / "statusline").chmod(0o755)
+    assert manager.status("claude-code-statusline").version is None
+    assert manager.status("claude-code-statusline", detect_version=True).version == "sl 9.9"
+
+
+# --------------------------------------------------------------------- #
+# Doctor row                                                             #
+# --------------------------------------------------------------------- #
+
+
+def _row(**kw):
+    from sccs.doctor.reporter import _statusline_preset_row
+    from sccs.doctor.statusline import StatusLinePresetStatus
+
+    defaults = dict(
+        name="ccs",
+        description="",
+        command="~/.claude/statusline",
+        installed=True,
+        is_active=False,
+        is_configured=True,
+        installable=True,
+        version=None,
+    )
+    defaults.update(kw)
+    return _statusline_preset_row(StatusLinePresetStatus(**defaults))
+
+
+def test_row_omitted_for_a_preset_that_is_neither_chosen_nor_live():
+    """Listing every bundled preset would be a catalogue, not a status."""
+    assert _row(is_configured=False, is_active=False) is None
+
+
+def test_row_shown_when_installed_and_healthy():
+    """Regression: an OK statusline used to print nothing at all.
+
+    `doctor check` is a status report and every other component prints an
+    OK row, so silence made "installed and fine" indistinguishable from
+    "SCCS has no idea this exists".
+    """
+    row = _row(installed=True, is_active=True, version="statusline 1.0.0")
+    assert row is not None
+    component, status, version, detail = row
+    assert "ccs" in component
+    assert status == "OK"
+    assert version == "statusline 1.0.0"
+    assert "in use" in detail
+
+
+def test_row_flags_configured_but_not_in_use():
+    _, status, _, detail = _row(installed=True, is_active=False)
+    assert status == "OK"
+    assert "not in use" in detail
+    assert "sccs statusline use ccs" in detail
+
+
+def test_row_flags_missing_with_the_install_command():
+    _, status, _, detail = _row(installed=False)
+    assert "MISSING" in status
+    assert "sccs statusline install ccs" in detail
+
+
+def test_row_missing_without_installer_says_so():
+    _, status, _, detail = _row(installed=False, installable=False)
+    assert "MISSING" in status
+    assert "no installer" in detail
+
+
+def test_row_shown_for_a_live_preset_even_if_not_configured():
+    row = _row(is_configured=False, is_active=True)
+    assert row is not None and "in use" in row[3]
+
+
 def test_install_hint_is_the_documented_command():
     preset = DEFAULT_STATUSLINE_PRESETS["claude-code-statusline"]
     assert install_command_hint(preset) == f"curl -fsSL {preset.install_url} | bash"

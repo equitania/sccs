@@ -110,6 +110,23 @@ class StatusLinePreset(BaseModel):
             "them into the git repository."
         ),
     )
+    version_arg: str | None = Field(
+        default=None,
+        description=(
+            "Argument that makes the marker binary print its version (e.g. "
+            "'--version'), shown in the doctor's Version column. None for "
+            "statuslines that cannot report one, such as a plain shell script."
+        ),
+    )
+
+    @field_validator("version_arg")
+    @classmethod
+    def _validate_version_arg(cls, v: str | None) -> str | None:
+        # Passed straight to argv, so keep it to a flag — never a path or a
+        # value that could smuggle in a second argument.
+        if v is not None and (not v.startswith("-") or " " in v):
+            raise ValueError(f"version_arg must be a single flag like '--version', got {v!r}")
+        return v
 
     @field_validator("install_url", "install_url_windows")
     @classmethod
@@ -150,6 +167,52 @@ class StatusLinePreset(BaseModel):
         marker = self.resolve_marker(claude_dir or DEFAULT_CLAUDE_DIR)
         return True if marker is None else marker.exists()
 
+    def detect_version(self, claude_dir: Path | None = None) -> str | None:
+        """Ask the marker binary for its version, or None.
+
+        Deliberately not routed through `doctor.runner._run`: that validator
+        requires argv[0] to look like a PATH name and rejects an absolute
+        path, which is exactly what a statusline marker is. The safety
+        properties are kept locally instead — the path is not user input at
+        call time (it comes from `marker_path`, validated as a bare name or
+        an absolute path), the process is spawned with `shell=False` and a
+        real argv list, `version_arg` is validated to be a single flag, and
+        stdin is closed so a confused binary cannot block us.
+
+        Every failure mode degrades to None. A statusline that does not
+        answer `--version`, is not executable, or hangs must not take down
+        the doctor report over a cosmetic column.
+        """
+        import subprocess
+
+        if not self.version_arg:
+            return None
+        marker = self.resolve_marker(claude_dir or DEFAULT_CLAUDE_DIR)
+        if marker is None or not marker.is_file() or not os.access(marker, os.X_OK):
+            return None
+
+        try:
+            result = subprocess.run(  # nosec B603 - shell=False, fixed argv, validated flag
+                [str(marker), self.version_arg],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+        out = ((result.stdout or "") + (result.stderr or "")).strip()
+        if not out:
+            return None
+        first = out.splitlines()[0].strip()
+        # Guard against a binary that answers with a paragraph instead of a
+        # version — the Version column is one cell wide.
+        return first if len(first) <= 40 else None
+
 
 class StatusLineConfig(BaseModel):
     """The `statusline:` block in config.yaml."""
@@ -185,6 +248,7 @@ DEFAULT_STATUSLINE_PRESETS: dict[str, StatusLinePreset] = {
         command="~/.claude/statusline",
         padding=0,
         marker_path="statusline",
+        version_arg="--version",
         install_url="https://raw.githubusercontent.com/glauberlima/claude-code-statusline/main/install.sh",
         install_url_windows="https://raw.githubusercontent.com/glauberlima/claude-code-statusline/main/install.ps1",
         # The binary is several MB and the toml is machine-local taste —
@@ -230,6 +294,7 @@ class StatusLinePresetStatus:
     is_active: bool  # matches settings.json right now
     is_configured: bool  # named as `statusline.active` in config.yaml
     installable: bool
+    version: str | None = None
 
 
 class StatusLineManager:
@@ -283,20 +348,28 @@ class StatusLineManager:
                 return name
         return None
 
-    def status(self, name: str) -> StatusLinePresetStatus:
+    def status(self, name: str, *, detect_version: bool = False) -> StatusLinePresetStatus:
+        """Status of one preset.
+
+        `detect_version` runs the marker binary, so it is opt-in: the doctor
+        wants it for its Version column, but `sccs statusline list` should
+        not spawn a subprocess per preset just to print a name.
+        """
         preset = self.preset(name)
+        installed = preset.is_installed(self.claude_dir)
         return StatusLinePresetStatus(
             name=name,
             description=preset.description,
             command=preset.command,
-            installed=preset.is_installed(self.claude_dir),
+            installed=installed,
             is_active=self.match_current() == name,
             is_configured=self.active == name,
             installable=bool(preset.install_url or preset.install_url_windows),
+            version=preset.detect_version(self.claude_dir) if (detect_version and installed) else None,
         )
 
-    def all_status(self) -> list[StatusLinePresetStatus]:
-        return [self.status(name) for name in sorted(self.presets)]
+    def all_status(self, *, detect_version: bool = False) -> list[StatusLinePresetStatus]:
+        return [self.status(name, detect_version=detect_version) for name in sorted(self.presets)]
 
     def current_block(self) -> dict[str, Any] | None:
         """The whole `statusLine` object currently in settings.json."""

@@ -248,16 +248,10 @@ def render_doctor_report(
     if cli_tools:
         for cli_st in cli_tools:
             table.add_row(*_cli_tool_row(cli_st))
-    # Only the configured statusline earns a row, and only when it is
-    # missing — listing every available preset would be noise.
     for sl_preset in statusline_presets or []:
-        if sl_preset.is_configured and not sl_preset.installed:
-            table.add_row(
-                f"statusline:{sl_preset.name}",
-                "[yellow]MISSING[/yellow]",
-                "-",
-                f"configured but not installed — `sccs statusline install {sl_preset.name}`",
-            )
+        row = _statusline_preset_row(sl_preset)
+        if row is not None:
+            table.add_row(*row)
 
     console.print(table)
     console.print(f"[dim]Platform: {node.platform}[/dim]")
@@ -267,6 +261,41 @@ def render_doctor_report(
     _print_permission_remediation(console, permissions)
     _print_orphan_remediation(console, gsd_orphans)
     _print_winget_path_remediation(console, cli_tools)
+
+
+def _statusline_preset_row(st) -> tuple[str, str, str, str] | None:
+    """One row per statusline preset that is either chosen or in use.
+
+    Shown in BOTH states, not just when missing: `doctor check` is a status
+    report, and every other component (npx, skill, browsers, perm) prints an
+    OK row too. Staying silent on a healthy statusline made it impossible to
+    tell "installed and fine" from "SCCS doesn't know about this at all".
+
+    A preset that is neither `statusline.active` nor currently live is left
+    out — listing every bundled preset would be a catalogue, not a status.
+    """
+    if not (st.is_configured or st.is_active):
+        return None
+
+    component = f"statusline-preset: {st.name}"
+    version = st.version or ""
+
+    if not st.installed:
+        detail = (
+            f"configured but not installed — `sccs statusline install {st.name}`"
+            if st.installable
+            else f"configured but not installed — no installer for this preset ({st.command})"
+        )
+        return (component, "[yellow]MISSING[/yellow]", version or "-", detail)
+
+    if st.is_active:
+        detail = f"installed · in use — {st.command}"
+    else:
+        # Installed and chosen, but something else currently owns
+        # statusLine — normally an extension like GSD. Worth saying out
+        # loud: the user configured this and is not seeing it.
+        detail = f"installed · not in use — `sccs statusline use {st.name}`"
+    return (component, "OK", version or "", detail)
 
 
 def _print_node_hint(
