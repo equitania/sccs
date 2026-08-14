@@ -82,13 +82,14 @@ class ProfileSpec(BaseModel):
             "on activate."
         ),
     )
-    statusline_fallback: str | None = Field(
+    statusline_fallback_preset: str | None = Field(
         default=None,
         description=(
-            "File name under ~/.claude/ to point `statusLine` at while the "
-            "profile is off (e.g. 'statusline.sh'). Only applied when the "
-            "current statusLine command matches one of the `hooks` patterns, "
-            "so an unrelated statusline is never touched."
+            "Name of the statusline preset to switch to while the profile is "
+            "off (see sccs/doctor/statusline.py). Only applied when the current "
+            "statusLine command matches one of the `hooks` patterns — i.e. when "
+            "this profile actually owns the statusline — so an unrelated one is "
+            "never touched. The previous block is stored and restored on activate."
         ),
     )
     npx_tools: list[str] = Field(
@@ -100,13 +101,13 @@ class ProfileSpec(BaseModel):
         ),
     )
 
-    @field_validator("statusline_fallback")
+    @field_validator("statusline_fallback_preset")
     @classmethod
-    def _validate_fallback(cls, v: str | None) -> str | None:
+    def _validate_fallback_preset(cls, v: str | None) -> str | None:
         if v is None:
             return None
         if "/" in v or "\\" in v or ".." in v:
-            raise ValueError(f"statusline_fallback must be a bare file name, got {v!r}")
+            raise ValueError(f"statusline_fallback_preset must be a preset name, got {v!r}")
         return v
 
 
@@ -122,7 +123,7 @@ DEFAULT_PROFILES: dict[str, ProfileSpec] = {
         skills=["gsd-*"],
         agents=["gsd-*"],
         hooks=["gsd-"],
-        statusline_fallback="statusline.sh",
+        statusline_fallback_preset="claude-code-statusline",
         npx_tools=["@opengsd/gsd-core"],
     ),
 }
@@ -362,11 +363,15 @@ class ProfileManager:
         claude_dir: Path | None = None,
         park_root: Path | None = None,
         state_manager: ProfileStateManager | None = None,
+        statusline_presets: dict[str, Any] | None = None,
     ) -> None:
         self.profiles = profiles
         self.claude_dir = claude_dir or DEFAULT_CLAUDE_DIR
         self.park_root = park_root or DEFAULT_PARK_ROOT
         self.state = state_manager or ProfileStateManager()
+        # Resolved lazily so importing profiles.py does not drag in the
+        # statusline module for callers that never switch a profile.
+        self._statusline_presets = statusline_presets
 
     # -- paths -------------------------------------------------------- #
 
@@ -651,6 +656,28 @@ class ProfileManager:
         cmd = sl.get("command") if isinstance(sl, dict) else None
         return isinstance(cmd, str) and any(pat in cmd for pat in patterns)
 
+    def _fallback_block(self, preset_name: str) -> dict[str, Any]:
+        """Resolve a profile's fallback preset to a settings.json block.
+
+        An unknown preset name is a configuration error and stops the
+        switch: silently leaving the statusline pointing at the parked
+        extension would give the user a blank status line with no clue why.
+        """
+        from sccs.doctor.statusline import StatusLineError, resolve_statusline_presets
+
+        presets = resolve_statusline_presets(self._statusline_presets)
+        preset = presets.get(preset_name)
+        if preset is None:
+            known = ", ".join(sorted(presets)) or "none"
+            raise ProfileError(
+                f"statusline_fallback_preset {preset_name!r} is not a known preset (known: {known}). "
+                f"Fix the profile in config.yaml, or run `sccs statusline list`."
+            )
+        try:
+            return preset.settings_block()
+        except StatusLineError as exc:  # pragma: no cover - defensive
+            raise ProfileError(str(exc)) from exc
+
     # -- operations --------------------------------------------------- #
 
     def deactivate(self, name: str) -> ProfileChange:
@@ -673,11 +700,10 @@ class ProfileManager:
         data = self._read_settings()
         if data is not None:
             removed_hooks, original_events = self._strip_hooks(data, spec.hooks)
-            if spec.statusline_fallback and self._statusline_matches(data, spec.hooks):
+            if spec.statusline_fallback_preset and self._statusline_matches(data, spec.hooks):
                 rec.previous_statusline = data.get("statusLine")
-                fallback = self.claude_dir / spec.statusline_fallback
-                data["statusLine"] = {"type": "command", "command": f'"{fallback}"'}
-                statusline_note = spec.statusline_fallback
+                data["statusLine"] = self._fallback_block(spec.statusline_fallback_preset)
+                statusline_note = spec.statusline_fallback_preset
             if removed_hooks or statusline_note:
                 self._write_settings(data)
 

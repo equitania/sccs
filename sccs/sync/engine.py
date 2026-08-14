@@ -59,7 +59,7 @@ class SyncEngine:
         # gsd-* skills/agents/hooks dropped by `npx @opengsd/gsd-core`) are
         # reproducible from the doctor manifest, so syncing them across
         # machines just produces conflicts. They are silently skipped here.
-        self._doctor_excludes = get_doctor_managed_excludes(config.doctor)
+        self._doctor_excludes = get_doctor_managed_excludes(config.doctor, getattr(config, "statusline", None))
         self.effective_global_exclude = list(config.global_exclude) + self._doctor_excludes
 
     def get_handler(self, category_name: str) -> CategoryHandler | None:

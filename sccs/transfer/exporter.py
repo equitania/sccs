@@ -68,7 +68,7 @@ class Exporter:
         # ships 70 gsd-* skills the recipient's own doctor run would install.
         self._doctor_excludes: list[str] = []
         if not include_managed:
-            self._doctor_excludes = get_doctor_managed_excludes(config.doctor)
+            self._doctor_excludes = get_doctor_managed_excludes(config.doctor, getattr(config, "statusline", None))
         self.effective_global_exclude = list(config.global_exclude) + self._doctor_excludes
 
     def scan_available_items(self) -> dict[str, list[SyncItem]]:

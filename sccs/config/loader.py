@@ -294,6 +294,20 @@ def save_opencode_model_map(model_map: dict[str, str], config_path: Path | None 
     return load_config(config_path)
 
 
+# Top-level keys whose defaults are deep-merged with the user's values just
+# below. Everything else SccsConfig declares is passed through verbatim.
+_DEEP_MERGED_KEYS = frozenset(
+    {
+        "repository",
+        "sync_categories",
+        "global_exclude",
+        "path_transforms",
+        "conflict_resolution",
+        "output",
+    }
+)
+
+
 def _merge_with_defaults(data: dict) -> dict:
     """Merge loaded data with default values for missing keys."""
     result = DEFAULT_CONFIG.copy()
@@ -321,32 +335,22 @@ def _merge_with_defaults(data: dict) -> dict:
     if "output" in data:
         result["output"] = {**result["output"], **data["output"]}
 
-    # `doctor` is fully optional in DEFAULT_CONFIG (DoctorConfig has its own
-    # default_factory), so we pass the user's block through verbatim. Without
-    # this branch, user-supplied `doctor:` overrides were silently dropped —
-    # all DoctorConfig fields fell back to their bundled defaults and a user
-    # that set `doctor.plugins:` to replace the plugin list would see no
-    # effect at all (the override never reached the Pydantic model).
-    if "doctor" in data:
-        result["doctor"] = data["doctor"]
-
-    # `opencode` is fully optional (OpenCodeConfig has its own default_factory)
-    # and absent from DEFAULT_CONFIG, so — exactly like `doctor` above — it must
-    # be passed through verbatim or the user's `opencode.model_map` override is
-    # silently dropped before it reaches the Pydantic model.
-    if "opencode" in data:
-        result["opencode"] = data["opencode"]
-
-    # `pi` and `codex` follow the same rule as `doctor`/`opencode` above: both
-    # are absent from DEFAULT_CONFIG and rely on their Pydantic default_factory,
-    # so a user-supplied block must be passed through verbatim. The `pi` branch
-    # was missing until v2.53.0 — pi.base_dir/pi.exclude overrides in
-    # config.yaml were silently dropped.
-    if "pi" in data:
-        result["pi"] = data["pi"]
-
-    if "codex" in data:
-        result["codex"] = data["codex"]
+    # Everything above needs a bespoke merge (defaults are deep-merged with
+    # the user's values). Every OTHER top-level block SccsConfig knows about
+    # is absent from DEFAULT_CONFIG and relies on its own default_factory, so
+    # it only has to be passed through verbatim.
+    #
+    # This loop replaces what used to be one hand-written branch per block —
+    # a pattern that silently dropped user configuration twice: `doctor:`
+    # overrides never reached the model at all, and `pi.base_dir`/`pi.exclude`
+    # were ignored until v2.53.0. A block whose branch nobody remembered to
+    # add simply vanished, with no error to hint at it. Deriving the list
+    # from the model instead means a new optional block cannot repeat that.
+    for key, value in data.items():
+        if key in _DEEP_MERGED_KEYS:
+            continue
+        if key in SccsConfig.model_fields:
+            result[key] = value
 
     return result
 

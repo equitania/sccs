@@ -1064,8 +1064,13 @@ class TestDoctorManagedExcludes:
         from sccs.doctor.managed import get_doctor_managed_excludes
 
         # User explicitly clears the npx tool list — gsd-* must drop out.
+        # Statusline preset paths stay: they are not tied to an npx tool, and
+        # a multi-megabyte statusline binary must never reach the repository.
         cfg = DoctorConfig(npx_tools=[])
-        assert get_doctor_managed_excludes(cfg) == []
+        excludes = get_doctor_managed_excludes(cfg)
+        assert "gsd-*" not in excludes
+        assert "playwright-cli" not in excludes
+        assert "statusline" in excludes
 
     def test_sync_engine_merges_doctor_excludes_into_global_exclude(self, tmp_path):
         """Verify the SyncEngine actually picks up the patterns and pushes

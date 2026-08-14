@@ -2803,6 +2803,7 @@ def _collect_doctor_statuses(
         "settings_path": settings_hook_detector.settings_path,
         "gsd_orphans": GsdOrphanDetector().get_statuses(npx_specs),
         "cli_tools": CliToolDetector().get_statuses(cli_tool_specs),
+        "statusline_presets": _collect_statusline_preset_statuses(),
     }
 
     if include_foreign:
@@ -2825,6 +2826,21 @@ def _load_doctor_config():
         return config.doctor
     except FileNotFoundError:
         return DoctorConfig()
+
+
+def _collect_statusline_preset_statuses():
+    """Status of every known statusline preset, or [] if unreadable.
+
+    Degrades silently: a malformed settings.json is already surfaced by the
+    dedicated statusline detector, and it must not take the whole doctor
+    report down with it.
+    """
+    from sccs.doctor.statusline import StatusLineError
+
+    try:
+        return _statusline_manager().all_status()
+    except (StatusLineError, OSError):
+        return []
 
 
 def _load_profiles():
@@ -2931,6 +2947,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
+        statusline_presets=statuses.get("statusline_presets"),
         powershell=statuses.get("powershell"),
     )
 
@@ -2989,6 +3006,7 @@ def doctor_install(ctx: click.Context, yes: bool, output_json: bool) -> None:
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
+        statusline_presets=statuses.get("statusline_presets"),
     )
 
     if plan.is_empty():
@@ -3387,6 +3405,210 @@ def profile_off(ctx: click.Context, name: str, yes: bool, output_json: bool) -> 
 def profile_on(ctx: click.Context, name: str, yes: bool, output_json: bool) -> None:
     """Bring NAME's parked artefacts back into ~/.claude/."""
     _run_profile_switch(ctx, name, enable=True, yes=yes, output_json=output_json)
+
+
+@cli.group("statusline")
+def statusline_group() -> None:
+    """Choose which statusline Claude Code runs.
+
+    \b
+    A preset names one statusline: its command, how to tell whether it is
+    installed, and optionally how to install it. Switching writes
+    `statusLine` in ~/.claude/settings.json.
+
+    \b
+    This is also what `sccs profile off` falls back to — parking an
+    extension that owns the statusline would otherwise leave the line
+    blank.
+
+    \b
+    Examples:
+        sccs statusline list                       Presets + what is active
+        sccs statusline install claude-code-statusline
+        sccs statusline use claude-code-statusline
+        sccs statusline show                       Current settings.json value
+    """
+
+
+def _statusline_manager():
+    """Build a StatusLineManager from config.yaml (or bundled defaults)."""
+    from sccs.doctor.statusline import StatusLineManager, resolve_statusline_presets
+
+    try:
+        config = load_config()
+        sl = config.statusline
+        return StatusLineManager(resolve_statusline_presets(sl.presets), active=sl.active)
+    except (FileNotFoundError, AttributeError):
+        return StatusLineManager(resolve_statusline_presets(None))
+
+
+@statusline_group.command("list")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def statusline_list(ctx: click.Context, output_json: bool) -> None:
+    """List available statusline presets."""
+    from sccs.doctor.statusline import StatusLineError
+
+    console = ctx.obj["console"]
+    manager = _statusline_manager()
+    try:
+        statuses = manager.all_status()
+        current = manager.current_command()
+        matched = manager.match_current()
+    except StatusLineError as exc:
+        if output_json:
+            emit_json_error(str(exc))
+        else:
+            console.print_error(str(exc))
+        raise SystemExit(1) from exc
+
+    if output_json:
+        emit_json({"presets": [vars(s) for s in statuses], "current_command": current, "current_preset": matched})
+        return
+
+    console.print("\n[bold]Statusline presets[/bold]")
+    for st in statuses:
+        marker = "[green]●[/green]" if st.is_active else " "
+        state = "[green]installed[/green]" if st.installed else "[yellow]not installed[/yellow]"
+        console.print(f"  {marker} [bold]{st.name}[/bold] — {state}")
+        if st.description:
+            console.print(f"      [dim]{st.description}[/dim]")
+        console.print(f"      [dim]{st.command}[/dim]")
+
+    if matched is None and current:
+        console.print(f"\n  [dim]Active statusline matches no preset:[/dim] {current}")
+    elif current is None:
+        console.print("\n  [dim]No statusline set in settings.json.[/dim]")
+    console.print("")
+
+
+@statusline_group.command("show")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def statusline_show(ctx: click.Context, output_json: bool) -> None:
+    """Print the statusLine entry currently in settings.json."""
+    from sccs.doctor.statusline import StatusLineError
+
+    console = ctx.obj["console"]
+    manager = _statusline_manager()
+    try:
+        current = manager.current_command()
+        matched = manager.match_current()
+    except StatusLineError as exc:
+        if output_json:
+            emit_json_error(str(exc))
+        else:
+            console.print_error(str(exc))
+        raise SystemExit(1) from exc
+
+    if output_json:
+        emit_json({"command": current, "preset": matched})
+        return
+
+    if current is None:
+        console.print_info("No statusline set in settings.json.")
+        return
+    console.print(f"\n  command: {current}")
+    console.print(f"  preset:  {matched or '(none — not a configured preset)'}\n")
+
+
+@statusline_group.command("use")
+@click.argument("name")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def statusline_use(ctx: click.Context, name: str, output_json: bool) -> None:
+    """Point settings.json at preset NAME."""
+    from sccs.doctor.statusline import StatusLineError, install_command_hint
+
+    console = ctx.obj["console"]
+    manager = _statusline_manager()
+    try:
+        preset = manager.preset(name)
+        block = manager.apply(name)
+    except StatusLineError as exc:
+        if output_json:
+            emit_json_error(str(exc))
+        else:
+            console.print_error(str(exc))
+        raise SystemExit(1) from exc
+
+    installed = preset.is_installed(manager.claude_dir)
+    if output_json:
+        emit_json({"preset": name, "statusLine": block, "installed": installed})
+        return
+
+    console.print_success(f"Statusline set to '{name}'.")
+    if not installed:
+        hint = install_command_hint(preset)
+        console.print_warning(f"'{name}' is not installed yet — the statusline will stay blank until it is.")
+        if hint:
+            console.print_info(f"Install it with: sccs statusline install {name}")
+    console.print_info("Start a new Claude Code session to see it.")
+
+
+@statusline_group.command("install")
+@click.argument("name")
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt")
+@click.option("--use/--no-use", default=True, help="Also point settings.json at it after installing (default: on)")
+@click.pass_context
+def statusline_install(ctx: click.Context, name: str, yes: bool, use: bool) -> None:
+    """Download and run preset NAME's installer.
+
+    \b
+    The installer is fetched to a temp file and executed with bash — never
+    piped from curl through a shell. Install URLs are restricted to an
+    allowlist of hosts at config-validation time.
+    """
+    from sccs.doctor.statusline import StatusLineError, install_command_hint, install_preset
+
+    console = ctx.obj["console"]
+    manager = _statusline_manager()
+    try:
+        preset = manager.preset(name)
+    except StatusLineError as exc:
+        console.print_error(str(exc))
+        raise SystemExit(1) from exc
+
+    hint = install_command_hint(preset)
+    if hint is None:
+        console.print_error(f"Preset '{name}' has no installer configured.")
+        raise SystemExit(1)
+
+    if preset.is_installed(manager.claude_dir):
+        console.print_info(f"'{name}' is already installed — running the installer again updates it.")
+
+    console.print(f"\n  This downloads and runs third-party code from:\n    {preset.install_url}\n")
+    if not yes and not console.confirm(f"Install '{name}'?", default=False):
+        console.print_info("Aborted.")
+        return
+
+    # Installers commonly rewrite settings.json.statusLine themselves
+    # (claude-code-statusline's install.sh does). Capture the current block
+    # so --no-use can actually keep its promise.
+    previous_block = manager.current_block() if not use else None
+
+    try:
+        install_preset(preset)
+    except StatusLineError as exc:
+        console.print_error(str(exc))
+        console.print_info(f"To do it by hand: {hint}")
+        raise SystemExit(1) from exc
+
+    console.print_success(f"'{name}' installed.")
+    if use:
+        try:
+            manager.apply(name)
+            console.print_success(f"Statusline set to '{name}'.")
+        except StatusLineError as exc:
+            console.print_warning(f"Installed, but setting the statusline failed: {exc}")
+    else:
+        try:
+            if manager.current_block() != previous_block:
+                manager.restore_block(previous_block)
+                console.print_info("The installer changed statusLine — reverted it (--no-use).")
+        except StatusLineError as exc:
+            console.print_warning(f"Could not restore the previous statusline: {exc}")
+    console.print_info("Start a new Claude Code session to see it.")
 
 
 def main() -> None:

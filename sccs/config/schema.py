@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from sccs.doctor.profiles import ProfileSpec
 from sccs.doctor.schema import DoctorConfig
+from sccs.doctor.statusline import StatusLineConfig
 
 # Git remote name: alphanumeric start, then alphanumerics/underscore/dot/hyphen.
 # Leading hyphen is forbidden to block option-injection (e.g. "--upload-pack=evil").
@@ -345,6 +346,17 @@ class SccsConfig(BaseModel):
             "switches together (skills, agents, settings.json hooks, "
             "statusline). Merged over the bundled defaults in "
             "sccs/doctor/profiles.py:DEFAULT_PROFILES."
+        ),
+    )
+    # Statusline block is fully optional: without it the bundled presets
+    # apply and `active` stays None, meaning SCCS never touches statusLine
+    # on its own.
+    statusline: StatusLineConfig = Field(
+        default_factory=StatusLineConfig,
+        description=(
+            "Which statusline Claude Code runs. `active` names the preset "
+            "SCCS should keep in settings.json; `presets` adds to or "
+            "overrides the bundled ones (sccs/doctor/statusline.py)."
         ),
     )
 

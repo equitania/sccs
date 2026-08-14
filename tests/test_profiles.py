@@ -124,9 +124,9 @@ def test_invalid_profile_names_rejected(bad):
         validate_profile_name(bad)
 
 
-def test_statusline_fallback_must_be_a_bare_filename():
+def test_statusline_fallback_preset_must_be_a_preset_name():
     with pytest.raises(ValueError):
-        ProfileSpec(statusline_fallback="../../etc/passwd")
+        ProfileSpec(statusline_fallback_preset="../../etc/passwd")
 
 
 # --------------------------------------------------------------------- #
@@ -169,10 +169,24 @@ def test_deactivate_drops_emptied_entries_and_events(manager: ProfileManager, cl
     assert len(hooks["SessionStart"][0]["hooks"]) == 1
 
 
-def test_deactivate_points_statusline_at_fallback(manager: ProfileManager, claude_dir: Path):
+def test_deactivate_points_statusline_at_fallback_preset(manager: ProfileManager, claude_dir: Path):
     change = manager.deactivate("gsd")
-    assert change.statusline == "statusline.sh"
-    assert "statusline.sh" in _settings(claude_dir)["statusLine"]["command"]
+    assert change.statusline == "claude-code-statusline"
+    sl = _settings(claude_dir)["statusLine"]
+    assert sl == {"type": "command", "command": "~/.claude/statusline", "padding": 0}
+
+
+def test_unknown_fallback_preset_aborts_the_switch(tmp_path: Path, claude_dir: Path):
+    """A typo in the profile must not silently leave a dead statusline."""
+    profiles = resolve_profiles({"gsd": ProfileSpec(hooks=["gsd-"], statusline_fallback_preset="typo-preset")})
+    mgr = ProfileManager(
+        profiles,
+        claude_dir=claude_dir,
+        park_root=tmp_path / "park",
+        state_manager=ProfileStateManager(state_path=tmp_path / "s.yaml"),
+    )
+    with pytest.raises(ProfileError, match="not a known preset"):
+        mgr.deactivate("gsd")
 
 
 def test_unrelated_statusline_is_left_alone(tmp_path: Path, claude_dir: Path):

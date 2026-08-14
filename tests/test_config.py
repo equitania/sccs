@@ -159,6 +159,47 @@ class TestConfigLoader:
         assert len(errors) > 0
 
 
+class TestOptionalBlockPassthrough:
+    """Every optional top-level block must survive the defaults merge.
+
+    Regression guard. `_merge_with_defaults` used to carry one hand-written
+    branch per block, and a block whose branch nobody added was dropped in
+    silence — no error, just settings that had no effect. It happened to
+    `doctor:` and again to `pi:` (fixed in v2.53.0). The merge now derives
+    the pass-through set from SccsConfig itself; this test fails if that
+    ever regresses to an allowlist.
+    """
+
+    @pytest.mark.parametrize(
+        ("block", "payload", "check"),
+        [
+            ("statusline", {"active": "builtin"}, lambda c: c.statusline.active == "builtin"),
+            ("profiles", {"mine": {"skills": ["x-*"]}}, lambda c: c.profiles["mine"].skills == ["x-*"]),
+            ("doctor", {"min_node_major": 24}, lambda c: c.doctor.min_node_major == 24),
+            ("pi", {"exclude": ["pi-*"]}, lambda c: c.pi.exclude == ["pi-*"]),
+            ("codex", {"exclude": ["cx-*"]}, lambda c: c.codex.exclude == ["cx-*"]),
+            ("opencode", {"exclude": ["oc-*"]}, lambda c: c.opencode.exclude == ["oc-*"]),
+        ],
+    )
+    def test_optional_block_reaches_the_model(self, tmp_path, sample_config, block, payload, check):
+        cfg = dict(sample_config)
+        cfg[block] = payload
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+        assert check(load_config(path)), f"{block!r} was dropped by _merge_with_defaults"
+
+    def test_unknown_block_is_still_ignored(self, tmp_path, sample_config):
+        """Pass-through is driven by the model, not by 'anything goes'."""
+        cfg = dict(sample_config)
+        cfg["not_a_real_block"] = {"x": 1}
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+        config = load_config(path)
+        assert not hasattr(config, "not_a_real_block")
+
+
 class TestDefaults:
     """Tests for default configuration."""
 

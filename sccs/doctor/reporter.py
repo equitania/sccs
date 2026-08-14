@@ -206,6 +206,7 @@ def render_doctor_report(
     status_lines: list[StatusLineStatus] | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
+    statusline_presets: list | None = None,
     powershell: PowerShellStatus | None = None,
     min_pwsh_major: int = 7,
 ) -> None:
@@ -247,6 +248,16 @@ def render_doctor_report(
     if cli_tools:
         for cli_st in cli_tools:
             table.add_row(*_cli_tool_row(cli_st))
+    # Only the configured statusline earns a row, and only when it is
+    # missing — listing every available preset would be noise.
+    for sl_preset in statusline_presets or []:
+        if sl_preset.is_configured and not sl_preset.installed:
+            table.add_row(
+                f"statusline:{sl_preset.name}",
+                "[yellow]MISSING[/yellow]",
+                "-",
+                f"configured but not installed — `sccs statusline install {sl_preset.name}`",
+            )
 
     console.print(table)
     console.print(f"[dim]Platform: {node.platform}[/dim]")

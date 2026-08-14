@@ -31,7 +31,7 @@ sccs profile list --json         # Maschinenlesbar
 1. Passende Skill-Verzeichnisse aus `~/.claude/skills/` **wandern** nach `~/.config/sccs/profiles/<name>/skills/`.
 2. Passende Agent-Dateien aus `~/.claude/agents/` wandern nach `~/.config/sccs/profiles/<name>/agents/`.
 3. Hook-Einträge, deren `command` ein Muster des Profils enthält, werden aus `settings.json` entfernt und im Profil-Zustand gesichert.
-4. Zeigt die `statusLine` auf ein Skript des Profils, wird sie auf `statusline_fallback` umgestellt; der alte Wert wird gesichert. Eine fremde Statusline (z.B. Starship) bleibt unangetastet.
+4. Zeigt die `statusLine` auf ein Skript des Profils, wird sie auf das Preset aus `statusline_fallback_preset` umgestellt (siehe [Statusline](#statusline)); der alte Wert wird gesichert. Eine fremde Statusline (z.B. Starship) bleibt unangetastet.
 5. Der Zustand landet in `~/.config/sccs/.profile_state.yaml`.
 
 **Es wird nichts gelöscht.** Alles wird verschoben und ist über `sccs profile on` vollständig wiederherstellbar. Kollidiert eine Datei mit einer gleichnamigen im Parkbereich, bricht der Vorgang mit einer Fehlermeldung ab, statt zu überschreiben.
@@ -77,10 +77,72 @@ profiles:
 | `skills` | fnmatch-Globs gegen Verzeichnisnamen in `~/.claude/skills/` |
 | `agents` | fnmatch-Globs gegen Dateinamen in `~/.claude/agents/` |
 | `hooks` | Substring-Muster gegen `hooks[*].hooks[*].command` — gleiche Semantik wie `doctor.disallowed_hooks` |
-| `statusline_fallback` | Bloßer Dateiname unter `~/.claude/`, auf den die Statusline umgestellt wird |
+| `statusline_fallback_preset` | Name des Statusline-Presets, auf das umgestellt wird |
 | `npx_tools` | Namen der Doctor-npx-Tools, die diese Artefakte installieren |
 
 Profilnamen dürfen nur Kleinbuchstaben, Ziffern, `-` und `_` enthalten.
+
+## Statusline
+
+Manche Extensions bringen ihre eigene Statusleiste mit — GSD zum Beispiel setzt `statusLine` auf `hooks/gsd-statusline.js`. Wird das Profil abgeschaltet, zeigt der Eintrag auf ein Skript, das nicht mehr eingebunden ist, und die Zeile bleibt leer. Deshalb gehört zu jedem solchen Profil ein Preset, auf das zurückgefallen wird.
+
+Ein **Preset** benennt eine Statusleiste: ihr Kommando, wie man erkennt ob sie installiert ist, und optional wie sie installiert wird.
+
+```bash
+sccs statusline list                            # Presets, installiert?, aktiv?
+sccs statusline install claude-code-statusline  # herunterladen und installieren
+sccs statusline use claude-code-statusline      # settings.json umstellen
+sccs statusline show                            # aktueller Eintrag
+```
+
+### Mitgelieferte Presets
+
+| Preset | Kommando | Installation |
+|--------|----------|--------------|
+| `builtin` | `"$HOME/.claude/statusline.sh"` | keine — dein eigenes Shell-Skript |
+| `claude-code-statusline` | `~/.claude/statusline` | [glauberlima/claude-code-statusline](https://github.com/glauberlima/claude-code-statusline) |
+
+`claude-code-statusline` zeigt Verzeichnis, Git-Branch, Dateiänderungen, Modell, Kontextauslastung mit Fortschrittsbalken und Kosten. Konfiguriert wird es in `~/.claude/statusline.toml` (Optionen: `cost`, `messages`, `messages_language`, `usage_bar_style`).
+
+### Installation
+
+`sccs statusline install <name>` und `sccs doctor install` laden das Installationsskript in eine temporäre Datei und führen es mit `bash <datei>` aus — **nie** `curl … | bash` durch eine Shell. Damit wird nichts, was aus der Konfiguration stammt, jemals von einer Shell interpretiert.
+
+Zusätzliche Absicherung:
+
+- Install-URLs müssen `https` sein und auf einen Host der Allowlist zeigen (`raw.githubusercontent.com`, `github.com`, `objects.githubusercontent.com`) — geprüft beim Laden der Konfiguration, nicht erst bei der Ausführung
+- Das heruntergeladene Skript darf nicht leer und nicht größer als 512 KB sein
+- Die Aktion ist bestätigungspflichtig und steht standardmäßig auf **Nein**
+
+Unter Windows bricht die automatische Installation ab und zeigt stattdessen den PowerShell-Befehl an.
+
+### Binary bleibt aus dem Repository
+
+`claude-code-statusline` legt ein mehrere Megabyte großes Binary in `~/.claude/` ab, dazu eine maschinenlokale `statusline.toml`. Beide stehen in `managed_paths` des Presets und landen darüber in den Sync-Excludes — `sccs sync` schiebt sie nicht ins Git-Repository. Das gilt für **alle** bekannten Presets, nicht nur das aktive: sonst würde ein Wechsel der Statusleiste plötzlich das Binary der vorherigen einsammeln.
+
+Dein eigenes `statusline.sh` ist davon **nicht** betroffen und wird weiterhin synchronisiert.
+
+### Eigene Presets
+
+```yaml
+statusline:
+  active: claude-code-statusline
+  presets:
+    starship:
+      description: "Starship prompt as statusline"
+      command: "starship prompt"
+```
+
+| Feld | Bedeutung |
+|------|-----------|
+| `command` | Wert für `statusLine.command`; Claude Code führt ihn über eine Shell aus, `~` und `$HOME` expandieren |
+| `padding` | Optionales `statusLine.padding`; bei `null` wird der Schlüssel weggelassen |
+| `marker_path` | Pfad (relativ zu `~/.claude/` oder absolut), dessen Existenz „installiert" beweist |
+| `install_url` | https-URL eines POSIX-Installers, Host aus der Allowlist |
+| `install_url_windows` | https-URL des PowerShell-Installers, wird als Hinweis angezeigt |
+| `managed_paths` | Bloße Dateinamen, die das Preset in `~/.claude/` ablegt — landen in den Sync-Excludes |
+
+`active` ist rein deklarativ: SCCS schreibt `statusLine` nur bei `sccs statusline use` oder beim Abschalten eines Profils. Der Doctor meldet lediglich, wenn das unter `active` genannte Preset fehlt.
 
 ---
 
@@ -109,7 +171,7 @@ sccs profile list --json         # Machine-readable
 1. Matching skill directories **move** from `~/.claude/skills/` to `~/.config/sccs/profiles/<name>/skills/`.
 2. Matching agent files move from `~/.claude/agents/` to `~/.config/sccs/profiles/<name>/agents/`.
 3. Hook entries whose `command` contains one of the profile's patterns are removed from `settings.json` and recorded in the profile state.
-4. If `statusLine` points at one of the profile's scripts it is switched to `statusline_fallback` and the old value is stored. An unrelated statusline (e.g. Starship) is left alone.
+4. If `statusLine` points at one of the profile's scripts it is switched to the preset named by `statusline_fallback_preset` (see [Statusline](#statusline-1)) and the old value is stored. An unrelated statusline (e.g. Starship) is left alone.
 5. State is written to `~/.config/sccs/.profile_state.yaml`.
 
 **Nothing is deleted.** Everything is moved and fully restorable via `sccs profile on`. If an item collides with a same-named one in the parking area, the operation aborts with an error instead of overwriting.
@@ -155,7 +217,69 @@ profiles:
 | `skills` | fnmatch globs against directory names in `~/.claude/skills/` |
 | `agents` | fnmatch globs against file names in `~/.claude/agents/` |
 | `hooks` | Substring patterns against `hooks[*].hooks[*].command` — same semantics as `doctor.disallowed_hooks` |
-| `statusline_fallback` | Bare file name under `~/.claude/` to point the statusline at |
+| `statusline_fallback_preset` | Name of the statusline preset to switch to |
 | `npx_tools` | Names of the doctor npx tools that install these artefacts |
 
 Profile names may contain lowercase letters, digits, `-` and `_` only.
+
+## Statusline
+
+Some extensions bring their own statusline — GSD points `statusLine` at `hooks/gsd-statusline.js`. Switch the profile off and that entry refers to a script that is no longer wired up, leaving the line blank. Every such profile therefore names a preset to fall back to.
+
+A **preset** names one statusline: its command, how to tell whether it is installed, and optionally how to install it.
+
+```bash
+sccs statusline list                            # Presets, installed?, active?
+sccs statusline install claude-code-statusline  # download and install
+sccs statusline use claude-code-statusline      # point settings.json at it
+sccs statusline show                            # current entry
+```
+
+### Bundled presets
+
+| Preset | Command | Installation |
+|--------|---------|--------------|
+| `builtin` | `"$HOME/.claude/statusline.sh"` | none — your own shell script |
+| `claude-code-statusline` | `~/.claude/statusline` | [glauberlima/claude-code-statusline](https://github.com/glauberlima/claude-code-statusline) |
+
+`claude-code-statusline` shows directory, git branch, file changes, model, context usage with a progress bar, and cost. Configure it in `~/.claude/statusline.toml` (options: `cost`, `messages`, `messages_language`, `usage_bar_style`).
+
+### Installing
+
+`sccs statusline install <name>` and `sccs doctor install` download the install script to a temp file and run it as `bash <file>` — **never** `curl … | bash` through a shell. Nothing originating in configuration is ever interpreted by a shell.
+
+Additional guards:
+
+- Install URLs must be `https` and point at an allowlisted host (`raw.githubusercontent.com`, `github.com`, `objects.githubusercontent.com`), checked at config-load time rather than at execution time
+- The downloaded script must be non-empty and no larger than 512 KB
+- The action requires confirmation and defaults to **No**
+
+On Windows the automatic install aborts and prints the PowerShell command instead.
+
+### The binary stays out of the repository
+
+`claude-code-statusline` drops a multi-megabyte binary into `~/.claude/` plus a machine-local `statusline.toml`. Both are listed in the preset's `managed_paths` and therefore land in the sync excludes — `sccs sync` will not push them to the git repository. This applies to **all** known presets, not just the active one: otherwise switching statuslines would suddenly make sync pick up the previous one's binary.
+
+Your own `statusline.sh` is unaffected and keeps syncing.
+
+### Custom presets
+
+```yaml
+statusline:
+  active: claude-code-statusline
+  presets:
+    starship:
+      description: "Starship prompt as statusline"
+      command: "starship prompt"
+```
+
+| Field | Meaning |
+|-------|---------|
+| `command` | Value for `statusLine.command`; Claude Code runs it through a shell, so `~` and `$HOME` expand |
+| `padding` | Optional `statusLine.padding`; omitted from settings.json when null |
+| `marker_path` | Path (relative to `~/.claude/`, or absolute) whose existence proves it is installed |
+| `install_url` | https URL of a POSIX installer, host from the allowlist |
+| `install_url_windows` | https URL of the PowerShell installer, shown as a hint |
+| `managed_paths` | Bare file names the preset drops into `~/.claude/` — added to the sync excludes |
+
+`active` is purely declarative: SCCS writes `statusLine` only on `sccs statusline use` or when a profile is switched off. The doctor merely reports when the preset named by `active` is missing.

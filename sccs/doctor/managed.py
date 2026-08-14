@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sccs.doctor.schema import DoctorConfig
 
 # Hardcoded mapping: bundled doctor tool name → glob patterns it manages
@@ -34,7 +36,10 @@ DEFAULT_MANAGED_PATTERNS: dict[str, list[str]] = {
 }
 
 
-def get_doctor_managed_excludes(doctor_config: DoctorConfig) -> list[str]:
+def get_doctor_managed_excludes(
+    doctor_config: DoctorConfig,
+    statusline_config: Any | None = None,
+) -> list[str]:
     """Return the glob patterns the sync engine should exclude.
 
     Combines:
@@ -42,15 +47,26 @@ def get_doctor_managed_excludes(doctor_config: DoctorConfig) -> list[str]:
         configured in the user's `doctor.npx_tools` (or its defaults).
       * User-supplied `doctor.managed_excludes` for additional plugins or
         custom tooling.
+      * The `managed_paths` of every known statusline preset. A statusline
+        like `claude-code-statusline` installs a multi-megabyte binary and
+        a machine-local .toml straight into ~/.claude/; neither belongs in
+        the synced repository. Contributed by ALL presets, not just the
+        active one, so switching statuslines does not make sync pick up the
+        binary the previous one left behind.
 
     Returns a deduplicated, sorted list so the merge is deterministic
     across calls.
     """
+    from sccs.doctor.statusline import resolve_statusline_presets, statusline_managed_paths
+
     patterns: set[str] = set()
 
     for tool in doctor_config.effective_npx_tools():
         patterns.update(DEFAULT_MANAGED_PATTERNS.get(tool.name, []))
 
     patterns.update(doctor_config.managed_excludes)
+
+    overrides = getattr(statusline_config, "presets", None)
+    patterns.update(statusline_managed_paths(resolve_statusline_presets(overrides)))
 
     return sorted(patterns)

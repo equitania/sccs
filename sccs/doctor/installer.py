@@ -1302,6 +1302,65 @@ def _settings_hook_cleanup_actions(
     ]
 
 
+def _statusline_preset_install_actions(statusline_presets: list | None) -> list[DoctorAction]:
+    """Offer to install the CONFIGURED statusline when it is missing.
+
+    Only the preset named by `statusline.active` qualifies: installing a
+    statusline the user has not chosen would be surprising, and merely
+    having a preset defined says nothing about wanting it.
+
+    Third-party code, so the action carries an explicit warning in its
+    manual block and — like every runnable action — a confirm prompt that
+    defaults to No. The install itself never pipes curl into a shell; see
+    statusline.install_preset().
+    """
+    from sccs.doctor.statusline import (
+        StatusLineError,
+        install_command_hint,
+        install_preset,
+        resolve_statusline_presets,
+    )
+
+    actions: list[DoctorAction] = []
+    presets = resolve_statusline_presets(None)
+
+    for st in statusline_presets or []:
+        if not st.is_configured or st.installed or not st.installable:
+            continue
+        preset = presets.get(st.name)
+        if preset is None or not preset.install_url:
+            continue
+
+        posix_hint = install_command_hint(preset)
+        block = "\n".join(
+            [
+                f"# Installs the '{st.name}' statusline by running a third-party script:",
+                f"#   {preset.install_url}",
+                "# SCCS downloads it to a temp file and runs it with bash —",
+                "# it is never piped from curl into a shell.",
+                f"# By hand: {posix_hint}",
+            ]
+        )
+
+        def _install(p=preset) -> None:
+            try:
+                install_preset(p)
+            except StatusLineError as exc:
+                raise DoctorError(str(exc)) from exc
+
+        actions.append(
+            DoctorAction(
+                label=f"install statusline '{st.name}' (runs a third-party installer)",
+                cmd=[],
+                runnable=True,
+                python_callable=_install,
+                manual_block=block,
+                component=f"statusline-preset:{st.name}",
+            )
+        )
+    return actions
+
+
 def _orphan_backup_root() -> Path:
     """Base dir under which orphan backups are created. Mirrors the doctor
     state location (~/.config/sccs); monkeypatch Path.home in tests."""
@@ -1478,6 +1537,7 @@ def build_install_plan(
     settings_path: Path | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
+    statusline_presets: list | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -1509,6 +1569,7 @@ def build_install_plan(
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     actions.extend(_cli_tool_install_actions(cli_tools))
+    actions.extend(_statusline_preset_install_actions(statusline_presets))
     # Settings.json sanitisation runs LAST so that third-party tools
     # (@opengsd/gsd-core, etc.) which overwrite settings.json during their
     # install step are followed by our cleanup pass.

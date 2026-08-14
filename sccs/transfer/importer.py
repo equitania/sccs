@@ -71,7 +71,8 @@ class Importer:
         self._managed_excludes: list[str] = []
         if not include_managed:
             doctor_config = config.doctor if config is not None else DoctorConfig()
-            self._managed_excludes = get_doctor_managed_excludes(doctor_config)
+            statusline_config = getattr(config, "statusline", None) if config is not None else None
+            self._managed_excludes = get_doctor_managed_excludes(doctor_config, statusline_config)
 
     def _is_managed(self, item_name: str) -> bool:
         """Return True if the item is reproducible via `sccs doctor install`."""
