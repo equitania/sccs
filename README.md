@@ -4,7 +4,7 @@
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
-**Version:** 2.49.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
+**Version:** 2.57.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.10
 
 ---
 
@@ -17,6 +17,7 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 ### Was kann SCCS?
 
 - 🔄 **Bidirektionale Synchronisierung** zwischen `~/.claude/` und Git-Repository, mit interaktiver Konfliktauflösung und automatischen Backups → [docs/usage/sync.md](docs/usage/sync.md)
+- 🎚️ **Profile: Artefakt-Gruppen ein-/ausschalten** *(v2.57.0)* — `sccs profile off gsd` parkt Skills, Agents, `settings.json`-Hooks und Statusline **einer** Extension unter `~/.config/sccs/profiles/`; `sccs profile on gsd` holt alles zurück. Nichts wird gelöscht, der Doctor installiert ein abgeschaltetes Profil nicht zurück, und die Sync-Excludes bleiben intakt. Auf einem typischen Setup nimmt das mitgelieferte `gsd`-Profil 71 Skills, 34 Agents und 19 Hook-Einträge aus dem Weg → [docs/usage/profiles.md](docs/usage/profiles.md)
 - 🩺 **System & Plugin Health-Check** (`sccs doctor`) für Node.js, `claude` CLI, Claude-Plugins, npm-Helper-Tools, Browser-Bundles und Filesystem-Permissions — mit gezielten Reparatur-Plänen → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🧹 **`sccs doctor optimize`** *(v2.30.0)* — Ein-Schuss-Optimierungslauf: install + update + Drift-Warnung für Plugins/MCP-Server außerhalb der Spec. Mit `--strict` werden Uninstall-Actions per Confirm gequeut.
 - 🔧 **`doctor.disallowed_hooks`** *(v2.31.0)* — Substring-Patterns entfernen unerwünschte Hooks aus `~/.claude/settings.json` nach jedem doctor-Pass (z.B. Hooks die von npx-Tools re-injiziert werden). Mit Backup, idempotent.
@@ -117,6 +118,7 @@ SCCS is a YAML-configured, bidirectional synchronization tool for Claude Code fi
 ### What can SCCS do?
 
 - 🔄 **Bidirectional sync** between `~/.claude/` and a Git repository, with interactive conflict resolution and automatic backups → [docs/usage/sync.md](docs/usage/sync.md)
+- 🎚️ **Profiles: switch artefact groups on and off** *(v2.57.0)* — `sccs profile off gsd` parks the skills, agents, `settings.json` hooks and statusline of **one** extension under `~/.config/sccs/profiles/`; `sccs profile on gsd` brings it all back. Nothing is deleted, the doctor will not reinstall a switched-off profile, and sync excludes stay intact. On a typical setup the bundled `gsd` profile takes 71 skills, 34 agents and 19 hook entries out of the way → [docs/usage/profiles.md](docs/usage/profiles.md)
 - 🩺 **System & plugin health check** (`sccs doctor`) for Node.js, the `claude` CLI, Claude plugins, npm helper tools, browser bundles and filesystem permissions — with surgical repair plans → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🧹 **`sccs doctor optimize`** *(v2.30.0)* — one-shot optimisation pass: install + update + drift warning for plugins/MCP servers outside the spec. With `--strict`, uninstall actions are queued per confirm.
 - 🔧 **`doctor.disallowed_hooks`** *(v2.31.0)* — substring patterns strip unwanted hooks from `~/.claude/settings.json` after every doctor pass (e.g. hooks re-injected by npx tools). Backup-aware, idempotent.

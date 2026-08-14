@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -787,11 +788,40 @@ class DoctorConfig(BaseModel):
         return [s for s in self.effective_plugins() if not s.allowlist_only]
 
     def effective_npx_tools(self) -> list[NpxToolSpec]:
-        """Return npx tools to check: override or default, plus extras."""
+        """Return npx tools to check: override or default, plus extras.
+
+        This is the FULL list and stays profile-blind on purpose: the sync
+        excludes derived from it (managed.py:get_doctor_managed_excludes)
+        must keep matching a disabled profile's artefacts, otherwise parking
+        GSD would make `sccs sync` start picking up gsd-* files again.
+        For install/check work use ``installable_npx_tools()``.
+        """
         from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
 
         base = list(self.npx_tools) if self.npx_tools is not None else list(DEFAULT_NPX_TOOLS)
         return base + list(self.extra_npx_tools)
+
+    def installable_npx_tools(
+        self,
+        profiles: dict[str, Any] | None = None,
+        state_manager: Any | None = None,
+    ) -> list[NpxToolSpec]:
+        """npx tools to install/check on this host.
+
+        Drops tools owned by a profile that `sccs profile off` switched
+        off — without this, the next `doctor install/update` would re-run
+        e.g. `npx @opengsd/gsd-core` and write the parked artefacts straight
+        back into ~/.claude/.
+
+        Mirrors the effective_/checkable_ split used for plugins.
+        """
+        from sccs.doctor.profiles import disabled_npx_tools, resolve_profiles
+
+        resolved = resolve_profiles(profiles)
+        disabled = disabled_npx_tools(resolved, state_manager)
+        if not disabled:
+            return self.effective_npx_tools()
+        return [t for t in self.effective_npx_tools() if t.name not in disabled]
 
     def effective_permission_checks(self) -> list[PermissionCheckSpec]:
         """Return permission checks to run: override or default, plus extras."""

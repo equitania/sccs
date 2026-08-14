@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.56.0
+**Version**: 2.57.0
 
 ### Key Features
 
@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Flexible Categories**: Claude skills, commands, hooks, scripts, fish config, etc.
 - **Bidirectional Sync**: Full two-way synchronization with conflict detection
 - **Git Integration**: Auto-commit and push after sync operations
+- **Profiles** (v2.57.0): `sccs profile on|off|list|status` switches a whole artefact group of one extension. `deactivate` **moves** matching skills/agents to `~/.config/sccs/profiles/<name>/`, strips matching `settings.json` hook entries (recording them for restore) and swaps a matching `statusLine` for `statusline_fallback`; `activate` reverses all of it. Nothing is deleted; a name collision in the parking area raises instead of overwriting. State in `~/.config/sccs/.profile_state.yaml`. Doctor integration is the load-bearing part: `DoctorConfig.installable_npx_tools()` drops a disabled profile's npx tools so `doctor install/update` cannot resurrect it, while `effective_npx_tools()` stays profile-blind so `get_doctor_managed_excludes()` keeps excluding `gsd-*` from sync. Bundled profile: `gsd` (`sccs/doctor/profiles.py:DEFAULT_PROFILES`)
 - **Converter literal-value safety** (v2.56.0): fish single-quoted values are literal (no expansion, no substitution) and fish has no backtick substitution at all — `convert_set_gx` used to run every value through `rewrite_fish_tokens` and embed it in a *double*-quoted target string, turning inert text into live code. Now: `sq` values are emitted single-quoted (`_sq()` / PowerShell `'…'`), `dq`/`bare` values get backtick escaping via `_dq_escape()` (zsh) and `` ` ``/`$(` escaping via `_ps_dq_escape()` (PowerShell). Intended features preserved: unquoted `(cmd)` → `$(cmd)` and `$var` expansion still work
 - **Transfer excludes doctor-managed items** (v2.55.0): `Exporter` mirrors `SyncEngine.effective_global_exclude` and filters `get_doctor_managed_excludes()` (`gsd-*`, `playwright-cli`) out of the selection UI and the ZIP; `Importer` filters symmetrically (`importable_manifest()`, `--all` and parsed selections) so pre-2.55.0 archives cannot write them back. The target machine reproduces those via `sccs doctor install`. Filter applies to items only (a `gsd-*.md` file *inside* your own skill survives); `--include-managed` on both commands is the escape hatch
 - **Doctor Plugin-Baseline** (v2.54.0): `claude-security` and `claude-md-management` (both `@claude-plugins-official`) joined `DEFAULT_CLAUDE_PLUGINS` as *required* entries — checked, installed and updated on every host. Scope caveat documented in `docs/usage/doctor.md`: `/plugin install` from inside a project writes project-scoped `<project>/.claude/settings.json`, while `doctor install` installs user-scoped

@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from sccs.doctor.profiles import ProfileSpec
 from sccs.doctor.schema import DoctorConfig
 
 # Git remote name: alphanumeric start, then alphanumerics/underscore/dot/hyphen.
@@ -332,6 +333,19 @@ class SccsConfig(BaseModel):
     codex: CodexConfig = Field(
         default_factory=CodexConfig,
         description="OpenAI Codex integration settings (codex CLI artefact export).",
+    )
+    # Profiles are fully optional: legacy config.yaml files without a
+    # `profiles:` key get the bundled DEFAULT_PROFILES (currently `gsd`).
+    # An entry here fully replaces the bundled spec of the same name, so a
+    # profile can be re-scoped without patching the package.
+    profiles: dict[str, ProfileSpec] = Field(
+        default_factory=dict,
+        description=(
+            "Named groups of ~/.claude/ artefacts that `sccs profile on|off` "
+            "switches together (skills, agents, settings.json hooks, "
+            "statusline). Merged over the bundled defaults in "
+            "sccs/doctor/profiles.py:DEFAULT_PROFILES."
+        ),
     )
 
     global_exclude: list[str] = Field(

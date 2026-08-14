@@ -2719,7 +2719,12 @@ def _is_statusline_sync_enabled() -> bool:
 
 
 def _collect_doctor_statuses(
-    doctor_cfg, state_manager=None, *, include_foreign: bool = False, check_updates: bool = False
+    doctor_cfg,
+    state_manager=None,
+    *,
+    include_foreign: bool = False,
+    check_updates: bool = False,
+    profiles=None,
 ):
     """Build all detector results once. Returns a dict for reuse.
 
@@ -2732,6 +2737,9 @@ def _collect_doctor_statuses(
     registry / marketplace manifests for newer versions (`doctor check` only).
     Off by default so install/update/optimize — which refresh blindly anyway —
     don't pay the network cost.
+
+    `profiles` overrides the profile map used to filter out npx tools owned
+    by a switched-off profile; None loads it from config.yaml.
     """
     from sccs.doctor.defaults import MIN_PWSH_MAJOR
     from sccs.doctor.detectors import (
@@ -2760,7 +2768,10 @@ def _collect_doctor_statuses(
     # Full list (incl. allowlist_only): ONLY for foreign-drift detection, so an
     # installed LSP / frontend-design@claude-code-plugins is never flagged foreign.
     plugin_specs_all = doctor_cfg.effective_plugins()
-    npx_specs = doctor_cfg.effective_npx_tools()
+    # Install/check list: drops tools belonging to a switched-off profile, so
+    # `doctor install/update` cannot resurrect artefacts `sccs profile off`
+    # parked. Sync excludes still use the full effective_npx_tools() list.
+    npx_specs = doctor_cfg.installable_npx_tools(profiles if profiles is not None else _load_profiles())
     permission_specs = doctor_cfg.effective_permission_checks()
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
     status_line_specs = doctor_cfg.effective_status_line_checks()
@@ -2814,6 +2825,21 @@ def _load_doctor_config():
         return config.doctor
     except FileNotFoundError:
         return DoctorConfig()
+
+
+def _load_profiles():
+    """Resolve the profile map: bundled DEFAULT_PROFILES + config.yaml overrides.
+
+    A missing or unreadable config.yaml falls back to the bundled defaults,
+    so `sccs profile` works on a host that has not been configured yet.
+    """
+    from sccs.doctor.profiles import resolve_profiles
+
+    try:
+        config = load_config()
+        return resolve_profiles(config.profiles)
+    except (FileNotFoundError, AttributeError):
+        return resolve_profiles(None)
 
 
 @cli.group("doctor")
@@ -3158,6 +3184,209 @@ def capability_card() -> None:
     # Inject the live version so the header can never go stale.
     content = _CARD_VERSION_RE.sub(rf"\g<1>{__version__}", content, count=1)
     click.echo(content)
+
+
+@cli.group("profile")
+def profile_group() -> None:
+    """Switch whole groups of ~/.claude/ artefacts on and off.
+
+    \b
+    A profile bundles skills, agents, settings.json hooks and the
+    statusline that one extension installs. Switching it off moves those
+    artefacts to a parking area under ~/.config/sccs/profiles/ — nothing
+    is deleted, and `sccs profile on` puts everything back.
+
+    \b
+    Use it to keep an extension you only need occasionally out of the
+    model's system prompt (and its hooks out of every tool call) during
+    everyday work.
+
+    \b
+    A switch takes effect in the NEXT Claude Code session — skills, agents
+    and hooks are read once at session start.
+
+    \b
+    Examples:
+        sccs profile list          Show profiles and their state
+        sccs profile off gsd       Park the GSD extension
+        sccs profile on gsd        Bring it back
+        sccs profile status gsd    Detail incl. parked artefacts
+    """
+
+
+def _profile_manager():
+    """Build a ProfileManager from the resolved profile map."""
+    from sccs.doctor.profiles import ProfileManager
+
+    return ProfileManager(_load_profiles())
+
+
+def _render_profile_row(console, st) -> None:
+    state = "[green]on[/green] " if st.enabled else "[yellow]off[/yellow]"
+    if st.enabled:
+        detail = f"{st.live_skills} skills, {st.live_agents} agents live"
+    else:
+        detail = f"{st.parked_skills} skills, {st.parked_agents} agents parked, {st.removed_hooks} hooks removed"
+    console.print(f"  {state}  [bold]{st.name}[/bold] — {detail}")
+    if st.description:
+        console.print(f"         [dim]{st.description}[/dim]")
+
+
+@profile_group.command("list")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def profile_list(ctx: click.Context, output_json: bool) -> None:
+    """List configured profiles and whether they are switched on."""
+    from sccs.doctor.profiles import ProfileError
+
+    console = ctx.obj["console"]
+    try:
+        statuses = _profile_manager().all_status()
+    except ProfileError as exc:
+        if output_json:
+            emit_json_error(str(exc))
+        else:
+            console.print_error(str(exc))
+        raise SystemExit(1) from exc
+
+    if output_json:
+        emit_json({"profiles": [vars(s) for s in statuses]})
+        return
+
+    if not statuses:
+        console.print_info("No profiles configured.")
+        return
+
+    console.print("\n[bold]Profiles[/bold]")
+    for st in statuses:
+        _render_profile_row(console, st)
+    console.print("\n[dim]A switch takes effect in the next Claude Code session.[/dim]\n")
+
+
+@profile_group.command("status")
+@click.argument("name", required=False)
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def profile_status(ctx: click.Context, name: str | None, output_json: bool) -> None:
+    """Show detail for NAME (or every profile when NAME is omitted)."""
+    from sccs.doctor.profiles import ProfileError
+
+    console = ctx.obj["console"]
+    manager = _profile_manager()
+    try:
+        statuses = [manager.status(name)] if name else manager.all_status()
+    except ProfileError as exc:
+        if output_json:
+            emit_json_error(str(exc))
+        else:
+            console.print_error(str(exc))
+        raise SystemExit(1) from exc
+
+    if output_json:
+        emit_json({"profiles": [vars(s) for s in statuses]})
+        return
+
+    for st in statuses:
+        console.print(f"\n[bold]{st.name}[/bold] — {'on' if st.enabled else 'off'}")
+        if st.description:
+            console.print(f"  {st.description}")
+        console.print(f"  live:    {st.live_skills} skills, {st.live_agents} agents")
+        console.print(f"  parked:  {st.parked_skills} skills, {st.parked_agents} agents")
+        console.print(f"  hooks:   {st.removed_hooks} removed from settings.json")
+        if st.changed_at:
+            console.print(f"  changed: {st.changed_at}")
+        if not st.enabled:
+            console.print(f"  [dim]parking area: {manager.park_root / st.name}[/dim]")
+    console.print("")
+
+
+def _run_profile_switch(ctx: click.Context, name: str, *, enable: bool, yes: bool, output_json: bool) -> None:
+    """Shared body of `profile on` / `profile off`."""
+    from sccs.doctor.profiles import ProfileError
+
+    console = ctx.obj["console"]
+    manager = _profile_manager()
+    verb = "on" if enable else "off"
+
+    try:
+        st = manager.status(name)
+    except ProfileError as exc:
+        if output_json:
+            emit_json_error(str(exc))
+        else:
+            console.print_error(str(exc))
+        raise SystemExit(1) from exc
+
+    if st.enabled == enable:
+        msg = f"Profile '{name}' is already {verb}."
+        if output_json:
+            emit_json({"profile": name, "enabled": enable, "changed": False, "message": msg})
+        else:
+            console.print_info(msg)
+        return
+
+    if not yes and not output_json:
+        if enable:
+            question = f"Restore profile '{name}' ({st.parked_skills} skills, {st.parked_agents} agents)?"
+        else:
+            question = f"Park profile '{name}' ({st.live_skills} skills, {st.live_agents} agents)? Nothing is deleted."
+        if not console.confirm(question, default=True):
+            console.print_info("Aborted.")
+            return
+
+    try:
+        change = manager.activate(name) if enable else manager.deactivate(name)
+    except ProfileError as exc:
+        if output_json:
+            emit_json_error(str(exc))
+        else:
+            console.print_error(str(exc))
+        raise SystemExit(1) from exc
+
+    if output_json:
+        emit_json(
+            {
+                "profile": change.name,
+                "enabled": change.enabled,
+                "changed": not change.noop,
+                "skills": change.skills,
+                "agents": change.agents,
+                "hooks": change.hooks,
+                "statusline": change.statusline,
+            }
+        )
+        return
+
+    moved = "restored" if enable else "parked"
+    console.print_success(
+        f"Profile '{change.name}' switched {verb}: "
+        f"{len(change.skills)} skills and {len(change.agents)} agents {moved}, "
+        f"{change.hooks} hook entries {'restored' if enable else 'removed'}."
+    )
+    if change.statusline:
+        note = "statusLine restored" if enable else f"statusLine now points at {change.statusline}"
+        console.print_info(note)
+    console.print_info("Start a new Claude Code session for the change to take effect.")
+
+
+@profile_group.command("off")
+@click.argument("name")
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def profile_off(ctx: click.Context, name: str, yes: bool, output_json: bool) -> None:
+    """Park NAME's artefacts — moved aside, never deleted."""
+    _run_profile_switch(ctx, name, enable=False, yes=yes, output_json=output_json)
+
+
+@profile_group.command("on")
+@click.argument("name")
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def profile_on(ctx: click.Context, name: str, yes: bool, output_json: bool) -> None:
+    """Bring NAME's parked artefacts back into ~/.claude/."""
+    _run_profile_switch(ctx, name, enable=True, yes=yes, output_json=output_json)
 
 
 def main() -> None:
