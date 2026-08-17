@@ -953,6 +953,33 @@ _STATUS_LINE_CELLAR_RE = re.compile(r"^/opt/homebrew/Cellar/([^/]+)/([^/]+)/(.+)
 _STATUS_LINE_SCRIPT_EXTS = (".sh", ".py", ".js", ".mjs", ".ps1", ".fish")
 
 
+def _expand_command_token(token: str) -> str:
+    """Resolve `~` and `$VAR` in a statusLine argv token before testing it.
+
+    Claude Code runs `statusLine.command` through a shell, so a value like
+    `~/.claude/statusline` or `"$HOME/.claude/statusline.sh"` is perfectly
+    valid there — but `shlex.split` leaves both forms untouched, and
+    `Path("~/.claude/statusline").is_file()` is always False. Without this
+    the doctor reports `missing_binary` for a statusline that works fine,
+    including both bundled presets and the `claude_statusline` sync
+    category's own `settings_ensure` command.
+
+    Expansion is for an existence check only — nothing here is ever
+    executed. An undefined variable stays literal, so the path still fails
+    to resolve and we still report it missing, which is the honest answer.
+    """
+    return os.path.expandvars(os.path.expanduser(token))
+
+
+def _describe_token(raw: str, expanded: str) -> str:
+    """`raw` for a plain path, `raw (→ expanded)` when expansion changed it.
+
+    Keeps the settings.json value recognizable in the report while showing
+    where we actually looked.
+    """
+    return raw if expanded == raw else f"{raw} (→ {expanded})"
+
+
 @dataclass
 class StatusLineStatus:
     """Result of inspecting ~/.claude/settings.json `statusLine.command`.
@@ -1188,8 +1215,9 @@ class StatusLineDetector:
         self, spec: StatusLineCheckSpec, resolved: Path, cmd: str, binary: str, script: str | None
     ) -> StatusLineStatus | None:
         """Return a status if the binary is missing, otherwise None."""
-        if "/" in binary:
-            if not Path(binary).is_file():
+        expanded = _expand_command_token(binary)
+        if "/" in expanded:
+            if not Path(expanded).is_file():
                 return StatusLineStatus(
                     spec=spec,
                     state="missing_binary",
@@ -1197,9 +1225,9 @@ class StatusLineDetector:
                     raw_command=cmd,
                     binary=binary,
                     script=script,
-                    detail=f"binary not found: {binary}",
+                    detail=f"binary not found: {_describe_token(binary, expanded)}",
                 )
-        elif which(binary) is None:
+        elif which(expanded) is None:
             return StatusLineStatus(
                 spec=spec,
                 state="missing_binary",
@@ -1217,8 +1245,8 @@ class StatusLineDetector:
         """Return a status if the script is missing, otherwise None."""
         if script is None or not self._looks_like_script(script):
             return None
-        script_path = Path(os.path.expanduser(script))
-        if script_path.is_file():
+        expanded = _expand_command_token(script)
+        if Path(expanded).is_file():
             return None
         return StatusLineStatus(
             spec=spec,
@@ -1227,7 +1255,7 @@ class StatusLineDetector:
             raw_command=cmd,
             binary=binary,
             script=script,
-            detail=f"script not found: {script}",
+            detail=f"script not found: {_describe_token(script, expanded)}",
         )
 
     def _is_required(self, spec: StatusLineCheckSpec, home_dir: Path) -> bool:

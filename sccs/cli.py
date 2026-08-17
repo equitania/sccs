@@ -2928,6 +2928,10 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
                 "bundled_skills": statuses.get("bundled_skills"),
                 "browser_bundles": statuses.get("browser_bundles"),
                 "status_lines": statuses.get("status_lines"),
+                # Mirrors the Rich table's `statusline-preset:` rows. Without
+                # it a GUI sees only the `status_lines` integrity check and
+                # cannot tell which preset is chosen, installed or live.
+                "statusline_presets": statuses.get("statusline_presets"),
                 "gsd_orphans": statuses.get("gsd_orphans"),
                 "cli_tools": statuses.get("cli_tools"),
             }
@@ -3444,6 +3448,23 @@ def _statusline_manager():
         return StatusLineManager(resolve_statusline_presets(None))
 
 
+def _persist_statusline_choice(name: str) -> tuple[bool, str | None]:
+    """Record the chosen preset as `statusline.active` in config.yaml.
+
+    Returns `(written, error)`. Writing is best-effort by design: the
+    statusline is already set in settings.json by the time we get here, and
+    an unwritable or absent config.yaml must not turn a successful switch
+    into a failure. `written` is False both when nothing needed changing
+    and when the write was skipped.
+    """
+    from sccs.config.loader import save_statusline_active
+
+    try:
+        return (save_statusline_active(name) is not None, None)
+    except (OSError, ValueError) as exc:
+        return (False, str(exc))
+
+
 @statusline_group.command("list")
 @click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
 @click.pass_context
@@ -3546,11 +3567,22 @@ def statusline_use(ctx: click.Context, name: str, output_json: bool) -> None:
         raise SystemExit(1) from exc
 
     installed = preset.is_installed(manager.claude_dir)
+    persisted, persist_error = _persist_statusline_choice(name)
     if output_json:
-        emit_json({"preset": name, "statusLine": block, "installed": installed})
+        emit_json(
+            {
+                "preset": name,
+                "statusLine": block,
+                "installed": installed,
+                "config_updated": persisted,
+                "config_error": persist_error,
+            }
+        )
         return
 
     console.print_success(f"Statusline set to '{name}'.")
+    if persist_error:
+        console.print_warning(f"settings.json is set, but config.yaml was not updated: {persist_error}")
     if not installed:
         hint = install_command_hint(preset)
         console.print_warning(f"'{name}' is not installed yet — the statusline will stay blank until it is.")
@@ -3614,6 +3646,10 @@ def statusline_install(ctx: click.Context, name: str, yes: bool, use: bool) -> N
             console.print_success(f"Statusline set to '{name}'.")
         except StatusLineError as exc:
             console.print_warning(f"Installed, but setting the statusline failed: {exc}")
+        else:
+            _, persist_error = _persist_statusline_choice(name)
+            if persist_error:
+                console.print_warning(f"settings.json is set, but config.yaml was not updated: {persist_error}")
     else:
         try:
             if manager.current_block() != previous_block:

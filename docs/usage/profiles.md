@@ -143,7 +143,7 @@ statusline:
 | `install_url_windows` | https-URL des PowerShell-Installers, wird als Hinweis angezeigt |
 | `managed_paths` | Bloße Dateinamen, die das Preset in `~/.claude/` ablegt — landen in den Sync-Excludes |
 
-`active` ist rein deklarativ: SCCS schreibt `statusLine` nur bei `sccs statusline use` oder beim Abschalten eines Profils.
+`active` bestimmt nicht allein, was läuft: SCCS schreibt `statusLine` nur bei `sccs statusline use` oder beim Abschalten eines Profils. Umgekehrt halten `sccs statusline use` und `sccs statusline install` seit v2.58.2 `active` in der `config.yaml` nach — `settings.json` ist Maschinenzustand und übersteht keinen Neuaufbau, `active` ist die Präferenz. Steht der Wert schon richtig, wird die Datei nicht angefasst (ein erneutes Schreiben würde die Kommentare darin verlieren); schlägt das Schreiben fehl, gibt es eine Warnung — die Statusleiste ist zu diesem Zeitpunkt bereits gesetzt.
 
 ### Im Doctor-Bericht
 
@@ -153,11 +153,18 @@ statusline:
 statusline-preset: claude-code-statusline │ OK      │ statusline 1.0.0 │ installed · in use — ~/.claude/statusline
 statusline-preset: claude-code-statusline │ OK      │ statusline 1.0.0 │ installed · not in use — `sccs statusline use claude-code-statusline`
 statusline-preset: claude-code-statusline │ MISSING │ -                │ configured but not installed — `sccs statusline install claude-code-statusline`
+statusline-preset: claude-code-statusline │ MISSING │ -                │ in use but not installed — `sccs statusline install claude-code-statusline`
 ```
 
 `installed · not in use` ist der interessante Fall: das Preset ist gewählt und vorhanden, aber etwas anderes besitzt gerade `statusLine` — normalerweise eine Extension wie GSD, solange deren Profil an ist.
 
+Die beiden MISSING-Varianten unterscheiden sich darin, *wie* das Preset gewählt wurde: `configured` steht in der `config.yaml`, `in use` steht in der `settings.json` — letzteres ist der Zustand direkt nach `sccs profile off`. `sccs doctor install` bietet die Installation in beiden Fällen an.
+
 Presets, die weder konfiguriert noch aktiv sind, erscheinen nicht — der Bericht ist ein Status, kein Katalog. Alle bekannten Presets zeigt `sccs statusline list`.
+
+### Kommandos mit `~` und `$HOME`
+
+`statusLine.command` wird von Claude Code über eine Shell ausgeführt, `~/.claude/statusline` und `"$HOME/.claude/statusline.sh"` sind dort also gültig. Der Doctor-Check `statusline: claude-statusline` — der prüft, ob der Eintrag in `settings.json` überhaupt startbar ist — expandiert beide Formen seit v2.58.2, bevor er die Datei sucht. Vorher meldete er für jedes mitgelieferte Preset dauerhaft `binary not found`, obwohl die Statusleiste lief; `doctor check` endete damit immer mit Exit-Code 1. Fehlt die Datei wirklich, nennt die Meldung beide Formen: `binary not found: ~/.claude/statusline (→ /home/du/.claude/statusline)`.
 
 Eine fehlende Statusleiste ist wie bei `cli_tools` nur ein Hinweis und ändert den Exit-Code **nicht**.
 
@@ -300,7 +307,7 @@ statusline:
 | `install_url_windows` | https URL of the PowerShell installer, shown as a hint |
 | `managed_paths` | Bare file names the preset drops into `~/.claude/` — added to the sync excludes |
 
-`active` is purely declarative: SCCS writes `statusLine` only on `sccs statusline use` or when a profile is switched off.
+`active` does not by itself decide what runs: SCCS writes `statusLine` only on `sccs statusline use` or when a profile is switched off. The other way round, `sccs statusline use` and `sccs statusline install` record `active` in `config.yaml` since v2.58.2 — `settings.json` is machine state and does not survive a rebuild, `active` is the preference. If the value is already correct the file is left alone (rewriting it would drop its comments); if the write fails you get a warning, because the statusline itself is already set by then.
 
 ### In the doctor report
 
@@ -310,10 +317,17 @@ statusline:
 statusline-preset: claude-code-statusline │ OK      │ statusline 1.0.0 │ installed · in use — ~/.claude/statusline
 statusline-preset: claude-code-statusline │ OK      │ statusline 1.0.0 │ installed · not in use — `sccs statusline use claude-code-statusline`
 statusline-preset: claude-code-statusline │ MISSING │ -                │ configured but not installed — `sccs statusline install claude-code-statusline`
+statusline-preset: claude-code-statusline │ MISSING │ -                │ in use but not installed — `sccs statusline install claude-code-statusline`
 ```
 
 `installed · not in use` is the interesting one: the preset is chosen and present, but something else currently owns `statusLine` — normally an extension like GSD while its profile is on.
 
+The two MISSING variants differ in *how* the preset was chosen: `configured` comes from `config.yaml`, `in use` from `settings.json` — the latter is the state right after `sccs profile off`. `sccs doctor install` offers the installer in both cases.
+
 Presets that are neither configured nor active do not appear — the report is a status, not a catalogue. `sccs statusline list` shows every known preset.
+
+### Commands with `~` and `$HOME`
+
+Claude Code runs `statusLine.command` through a shell, so `~/.claude/statusline` and `"$HOME/.claude/statusline.sh"` are valid there. The `statusline: claude-statusline` check — which verifies the `settings.json` entry can actually start — expands both forms since v2.58.2 before looking for the file. Before that it permanently reported `binary not found` for every bundled preset while the statusline was working, and `doctor check` always exited 1. When the file really is absent, the message names both forms: `binary not found: ~/.claude/statusline (→ /home/you/.claude/statusline)`.
 
 Like `cli_tools`, a missing statusline is informational and does **not** change the exit code.

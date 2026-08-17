@@ -1,7 +1,7 @@
 <!--
   Capability Card — generated/maintained via the `cli-capability-card` skill.
   Audience: an LLM/agent that wants to USE this tool. Keep it dense and current.
-  Regenerate the command table with scripts/introspect_cli.py after CLI changes.
+  Refresh the command table from `sccs <group> <cmd> --help` after CLI changes.
 -->
 # sccs — Agent Capability Card
 
@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.54.0  ·  **Python:** ≥3.10
+- **Version:** 2.58.2  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -29,6 +29,10 @@
   (skills verbatim → `~/.agents/skills/`, agents → `~/.codex/agents/*.toml`, commands wrapped as skills).
 - Convert a Fish shell config into a PowerShell profile or a native zsh profile (best-effort
   function translation, `uname`-guarded platform files); generate a hub README for the repo.
+- Park a whole extension's artefacts (skills, agents, hooks, statusline) with `profile off`, without
+  deleting anything — the doctor stops reinstalling them while parked.
+- Pick which statusline Claude Code runs (`statusline use|install`), including a confirm-gated
+  third-party installer that is never piped from curl into a shell.
 - Inspect status/history/diffs and manage which categories are enabled.
 
 ## Command reference
@@ -73,7 +77,15 @@
 | `sccs integrations status` | Show detailed integration status. | — |
 | `sccs integrations trust-repo` | Register SCCS repository as trusted in Claude Desktop. | -n/--dry-run |
 | `sccs log` | Show sync history. | --last INTEGER |
+| `sccs profile list` | List configured profiles and whether they are switched on. | --json |
+| `sccs profile off` | Park NAME's artefacts (skills, agents, `settings.json` hooks, statusline) — moved to `~/.config/sccs/profiles/<name>/`, never deleted. | NAME, -y/--yes, --json |
+| `sccs profile on` | Bring NAME's parked artefacts back into `~/.claude/` (three-way hook merge, original grouping preserved). | NAME, -y/--yes, --json |
+| `sccs profile status` | Detail for NAME, or every profile when NAME is omitted. | [NAME], --json |
 | `sccs status` | Show synchronization status. | -c/--category TEXT, --json |
+| `sccs statusline install` | Download and run preset NAME's installer (temp file + `bash <file>`, never `curl \| bash`; confirm defaults to No). | NAME, -y/--yes, --use/--no-use, --json |
+| `sccs statusline list` | List presets with installed/active/configured state and version. | --json |
+| `sccs statusline show` | Print the `statusLine` entry currently in settings.json. | --json |
+| `sccs statusline use` | Point settings.json at preset NAME and record it as `statusline.active` in config.yaml. | NAME, --json |
 | `sccs sync` | Synchronize files between local and repository. | -c/--category TEXT, -n/--dry-run, -f/--force local\|repo\|newer, -i/--interactive, --commit, --no-commit, --push, --no-push, --pull, --no-pull-check, --docs/--no-docs, --migrate/--no-migrate, --json |
 
 Notation: `[ARG]` optional positional · `ARG` required positional · `a|b` choice · `--flag` boolean.
@@ -175,6 +187,21 @@ fish-to-zsh translates functions/control flow best-effort (falls back to comment
 emits broken zsh); `*.macos.fish`/`*.linux.fish` are converted inside `uname` guards. Distribute
 via the disabled-by-default `zsh_config` category.
 
+### Park an extension / choose a statusline
+```bash
+sccs profile list                              # profiles and their state
+sccs profile off gsd                           # park 71 skills + 34 agents + 17 hook entries
+sccs profile status gsd                        # what is parked, and where
+sccs profile on gsd                            # restore everything, hooks in their original grouping
+sccs statusline list                           # presets: installed? in use? configured?
+sccs statusline install claude-code-statusline # third-party installer, confirm-gated
+sccs statusline use builtin                    # switch back to ~/.claude/statusline.sh
+```
+Nothing is deleted — parked artefacts move to `~/.config/sccs/profiles/<name>/`, and a parked
+profile's npx tools are dropped from `doctor install/update` so the next pass cannot resurrect it.
+`profile off` also swaps a statusline owned by that profile for its `statusline_fallback_preset`.
+Both switches take effect in the NEXT Claude Code session.
+
 ### Inspect & manage
 ```bash
 sccs status                    # changed items per category (+ inline integration status)
@@ -203,13 +230,22 @@ sccs config show               # current config; also: validate | edit | init [-
   doctored machines don't clobber each other. Bypass per-item with an explicit `-a <name>`/`-c <name>`.
 - **Auto-commit semantics:** `--commit`/`--push`/`--pull` override config; `--no-commit`/`--no-push` force off.
 - **Permissions:** doctor never runs `sudo`; permission problems are emitted as copy-paste manual blocks.
+- **Profiles take effect next session:** skills, agents and hooks are read once at session start;
+  `profile on/off` never touches the running session. A name collision in the parking area raises
+  instead of overwriting (that state would mean data loss).
+- **Statusline commands run through a shell:** `~` and `$VAR` in `statusLine.command` are valid and
+  are expanded by the doctor's check before it looks for the file (v2.58.2). `statusline use|install`
+  writes both `~/.claude/settings.json` and `statusline.active` in config.yaml; the latter is what
+  `doctor install` reads when deciding whether to offer the installer.
 - **Platforms:** categories can be platform-gated (e.g. `fish_config` is macOS-only by default).
 
 ## Machine-readable outputs
 - **`--json`** (Core-First commands, single-line JSON on stdout via `click.echo`, never the ANSI Rich
   console): `status`, `categories list`, `config show`, `config validate`, `sync` (incl. `--dry-run`),
-  `diff`, `doctor check|install|update`. Implementation: `sccs/output/json_emit.py`. Use these for
-  GUI/automation consumption instead of scraping the Rich text.
+  `diff`, `doctor check|install|update`, `profile on|off|list|status`, `statusline list|show|use`.
+  Implementation: `sccs/output/json_emit.py`. Use these for GUI/automation consumption instead of
+  scraping the Rich text. `doctor check --json` carries `statusline_presets` (every known preset with
+  `installed`/`is_active`/`is_configured`/`version`) next to the `status_lines` integrity check.
 - **Self-serve card:** `sccs capability-card` → this card as raw Markdown (self-description; version
   always live-injected).
 - **Non-interactive escapes:** `config init --repo-path PATH` bypasses the interactive prompt.
@@ -222,6 +258,7 @@ sccs config show               # current config; also: validate | edit | init [-
 ## Deeper docs
 - `docs/usage/sync.md` — workflows, conflict resolution, backups, config schema.
 - `docs/usage/doctor.md` — every check, cascade-resilience, statusline, manual blocks.
+- `docs/usage/profiles.md` — profiles, statusline presets, install safety (DE/EN).
 - `docs/usage/transfer.md` — export/import (ZIP) use cases.
 - `docs/usage/opencode.md` — model mapping & conversion rules.
 - `docs/usage/categories.md` · `docs/usage/platforms.md` · `docs/usage/cli-reference.md` — full reference.

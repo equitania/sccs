@@ -5,6 +5,7 @@
 # the installer stubs the subprocess runner.
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -328,6 +329,115 @@ def test_row_missing_without_installer_says_so():
 def test_row_shown_for_a_live_preset_even_if_not_configured():
     row = _row(is_configured=False, is_active=True)
     assert row is not None and "in use" in row[3]
+
+
+# --------------------------------------------------------------------- #
+# Doctor install action                                                  #
+# --------------------------------------------------------------------- #
+
+
+def _install_actions(**kw):
+    from sccs.doctor.installer import _statusline_preset_install_actions
+    from sccs.doctor.statusline import StatusLinePresetStatus
+
+    defaults = dict(
+        name="claude-code-statusline",
+        description="",
+        command="~/.claude/statusline",
+        installed=False,
+        is_active=False,
+        is_configured=True,
+        installable=True,
+        version=None,
+    )
+    defaults.update(kw)
+    return _statusline_preset_install_actions([StatusLinePresetStatus(**defaults)])
+
+
+def test_install_action_offered_for_the_configured_preset():
+    actions = _install_actions()
+    assert len(actions) == 1
+    assert actions[0].component == "statusline-preset:claude-code-statusline"
+
+
+def test_install_action_offered_for_a_live_preset_that_is_not_configured():
+    """Regression (v2.58.2): `sccs profile off <name>` points settings.json at
+    the profile's fallback preset without touching config.yaml. Gating the
+    action on `statusline.active` alone made doctor print a MISSING row for a
+    statusline it then refused to install — the row and the action must agree.
+    """
+    assert len(_install_actions(is_configured=False, is_active=True)) == 1
+
+
+def test_no_install_action_for_a_preset_that_is_neither_chosen_nor_live():
+    assert _install_actions(is_configured=False, is_active=False) == []
+
+
+def test_no_install_action_when_already_installed():
+    assert _install_actions(installed=True) == []
+
+
+# --------------------------------------------------------------------- #
+# CLI: choosing a preset records the choice                              #
+# --------------------------------------------------------------------- #
+
+
+def test_statusline_use_writes_settings_and_config(tmp_path: Path, monkeypatch, sample_config: dict):
+    """`sccs statusline use` must touch BOTH files.
+
+    settings.json alone is machine state: it does not survive a rebuild, and
+    `doctor install` reads `statusline.active` to decide whether to offer the
+    installer (v2.58.2).
+    """
+    import yaml
+    from click.testing import CliRunner
+
+    from sccs.cli import cli
+
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "settings.json").write_text('{"theme": "dark"}', encoding="utf-8")
+    monkeypatch.setattr("sccs.doctor.statusline.DEFAULT_CLAUDE_DIR", claude_dir)
+
+    cfg_path = tmp_path / "config.yaml"
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        yaml.dump(sample_config, f, default_flow_style=False)
+    monkeypatch.setenv("SCCS_CONFIG", str(cfg_path))
+
+    result = CliRunner().invoke(cli, ["statusline", "use", "claude-code-statusline", "--json"])
+    assert result.exit_code == 0, result.output
+
+    settings = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+    assert settings["statusLine"]["command"] == "~/.claude/statusline"
+    assert settings["theme"] == "dark"  # untouched
+
+    with open(cfg_path, encoding="utf-8") as f:
+        assert yaml.safe_load(f)["statusline"]["active"] == "claude-code-statusline"
+
+
+def test_statusline_use_survives_an_unwritable_config(tmp_path: Path, monkeypatch, sample_config: dict):
+    """The statusline is already set by then — a failed preference write must
+    warn, not fail the command."""
+    from click.testing import CliRunner
+
+    from sccs.cli import cli
+
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "settings.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("sccs.doctor.statusline.DEFAULT_CLAUDE_DIR", claude_dir)
+    monkeypatch.setattr(
+        "sccs.config.loader.save_statusline_active",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("read-only file system")),
+    )
+
+    result = CliRunner().invoke(cli, ["statusline", "use", "builtin"])
+    assert result.exit_code == 0, result.output
+    # Rich colours and hard-wraps the console output — strip both before
+    # asserting (CI forces colour, a local pipe does not).
+    plain = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+    assert "read-only file system" in plain
+    assert json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))["statusLine"]
 
 
 def test_install_hint_is_the_documented_command():

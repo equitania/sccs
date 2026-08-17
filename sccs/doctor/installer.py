@@ -1303,11 +1303,16 @@ def _settings_hook_cleanup_actions(
 
 
 def _statusline_preset_install_actions(statusline_presets: list | None) -> list[DoctorAction]:
-    """Offer to install the CONFIGURED statusline when it is missing.
+    """Offer to install the CHOSEN statusline when it is missing.
 
-    Only the preset named by `statusline.active` qualifies: installing a
-    statusline the user has not chosen would be surprising, and merely
-    having a preset defined says nothing about wanting it.
+    Chosen means either named by `statusline.active` in config.yaml or
+    currently live in settings.json — the same condition the report row
+    uses (`reporter._statusline_preset_row`). Requiring `active` alone left
+    a gap: `sccs profile off <name>` points settings.json at the profile's
+    fallback preset without touching config.yaml, so the doctor printed a
+    MISSING row for a statusline it then refused to install. A preset that
+    is neither chosen nor live is still never offered — merely defining one
+    says nothing about wanting it.
 
     Third-party code, so the action carries an explicit warning in its
     manual block and — like every runnable action — a confirm prompt that
@@ -1325,7 +1330,7 @@ def _statusline_preset_install_actions(statusline_presets: list | None) -> list[
     presets = resolve_statusline_presets(None)
 
     for st in statusline_presets or []:
-        if not st.is_configured or st.installed or not st.installable:
+        if not (st.is_configured or st.is_active) or st.installed or not st.installable:
             continue
         preset = presets.get(st.name)
         if preset is None or not preset.install_url:

@@ -281,10 +281,15 @@ def _statusline_preset_row(st) -> tuple[str, str, str, str] | None:
     version = st.version or ""
 
     if not st.installed:
+        # "configured" and "in use" are different situations — config.yaml
+        # names it vs. settings.json points at it right now (what
+        # `sccs profile off` leaves behind). Saying which one is the case
+        # is the difference between a diagnosable row and a guess.
+        how = "configured" if st.is_configured else "in use"
         detail = (
-            f"configured but not installed — `sccs statusline install {st.name}`"
+            f"{how} but not installed — `sccs statusline install {st.name}`"
             if st.installable
-            else f"configured but not installed — no installer for this preset ({st.command})"
+            else f"{how} but not installed — no installer for this preset ({st.command})"
         )
         return (component, "[yellow]MISSING[/yellow]", version or "-", detail)
 

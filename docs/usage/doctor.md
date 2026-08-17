@@ -90,7 +90,10 @@ Die mitgelieferte Baseline (`DEFAULT_CLAUDE_PLUGINS`) enthält als **required** 
 `statusLine.command` und meldet einen der folgenden Zustände:
 
 - **`OK`** — Binary auf PATH oder über absoluten Pfad erreichbar, Skript-Datei
-  (falls referenziert) existiert.
+  (falls referenziert) existiert. `~` und `$VAR` werden vor der Prüfung
+  expandiert (ab v2.58.2) — Claude Code führt das Kommando über eine Shell
+  aus, dort sind beide Formen gültig; vorher meldete jedes mitgelieferte
+  Statusline-Preset dauerhaft `binary not found`.
 - **`STALE`** — Apple-Silicon-Homebrew-Cellar-Pfad
   `/opt/homebrew/Cellar/<pkg>/<version>/bin/<binary>` zeigt auf ein Cellar-
   Verzeichnis das nicht mehr existiert (z.B. nach `brew upgrade node`).
@@ -320,7 +323,10 @@ The bundled baseline (`DEFAULT_CLAUDE_PLUGINS`) treats `skill-creator`, `superpo
 `statusLine.command` and reports one of these states:
 
 - **`OK`** — binary on PATH or reachable via absolute path, script file (if
-  referenced) exists.
+  referenced) exists. `~` and `$VAR` are expanded before the check (since
+  v2.58.2) — Claude Code runs the command through a shell, where both forms
+  are valid; before that every bundled statusline preset was permanently
+  reported as `binary not found`.
 - **`STALE`** — Apple-Silicon Homebrew Cellar path
   `/opt/homebrew/Cellar/<pkg>/<version>/bin/<binary>` points at a Cellar
   directory that no longer exists (e.g. after `brew upgrade node`).

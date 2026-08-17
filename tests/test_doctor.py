@@ -3319,6 +3319,74 @@ class TestStatusLineDetector:
         assert st.state == "opaque"
 
 
+class TestStatusLineTokenExpansion:
+    """`statusLine.command` is run by Claude Code through a shell, so `~` and
+    `$HOME` are legitimate there — and `shlex.split` leaves both untouched.
+
+    Regression (v2.58.2): the existence check ran on the raw token, so the
+    bundled `claude-code-statusline` preset (`~/.claude/statusline`), the
+    `builtin` preset (`"$HOME/.claude/statusline.sh"`) and the
+    `claude_statusline` sync category's own settings_ensure command were all
+    reported as `missing_binary` while working perfectly. The row could never
+    be cleared, so `doctor check` exited 1 forever.
+    """
+
+    @staticmethod
+    def _home(tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))  # expanduser on Windows
+        return home
+
+    def _status(self, tmp_path, command):
+        from sccs.doctor.detectors import StatusLineDetector
+        from sccs.doctor.schema import StatusLineCheckSpec
+
+        sf = _write_settings(tmp_path, statusline={"type": "command", "command": command})
+        spec = StatusLineCheckSpec(identifier="t", settings_path=str(sf), required_mode="never")
+        return StatusLineDetector().get_statuses([spec])[0]
+
+    def test_tilde_binary_that_exists_is_ok(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path, monkeypatch)
+        (home / ".claude" / "statusline").write_text("#!/bin/sh\n", encoding="utf-8")
+        st = self._status(tmp_path, "~/.claude/statusline")
+        assert st.state == "ok", st.detail
+
+    def test_home_var_binary_that_exists_is_ok(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path, monkeypatch)
+        (home / ".claude" / "statusline.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        st = self._status(tmp_path, '"$HOME/.claude/statusline.sh"')
+        assert st.state == "ok", st.detail
+
+    def test_tilde_binary_that_is_absent_still_reports_missing(self, tmp_path, monkeypatch):
+        self._home(tmp_path, monkeypatch)
+        st = self._status(tmp_path, "~/.claude/statusline")
+        assert st.state == "missing_binary"
+        # Raw value stays recognizable, expanded path shows where we looked.
+        assert "~/.claude/statusline" in st.detail
+        assert ".claude/statusline (→ " in st.detail
+
+    def test_tilde_script_argument_is_expanded_too(self, tmp_path, monkeypatch):
+        import sys as _sys
+
+        home = self._home(tmp_path, monkeypatch)
+        script = home / ".claude" / "sl.js"
+        script.write_text("// statusline\n", encoding="utf-8")
+        assert self._status(tmp_path, f"{_sys.executable} ~/.claude/sl.js").state == "ok"
+
+        script.unlink()
+        st = self._status(tmp_path, f"{_sys.executable} ~/.claude/sl.js")
+        assert st.state == "missing_script"
+
+    def test_undefined_variable_is_still_reported_missing(self, tmp_path, monkeypatch):
+        """An unexpandable `$NOPE` must not silently pass as installed."""
+        self._home(tmp_path, monkeypatch)
+        monkeypatch.delenv("SCCS_NO_SUCH_VAR", raising=False)
+        st = self._status(tmp_path, "$SCCS_NO_SUCH_VAR/statusline")
+        assert st.state == "missing_binary"
+
+
 class TestStatusLineAutoFix:
     """`_status_line_actions` returns an in-process auto-fix for stale_cellar
     and manual blocks for the unfixable states. The auto-fix must back up

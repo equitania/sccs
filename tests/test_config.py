@@ -263,3 +263,64 @@ class TestRemoteValidation:
             sync_categories={},
         )
         assert config.repository.remote == good_remote
+
+
+class TestSaveStatuslineActive:
+    """`sccs statusline use/install` records the chosen preset in config.yaml.
+
+    settings.json is machine state; `statusline.active` is the preference that
+    survives a rebuild and is what `doctor install` consults before offering
+    the installer (v2.58.2).
+    """
+
+    def _write(self, temp_dir: Path, sample_config: dict, statusline: dict | None = None) -> Path:
+        if statusline is not None:
+            sample_config["statusline"] = statusline
+        path = temp_dir / "config.yaml"
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(sample_config, f, default_flow_style=False)
+        return path
+
+    def test_writes_the_preset_name(self, temp_dir: Path, sample_config: dict):
+        from sccs.config.loader import save_statusline_active
+
+        path = self._write(temp_dir, sample_config)
+        result = save_statusline_active("claude-code-statusline", path)
+
+        assert result is not None
+        assert result.statusline.active == "claude-code-statusline"
+        with open(path, encoding="utf-8") as f:
+            assert yaml.safe_load(f)["statusline"]["active"] == "claude-code-statusline"
+
+    def test_keeps_user_presets_in_the_block(self, temp_dir: Path, sample_config: dict):
+        """Only `active` may change — a custom preset must survive the write."""
+        from sccs.config.loader import save_statusline_active
+
+        path = self._write(
+            temp_dir,
+            sample_config,
+            {"active": "builtin", "presets": {"mine": {"command": "/my/own", "description": "x"}}},
+        )
+        save_statusline_active("claude-code-statusline", path)
+
+        with open(path, encoding="utf-8") as f:
+            block = yaml.safe_load(f)["statusline"]
+        assert block["active"] == "claude-code-statusline"
+        assert block["presets"]["mine"]["command"] == "/my/own"
+
+    def test_unchanged_value_is_a_no_op(self, temp_dir: Path, sample_config: dict):
+        """Re-serializing YAML drops the user's comments — so don't rewrite
+        the file when the value is already what we would write."""
+        from sccs.config.loader import save_statusline_active
+
+        path = self._write(temp_dir, sample_config, {"active": "builtin"})
+        before = path.read_bytes()
+
+        assert save_statusline_active("builtin", path) is None
+        assert path.read_bytes() == before
+
+    def test_missing_config_file_is_not_an_error(self, temp_dir: Path):
+        """Setting a statusline must not fail just because config.yaml is absent."""
+        from sccs.config.loader import save_statusline_active
+
+        assert save_statusline_active("builtin", temp_dir / "nope.yaml") is None

@@ -294,6 +294,52 @@ def save_opencode_model_map(model_map: dict[str, str], config_path: Path | None 
     return load_config(config_path)
 
 
+def save_statusline_active(preset_name: str, config_path: Path | None = None) -> SccsConfig | None:
+    """Record `statusline.active` in the user's config.yaml.
+
+    `sccs statusline use/install` writes ~/.claude/settings.json, which is
+    machine state — it does not survive a rebuild, and it is not what
+    `sccs doctor install` consults when deciding whether to offer the
+    installer. Persisting the choice here is what makes the preset
+    *chosen* rather than merely *currently live*.
+
+    Operates on the raw YAML dict (like `save_opencode_model_map`) so only
+    the user's own keys are touched, and writes a backup first. Returns
+    None when the value is already correct — re-serializing YAML drops the
+    comments in the user's file, so a no-op must stay a no-op.
+
+    Never raises on a read-only or missing config: choosing a statusline
+    must not fail because the preference could not be recorded. The caller
+    reports what happened.
+    """
+    if config_path is None:
+        config_path = get_config_path()
+
+    if not config_path.is_file():
+        return None
+
+    raw = load_raw_user_data(config_path)
+    block = raw.get("statusline")
+    if not isinstance(block, dict):
+        block = {}
+    if block.get("active") == preset_name:
+        return None
+    block["active"] = preset_name
+    raw["statusline"] = block
+
+    create_backup(config_path, category="config")
+
+    try:
+        yaml_text = yaml.dump(raw, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+    except (OSError, yaml.YAMLError) as exc:
+        logger.error("Could not persist statusline preset to %s: %s", config_path, exc)
+        raise ConfigWriteError(f"Cannot persist statusline preset to {config_path}: {exc}") from exc
+
+    return load_config(config_path)
+
+
 # Top-level keys whose defaults are deep-merged with the user's values just
 # below. Everything else SccsConfig declares is passed through verbatim.
 _DEEP_MERGED_KEYS = frozenset(

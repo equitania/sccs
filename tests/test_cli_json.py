@@ -249,6 +249,44 @@ class TestDoctorJson:
         assert data["min_node_major"] == 22
 
     @patch("sccs.doctor.reporter.has_updates", return_value=False)
+    @patch("sccs.doctor.reporter.has_problems", return_value=False)
+    @patch("sccs.cli._collect_doctor_statuses")
+    @patch("sccs.cli._load_doctor_config")
+    def test_doctor_check_json_carries_statusline_presets(self, mock_cfg, mock_collect, mock_probs, mock_upd):
+        """Regression (v2.58.2): the Rich table gained `statusline-preset:` rows
+        in v2.58.1 but the JSON payload did not, so a GUI saw only the
+        `status_lines` integrity check and could not tell which preset is
+        chosen, installed or live."""
+        from sccs.doctor.statusline import StatusLinePresetStatus
+
+        mock_cfg.return_value = MagicMock(min_node_major=22)
+        mock_collect.return_value = {
+            "node": {},
+            "claude_cli": {},
+            "plugins": [],
+            "npx_tools": [],
+            "statusline_presets": [
+                StatusLinePresetStatus(
+                    name="claude-code-statusline",
+                    description="",
+                    command="~/.claude/statusline",
+                    installed=True,
+                    is_active=True,
+                    is_configured=True,
+                    installable=True,
+                    version="statusline 1.0.0",
+                )
+            ],
+        }
+
+        result = CliRunner().invoke(cli, ["doctor", "check", "--json", "--no-update-check"])
+        assert result.exit_code == 0
+        presets = _parse_clean(result.output)["statusline_presets"]
+        assert presets[0]["name"] == "claude-code-statusline"
+        assert presets[0]["is_active"] is True
+        assert presets[0]["version"] == "statusline 1.0.0"
+
+    @patch("sccs.doctor.reporter.has_updates", return_value=False)
     @patch("sccs.doctor.reporter.has_problems", return_value=True)
     @patch("sccs.cli._collect_doctor_statuses")
     @patch("sccs.cli._load_doctor_config")

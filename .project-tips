@@ -1,4 +1,4 @@
-# sccs v2.54.0 | Claude Code Sync Tool (UV)
+# sccs v2.58.2 | Claude Code Sync Tool (UV)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Setup:    uv venv --python 3.12 && venv+ && uv pip install -e ".[dev]"
 ▸ Sync:     sccs sync --dry-run
@@ -9,4 +9,6 @@
 ▸ Doctor:   sccs doctor check
 ▸ Zsh:      sccs convert fish-to-zsh --dry-run
 ▸ Codex:    sccs integrations codex export-all --dry-run
+▸ Profile:  sccs profile off gsd
+▸ Statusln: sccs statusline list
 ▸ Build:    uv build
