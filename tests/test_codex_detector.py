@@ -221,3 +221,75 @@ class TestCommandGaps:
         assert len(gaps) == 1
         assert not gaps[0].collision
         assert gaps[0].needs_update
+
+
+class TestSourceNames:
+    """`source_names` tells "already in sync" apart from "no such artefact"."""
+
+    def test_lists_skills_agents_and_commands(self, tmp_path):
+        detector = _detector(tmp_path)
+        dirs = {
+            "cc_skills": tmp_path / ".claude" / "skills",
+            "cc_agents": tmp_path / ".claude" / "agents",
+            "cc_commands": tmp_path / ".claude" / "commands",
+        }
+        _write_skill(dirs["cc_skills"], "my-skill")
+        (dirs["cc_agents"] / "reviewer.md").write_text(AGENT_MD, encoding="utf-8")
+        (dirs["cc_commands"] / "finalize.md").write_text(COMMAND_MD, encoding="utf-8")
+
+        assert detector.source_names("skills") == {"my-skill"}
+        assert detector.source_names("agents") == {"reviewer"}
+        assert detector.source_names("commands") == {"finalize"}
+
+    def test_skips_private_and_local_artefacts(self, tmp_path):
+        detector = _detector(tmp_path)
+        cc_agents = tmp_path / ".claude" / "agents"
+        for filename in ("_draft.md", ".hidden.md", "notes.local.md", "keeper.md"):
+            (cc_agents / filename).write_text(AGENT_MD, encoding="utf-8")
+
+        assert detector.source_names("agents") == {"keeper"}
+
+    def test_missing_directory_is_empty(self, tmp_path):
+        detector = CodexDetector(
+            codex_dir=tmp_path / ".codex",
+            skills_dir=tmp_path / ".agents" / "skills",
+            cc_skills_dir=tmp_path / "nope-skills",
+            cc_agents_dir=tmp_path / "nope-agents",
+            cc_commands_dir=tmp_path / "nope-commands",
+        )
+        assert detector.source_names("agents") == set()
+        assert detector.source_names("commands") == set()
+        assert detector.source_names("skills") == set()
+
+
+class TestSymlinkGuards:
+    """Symlinked sources are never exported (defence against link-following)."""
+
+    def test_symlinked_skill_is_ignored(self, tmp_path):
+        detector = _detector(tmp_path)
+        cc_skills = tmp_path / ".claude" / "skills"
+        outside = tmp_path / "outside-skill"
+        outside.mkdir()
+        (outside / "SKILL.md").write_text("---\nname: x\ndescription: d\n---\nBody\n", encoding="utf-8")
+        (cc_skills / "linked").symlink_to(outside, target_is_directory=True)
+
+        assert detector.get_skill_gaps() == []
+        assert detector.source_names("skills") == set()
+
+    def test_symlinked_agent_is_ignored(self, tmp_path):
+        detector = _detector(tmp_path)
+        outside = tmp_path / "outside-agent.md"
+        outside.write_text(AGENT_MD, encoding="utf-8")
+        (tmp_path / ".claude" / "agents" / "linked.md").symlink_to(outside)
+
+        assert detector.get_agent_gaps() == []
+        assert detector.source_names("agents") == set()
+
+    def test_symlinked_command_is_ignored(self, tmp_path):
+        detector = _detector(tmp_path)
+        outside = tmp_path / "outside-command.md"
+        outside.write_text(COMMAND_MD, encoding="utf-8")
+        (tmp_path / ".claude" / "commands" / "linked.md").symlink_to(outside)
+
+        assert detector.get_command_gaps() == []
+        assert detector.source_names("commands") == set()

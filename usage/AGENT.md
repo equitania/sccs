@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.58.2  ·  **Python:** ≥3.10
+- **Version:** 2.58.3  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -171,9 +171,14 @@ sccs integrations codex export-agents -a reviewer # one agent only (bypasses gsd
 One-way (Claude Code is source of truth). Skills copy verbatim (identical agentskills.io format);
 agents become Codex agent TOML (body → `developer_instructions`, model alias → Codex model +
 reasoning effort, read-only tool sets → `sandbox_mode = "read-only"`); commands are wrapped as
-skills (Codex prompts are deprecated). The bundled model map is static — override via
-`codex.model_map` in config. Name collisions: a real skill always wins over a same-named command
-(skipped with a warning). `gsd-*` excluded by default. No MCP merge / no CLAUDE.md→AGENTS.md (v1).
+skills (Codex prompts are deprecated). Bundled model map (v2.58.3): `opus`/`sonnet` →
+`gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`, efforts `high`/`medium`/`low`. All three aliases share
+ONE current model family and differ only in reasoning effort — Codex has no discovery *command*,
+but caches a catalogue at `~/.codex/models_cache.json` (one `slug` per entry) to re-check the map
+against the installed CLI; override via `codex.model_map`. A name passed to `-s`/`-a`/`-c` that
+does not exist in `~/.claude/` fails with `No such agent/skill/command` and exit 1 (a name that is
+merely already in sync still succeeds). Name collisions: a real skill always wins over a same-named
+command (skipped with a warning). `gsd-*` excluded by default. No MCP merge / no CLAUDE.md→AGENTS.md (v1).
 
 ### Convert Fish config to PowerShell or zsh; regenerate hub README
 ```bash

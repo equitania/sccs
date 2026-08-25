@@ -1801,8 +1801,16 @@ def integrations_status(ctx: click.Context) -> None:
     if codex_info is not None:
         console.print(f"\n[bold]Codex[/bold] detected at {codex_info.codex_dir}")
         codex_exclude = _resolve_codex_excludes()
+        # The model maps must be injected here exactly as `codex status` does:
+        # an agent gap is decided by comparing RENDERED TOML against the target
+        # file, and the rendered `model` line comes from the map. Falling back
+        # to the bundled default would make this overview disagree with
+        # `sccs integrations codex status` for anyone overriding codex.model_map.
+        codex_model_map, codex_reasoning_map = _resolve_codex_model_maps()
         codex_skill_gaps = codex_detector.get_skill_gaps(exclude_patterns=codex_exclude)
-        codex_agent_gaps = codex_detector.get_agent_gaps(exclude_patterns=codex_exclude)
+        codex_agent_gaps = codex_detector.get_agent_gaps(
+            codex_model_map, codex_reasoning_map, exclude_patterns=codex_exclude
+        )
         codex_command_gaps = codex_detector.get_command_gaps(exclude_patterns=codex_exclude)
         console.print(
             f"  skills to export: {len(codex_skill_gaps)} · "
@@ -2642,6 +2650,17 @@ def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
     else:
         gaps = detector.get_skill_gaps(exclude_patterns=exclude)
         export_fn, unit = export_skills_to_codex, "skills"
+
+    if selected:
+        # A typo must not look like success: an artefact already in sync
+        # produces no gap, and so does a name that does not exist at all.
+        # Compare against the source tree to tell the two apart.
+        known = detector.source_names(kind)
+        unknown = sorted(name for name in selected if name not in known)
+        if unknown:
+            console.print_error(f"No such {unit[:-1]} in ~/.claude: {', '.join(unknown)}")
+            sys.exit(1)
+        gaps = [gap for gap in gaps if gap.name in set(selected)]
 
     if not gaps:
         console.print_success(f"All {unit} are already up to date in Codex")

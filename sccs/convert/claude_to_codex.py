@@ -33,16 +33,28 @@ from sccs.convert.claude_to_opencode import _split_allowed_tools
 # bare Anthropic model id. Codex expects an OpenAI model id in `model` plus an
 # optional `model_reasoning_effort`.
 #
-# IMPORTANT: unlike OpenCode there is NO live discovery command in the Codex
+# IMPORTANT: unlike OpenCode there is NO live discovery COMMAND in the Codex
 # CLI, so this static map is the only bundled source and WILL age as OpenAI
-# model ids drift. Override it via `codex.model_map` / `codex.extra_model_map`
-# in ~/.config/sccs/config.yaml. An unknown value passes through unchanged with
-# a warning — a stale entry here never blocks an export, it only shapes the
-# fallback.
+# model ids drift — it already did once (the v2.53.0 map pointed at the
+# retired gpt-5.1-codex family). Override it via `codex.model_map` /
+# `codex.extra_model_map` in ~/.config/sccs/config.yaml. An unknown value
+# passes through unchanged with a warning — a stale entry here never blocks an
+# export, it only shapes the fallback.
+#
+# To re-check the map against the installed CLI, read the model catalogue Codex
+# caches locally (no command, but a machine-readable file):
+#
+#     python -c "import json,pathlib;print([m['slug'] for m in json.loads(
+#       pathlib.Path.home().joinpath('.codex/models_cache.json').read_text())['models']])"
+#
+# Policy (owner's call): always map onto the CURRENT top model family, never
+# onto an older generation's small model. A Claude tier is a depth/cost signal,
+# and Codex expresses depth through `model_reasoning_effort` on one family —
+# so all three aliases share the newest family and differ only in effort.
 DEFAULT_CODEX_MODEL_MAP: dict[str, str] = {
-    "opus": "gpt-5.1-codex",
-    "sonnet": "gpt-5.1-codex",
-    "haiku": "gpt-5.1-codex-mini",
+    "opus": "gpt-5.6-terra",
+    "sonnet": "gpt-5.6-terra",
+    "haiku": "gpt-5.6-luna",
 }
 
 # Claude tier -> Codex reasoning effort. The Claude tiers differ mainly in

@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 2.58.3 (25.08.2026)
+
+### Fixed (Codex export)
+
+- **The bundled Codex model map pointed at a retired model family, so every exported agent carried a dead `model` id.** v2.53.0 shipped `opus`/`sonnet` → `gpt-5.1-codex` and `haiku` → `gpt-5.1-codex-mini`. Codex has since retired that family — the catalogue the installed CLI (0.149.1) actually carries lists `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4-mini`. Nothing failed loudly, because an unrecognised alias is only *warned* about, and a literal id is deliberately passed through untouched: `sccs integrations codex export-agents` reported success while writing TOML that Codex would reject at use time. The map now reads `opus`/`sonnet` → `gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`.
+- **The mapping rule is now explicit and test-enforced.** All three aliases point at ONE current top model family and differ only in `model_reasoning_effort` (`high`/`medium`/`low`) — a Claude tier is a depth/cost signal, and depth is exactly what Codex expresses through effort. An alias is never mapped onto an older generation's small model, which is what made the previous `haiku` → `*-mini` entry the wrong shape as well as the wrong id. `TestBundledModelMapPolicy` pins the properties (one family, all aliases mapped, effort ordered by tier, the retired family gone) rather than specific slugs, so a future refresh does not have to fight the tests.
+- Codex still has no discovery *command* — but it does cache a machine-readable catalogue at `~/.codex/models_cache.json` (one `slug` per entry). Both the module comment and `docs/usage/codex.md` (DE/EN) now name that file as the way to re-check the map against the installed CLI, instead of describing the drift as unverifiable.
+
+### Fixed (Codex CLI)
+
+- **`sccs integrations status` judged agent gaps against the bundled model map, not the configured one.** It called `get_agent_gaps()` without the maps while `sccs integrations codex status` injected them. Since an agent gap is decided by comparing *rendered* TOML against the target file, and the rendered `model` line comes from the map, the two commands reported different gap counts for anyone overriding `codex.model_map` — the overview claiming work that the detail view said was done.
+- **An unknown name in `-s`/`-a`/`-c` exited 0 in silence.** `export-agents -a typo --dry-run` printed only "Dry run — no files will be written" and returned success. The cause is structural: a gap list cannot distinguish "already in sync" (no gap) from "does not exist" (also no gap). The new `CodexDetector.source_names(kind)` supplies the exportable names from the source tree, so a name that is not there now fails with `No such agent: typo` and exit code 1, while a name that is merely up to date still reports success. Same skip rules as the export itself (`_`/`.` prefixes, `.local.md`, symlinks).
+
+### Tests
+
+14 new tests: `TestBundledModelMapPolicy` (`tests/test_codex_convert.py`), `TestSourceNames` and `TestSymlinkGuards` (`tests/test_codex_detector.py` — the symlink defences added in v2.53.0 had no coverage until now), `TestSelectionByName` and `TestIntegrationsStatusModelMap` (`tests/test_codex_cli.py`). Full suite: 1495 passed.
+
 ## Version 2.58.2 (17.08.2026)
 
 ### Fixed (doctor statusline check)

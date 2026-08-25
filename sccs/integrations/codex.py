@@ -287,6 +287,30 @@ class CodexDetector:
 
     # ----- helpers -------------------------------------------------------- #
 
+    def source_names(self, kind: str) -> set[str]:
+        """Names of exportable Claude artefacts of ``kind`` (skills/agents/commands).
+
+        A gap list alone cannot tell "already up to date" apart from "no such
+        artefact" — an artefact in sync produces no gap, and so does a typo.
+        Callers selecting by name compare against this set to reject typos
+        instead of silently exporting nothing.
+        """
+        if kind == "skills":
+            return self._cc_skill_names()
+
+        directory = self._cc_agents_dir if kind == "agents" else self._cc_commands_dir
+        if not directory.is_dir():
+            return set()
+
+        names: set[str] = set()
+        for path in directory.glob("*.md"):
+            if path.name.startswith(_SKIP_PATTERNS) or path.name.endswith(_LOCAL_SUFFIX):
+                continue
+            if path.is_symlink():
+                continue
+            names.add(path.stem)
+        return names
+
     def _cc_skill_names(self) -> set[str]:
         """Names of exportable Claude skills (they claim the skill slots)."""
         names: set[str] = set()

@@ -228,12 +228,12 @@ class TestRenderCodexAgentToml:
             "reviewer",
             'Reviews "critical" code.',
             "# Role\n\nYou review diffs.\n",
-            model="gpt-5.1-codex",
+            model="gpt-5.6-terra",
             model_reasoning_effort="high",
             sandbox_mode="read-only",
         )
         parsed = _parse(doc)
-        assert parsed["model"] == "gpt-5.1-codex"
+        assert parsed["model"] == "gpt-5.6-terra"
         assert parsed["model_reasoning_effort"] == "high"
         assert parsed["sandbox_mode"] == "read-only"
         assert parsed["description"] == 'Reviews "critical" code.'
@@ -245,3 +245,34 @@ class TestRenderCodexAgentToml:
         assert lines[0].startswith("name = ")
         assert lines[1].startswith("description = ")
         assert lines[-1].endswith("'''") or lines[-1].endswith('"""')
+
+
+class TestBundledModelMapPolicy:
+    """Guards the owner's mapping policy (v2.58.3).
+
+    The v2.53.0 map shipped `gpt-5.1-codex` / `gpt-5.1-codex-mini` and went
+    stale unnoticed — Codex retired that family, so every exported agent
+    carried a dead model id. These tests do not pin a specific slug (that
+    would need updating on every OpenAI release anyway); they pin the two
+    properties that made the old map wrong.
+    """
+
+    def test_every_alias_is_mapped(self):
+        assert set(DEFAULT_CODEX_MODEL_MAP) == {"opus", "sonnet", "haiku"}
+        assert set(DEFAULT_CODEX_REASONING_EFFORT_MAP) == {"opus", "sonnet", "haiku"}
+
+    def test_all_aliases_share_one_model_family(self):
+        # Policy: a Claude tier is a depth signal, and Codex expresses depth
+        # through model_reasoning_effort — so the tiers must not drift onto
+        # different model generations (never map haiku onto an older mini).
+        families = {value.rsplit("-", 1)[0] for value in DEFAULT_CODEX_MODEL_MAP.values()}
+        assert len(families) == 1, f"aliases straddle model families: {DEFAULT_CODEX_MODEL_MAP}"
+
+    def test_retired_model_family_is_gone(self):
+        assert not any(v.startswith("gpt-5.1-codex") for v in DEFAULT_CODEX_MODEL_MAP.values())
+
+    def test_effort_ordering_matches_tier_depth(self):
+        efforts = DEFAULT_CODEX_REASONING_EFFORT_MAP
+        order = ["low", "medium", "high", "xhigh", "max"]
+        assert order.index(efforts["haiku"]) < order.index(efforts["sonnet"])
+        assert order.index(efforts["sonnet"]) <= order.index(efforts["opus"])

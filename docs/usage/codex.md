@@ -51,11 +51,19 @@ sccs integrations codex export-all
 
 **Agent-Konvertierung**: Der Markdown-Body wird zu `developer_instructions`, `description` wird übernommen, das Claude-Modell-Alias (`sonnet`/`opus`/`haiku`) wird auf ein Codex-Modell plus `model_reasoning_effort` gemappt. Eine `tools:`-Allowlist, die nur Lese-Tools enthält, wird zu `sandbox_mode = "read-only"`; alles andere wird mit EINER Warnung verworfen (Codex steuert Zugriff über `sandbox_mode`/`approval_policy`, nicht pro Tool).
 
-**Modell-Mapping ist statisch**: Codex hat — anders als OpenCode — keinen Discovery-Befehl. Die mitgelieferte Zuordnung (z. B. `sonnet` → `gpt-5.1-codex`, Effort `medium`) veraltet mit der Zeit; korrigiere sie über `codex.model_map`/`codex.extra_model_map` in der Config. Unbekannte Werte werden mit Warnung unverändert durchgereicht.
+**Modell-Mapping ist statisch**: Codex hat — anders als OpenCode — keinen Discovery-Befehl. Die mitgelieferte Zuordnung (`opus`/`sonnet` → `gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`, Effort `high`/`medium`/`low`) veraltet mit der Zeit; korrigiere sie über `codex.model_map`/`codex.extra_model_map` in der Config. Unbekannte Werte werden mit Warnung unverändert durchgereicht.
+
+Die Zuordnung folgt einer Regel: Alle drei Aliase zeigen auf die **aktuelle Top-Modellfamilie** und unterscheiden sich nur im `model_reasoning_effort` — ein Claude-Tier ist ein Tiefen-Signal, und genau das drückt Codex über den Effort aus. Ein Alias wird nie auf das kleine Modell einer älteren Generation gemappt.
+
+Ob die Zuordnung noch zur installierten CLI passt, verrät der lokale Modell-Cache von Codex (in der Fish-Shell):
+
+```fish
+python3 -c "import json,pathlib;print([m['slug'] for m in json.loads(pathlib.Path.home().joinpath('.codex/models_cache.json').read_text())['models']])"
+```
 
 **Kollisionen (Commands)**: Commands landen im selben Skill-Baum wie Skills. Ein Command, dessen Name mit einem Claude-Skill kollidiert oder dessen Ziel-Verzeichnis ein echter Skill ist (trägt mehr als die verpackte `SKILL.md`), wird **nie geschrieben** — der Skill gewinnt, der Command wird mit Warnung übersprungen. Bereits verpackte Commands (Verzeichnis mit genau einer `SKILL.md`) bleiben re-exportierbar.
 
-**Plugin-Artefakte werden nicht exportiert**: Doctor-gemanagte Skills/Agents/Commands (`gsd-*`, `playwright-cli`) fallen per Default aus `status` und den Export-Befehlen raus. Eigene Patterns ergänzt du über `codex.exclude` (Glob, gegen den Basename). Ein explizites `-s`/`-a`/`-c` umgeht den Exclude.
+**Plugin-Artefakte werden nicht exportiert**: Doctor-gemanagte Skills/Agents/Commands (`gsd-*`, `playwright-cli`) fallen per Default aus `status` und den Export-Befehlen raus. Eigene Patterns ergänzt du über `codex.exclude` (Glob, gegen den Basename). Ein explizites `-s`/`-a`/`-c` umgeht den Exclude. Ein Name, den es in `~/.claude/` gar nicht gibt, bricht seit v2.58.3 mit `No such agent/skill/command` und Exit-Code 1 ab — ein Tippfehler sieht damit nicht mehr wie ein erfolgreicher Lauf ohne Änderungen aus.
 
 **Nicht abgedeckt (v1)**: kein MCP-Merge nach `~/.codex/config.toml` und kein CLAUDE.md → AGENTS.md. Für eine einmalige Komplett-Migration bietet Codex selbst den `/import`-Befehl an; der SCCS-Export ist der wiederholbare, inkrementelle Weg danach.
 
@@ -69,10 +77,10 @@ codex:
   skills_dir: ~/.agents/skills
   # Modell-Zuordnung voll ersetzen (None = Bundled-Default)
   model_map:
-    sonnet: gpt-5.1-codex
+    sonnet: gpt-5.6-terra
   # ... oder additiv ergänzen
   extra_model_map:
-    haiku: gpt-5.1-codex-mini
+    haiku: gpt-5.6-luna
   # Reasoning-Effort pro Alias (Default: opus=high, sonnet=medium, haiku=low)
   reasoning_effort_map:
     sonnet: high
@@ -139,11 +147,19 @@ sccs integrations codex export-all
 
 **Agent conversion**: the Markdown body becomes `developer_instructions`, `description` carries over, the Claude model alias (`sonnet`/`opus`/`haiku`) is mapped to a Codex model plus `model_reasoning_effort`. A `tools:` allowlist containing only read-only tools becomes `sandbox_mode = "read-only"`; anything else is dropped with ONE warning (Codex governs access via `sandbox_mode`/`approval_policy`, not per tool).
 
-**Model mapping is static**: unlike OpenCode, Codex has no discovery command. The bundled map (e.g. `sonnet` → `gpt-5.1-codex`, effort `medium`) will age; correct it via `codex.model_map`/`codex.extra_model_map` in the config. Unknown values pass through unchanged with a warning.
+**Model mapping is static**: unlike OpenCode, Codex has no discovery command. The bundled map (`opus`/`sonnet` → `gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`, effort `high`/`medium`/`low`) will age; correct it via `codex.model_map`/`codex.extra_model_map` in the config. Unknown values pass through unchanged with a warning.
+
+The map follows one rule: all three aliases point at the **current top model family** and differ only in `model_reasoning_effort` — a Claude tier is a depth signal, and effort is exactly how Codex expresses depth. An alias is never mapped onto an older generation's small model.
+
+To check the map against the installed CLI, read the model catalogue Codex caches locally (fish shell):
+
+```fish
+python3 -c "import json,pathlib;print([m['slug'] for m in json.loads(pathlib.Path.home().joinpath('.codex/models_cache.json').read_text())['models']])"
+```
 
 **Collisions (commands)**: commands land in the same skill tree as skills. A command whose name collides with a Claude skill, or whose target directory is a real skill (carries more than the wrapped `SKILL.md`), is **never written** — the skill wins and the command is skipped with a warning. Previously wrapped commands (a directory holding exactly one `SKILL.md`) stay re-exportable.
 
-**Plugin artefacts are not exported**: doctor-managed skills/agents/commands (`gsd-*`, `playwright-cli`) are dropped from `status` and the export commands by default. Add your own patterns via `codex.exclude` (glob, matched against the basename). An explicit `-s`/`-a`/`-c` bypasses the exclude.
+**Plugin artefacts are not exported**: doctor-managed skills/agents/commands (`gsd-*`, `playwright-cli`) are dropped from `status` and the export commands by default. Add your own patterns via `codex.exclude` (glob, matched against the basename). An explicit `-s`/`-a`/`-c` bypasses the exclude. Since v2.58.3 a name that does not exist in `~/.claude/` fails with `No such agent/skill/command` and exit code 1 — a typo no longer reads like a successful no-op run.
 
 **Out of scope (v1)**: no MCP merge into `~/.codex/config.toml` and no CLAUDE.md → AGENTS.md. For a one-time full migration Codex itself offers the `/import` command; the SCCS export is the repeatable, incremental path afterwards.
 
@@ -157,10 +173,10 @@ codex:
   skills_dir: ~/.agents/skills
   # Fully replace the model map (None = bundled default)
   model_map:
-    sonnet: gpt-5.1-codex
+    sonnet: gpt-5.6-terra
   # ... or extend additively
   extra_model_map:
-    haiku: gpt-5.1-codex-mini
+    haiku: gpt-5.6-luna
   # Reasoning effort per alias (default: opus=high, sonnet=medium, haiku=low)
   reasoning_effort_map:
     sonnet: high

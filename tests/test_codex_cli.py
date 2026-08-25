@@ -83,3 +83,81 @@ class TestCodexGroup:
         assert "Dry run" in output
         assert "Would create" in output
         assert not (dirs["skills"] / "my-skill").exists()
+
+
+class TestSelectionByName:
+    """A typo in -s/-a/-c must fail loudly, not report silent success."""
+
+    def _detector(self, tmp_path):
+        from sccs.integrations.codex import CodexDetector
+
+        for rel in (".codex", ".agents/skills", ".claude/skills", ".claude/agents", ".claude/commands"):
+            (tmp_path / rel).mkdir(parents=True)
+        skill = tmp_path / ".claude" / "skills" / "my-skill"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("---\nname: my-skill\ndescription: d\n---\nBody\n", encoding="utf-8")
+        (tmp_path / ".claude" / "agents" / "reviewer.md").write_text(
+            "---\nname: reviewer\ndescription: Reviews code.\nmodel: sonnet\n---\nBody\n", encoding="utf-8"
+        )
+        return CodexDetector(
+            codex_dir=tmp_path / ".codex",
+            skills_dir=tmp_path / ".agents" / "skills",
+            cc_skills_dir=tmp_path / ".claude" / "skills",
+            cc_agents_dir=tmp_path / ".claude" / "agents",
+            cc_commands_dir=tmp_path / ".claude" / "commands",
+        )
+
+    def test_unknown_agent_name_exits_nonzero(self, tmp_path):
+        runner = CliRunner()
+        with patch("sccs.cli._make_codex_detector", return_value=self._detector(tmp_path)):
+            result = runner.invoke(cli, ["integrations", "codex", "export-agents", "-a", "nope", "--dry-run"])
+        assert result.exit_code == 1
+        assert "No such agent" in _plain(result.output)
+        assert "nope" in _plain(result.output)
+
+    def test_unknown_skill_name_exits_nonzero(self, tmp_path):
+        runner = CliRunner()
+        with patch("sccs.cli._make_codex_detector", return_value=self._detector(tmp_path)):
+            result = runner.invoke(cli, ["integrations", "codex", "export-skills", "-s", "typo", "--dry-run"])
+        assert result.exit_code == 1
+        assert "No such skill" in _plain(result.output)
+
+    def test_known_name_still_exports(self, tmp_path):
+        runner = CliRunner()
+        with patch("sccs.cli._make_codex_detector", return_value=self._detector(tmp_path)):
+            result = runner.invoke(cli, ["integrations", "codex", "export-skills", "-s", "my-skill", "--dry-run"])
+        assert result.exit_code == 0
+        assert "Would create" in _plain(result.output)
+
+
+class TestIntegrationsStatusModelMap:
+    """`integrations status` must judge agent gaps with the CONFIGURED map.
+
+    Regression for v2.58.3: it called get_agent_gaps() without the maps, so it
+    rendered agent TOML against the bundled defaults and disagreed with
+    `sccs integrations codex status` for anyone overriding codex.model_map.
+    """
+
+    def test_status_injects_the_resolved_model_maps(self):
+        runner = CliRunner()
+        detector = MagicMock()
+        detector.get_info.return_value = MagicMock(codex_dir="/x/.codex")
+        detector.get_skill_gaps.return_value = []
+        detector.get_agent_gaps.return_value = []
+        detector.get_command_gaps.return_value = []
+
+        model_map = {"sonnet": "custom-model"}
+        reasoning_map = {"sonnet": "high"}
+
+        with (
+            patch("sccs.cli._make_codex_detector", return_value=detector),
+            patch("sccs.cli._resolve_codex_model_maps", return_value=(model_map, reasoning_map)),
+            patch("sccs.cli._resolve_codex_excludes", return_value=[]),
+        ):
+            result = runner.invoke(cli, ["integrations", "status"])
+
+        assert result.exit_code == 0
+        detector.get_agent_gaps.assert_called_once()
+        args, kwargs = detector.get_agent_gaps.call_args
+        assert args[0] is model_map
+        assert args[1] is reasoning_map
