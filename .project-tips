@@ -9,6 +9,7 @@
 ▸ Doctor:   sccs doctor check
 ▸ Zsh:      sccs convert fish-to-zsh --dry-run
 ▸ Codex:    sccs integrations codex export-all --dry-run
+▸ Hooks:    sccs integrations codex export-hooks --dry-run  (danach /hooks in Codex)
 ▸ Profile:  sccs profile off gsd
 ▸ Statusln: sccs statusline list
 ▸ Build:    uv build
