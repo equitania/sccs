@@ -107,3 +107,75 @@ class TestMatcherWarnings:
         warnings = matcher_warnings("Bash,Read")
         assert len(warnings) == 1
         assert "Read" in warnings[0]
+
+
+class TestRealWorldSettings:
+    """The verdicts the spec claims for a real ~/.claude/settings.json.
+
+    Inlined rather than read from disk: a test that depends on the developer's
+    own settings passes or fails for the wrong reasons, and would break in CI.
+    """
+
+    SETTINGS_HOOKS = {
+        "PostToolUse": [
+            {
+                "matcher": "Edit|Write",
+                "hooks": [{"type": "command", "command": 'python3 "$HOME/.claude/hooks/quality-gate.py"'}],
+            }
+        ],
+        "PostToolUseFailure": [
+            {
+                "matcher": "Read|Write|Edit|Bash",
+                "hooks": [{"type": "command", "command": "$HOME/.claude/hooks/nono-hook.sh"}],
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "Bash|Read|Grep|Glob",
+                "hooks": [{"type": "command", "command": 'python3 "$HOME/.claude/hooks/suggest-compact.py"'}],
+            }
+        ],
+        "SessionStart": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": 'python3 "$HOME/.claude/hooks/discover-skills.py"'}],
+            },
+            {"hooks": [{"type": "command", "command": '"/Users/picard/.claude/hooks/context-mode-cache-heal.mjs"'}]},
+        ],
+        "Stop": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": 'python3 "$HOME/.claude/hooks/cost-tracker.py"'}],
+            }
+        ],
+    }
+
+    def test_four_events_survive_one_is_dropped(self):
+        converted, _ = convert_hooks_block(self.SETTINGS_HOOKS)
+        assert sorted(converted) == ["PostToolUse", "PreToolUse", "SessionStart", "Stop"]
+        assert "PostToolUseFailure" not in converted
+
+    def test_the_dropped_event_is_named_in_a_warning(self):
+        _, warnings = convert_hooks_block(self.SETTINGS_HOOKS)
+        assert any("PostToolUseFailure" in w for w in warnings)
+
+    def test_suggest_compact_gets_a_matcher_warning(self):
+        _, warnings = convert_hooks_block(self.SETTINGS_HOOKS)
+        matcher_warns = [w for w in warnings if "matcher names" in w]
+        assert any("Read" in w and "Grep" in w and "Glob" in w for w in matcher_warns)
+
+    def test_quality_gate_survives_without_a_warning_about_itself(self):
+        converted, _ = convert_hooks_block(self.SETTINGS_HOOKS)
+        group = converted["PostToolUse"][0]
+        assert group["matcher"] == "Edit|Write"
+        assert group["hooks"][0]["command"].endswith('quality-gate.py"')
+
+    def test_both_session_start_groups_survive(self):
+        converted, _ = convert_hooks_block(self.SETTINGS_HOOKS)
+        assert len(converted["SessionStart"]) == 2
+
+    def test_empty_matcher_is_not_emitted(self):
+        # An empty matcher matches everything on both sides; omitting it keeps
+        # the document smaller and the trust hash stable.
+        converted, _ = convert_hooks_block(self.SETTINGS_HOOKS)
+        assert "matcher" not in converted["Stop"][0]
