@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.58.4  ·  **Python:** ≥3.10
+- **Version:** 2.59.0  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -73,6 +73,7 @@
 | `sccs integrations codex export-agents` | Convert Claude agents into Codex agent TOML files (~/.codex/agents/). | -n/--dry-run, --overwrite/--no-overwrite, -a/--agent TEXT |
 | `sccs integrations codex export-commands` | Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md). | -n/--dry-run, --overwrite/--no-overwrite, -c/--command TEXT |
 | `sccs integrations codex export-all` | Export skills, agents and commands to Codex in one run. | -n/--dry-run, --overwrite/--no-overwrite |
+| `sccs integrations codex export-hooks` | Merge Claude hook entries into ~/.codex/hooks.json. | -n/--dry-run |
 | `sccs integrations codex status` | Show Codex installation and export gaps. | — |
 | `sccs integrations status` | Show detailed integration status. | — |
 | `sccs integrations trust-repo` | Register SCCS repository as trusted in Claude Desktop. | -n/--dry-run |
@@ -167,6 +168,7 @@ sccs integrations codex status                    # skills/agents/commands still
 sccs integrations codex export-skills --dry-run
 sccs integrations codex export-all                # skills verbatim → ~/.agents/skills/, agents → ~/.codex/agents/*.toml
 sccs integrations codex export-agents -a reviewer # one agent only (bypasses gsd-* exclude)
+sccs integrations codex export-hooks --dry-run   # 10 shared events; others dropped with a warning
 ```
 One-way (Claude Code is source of truth). Skills copy verbatim (identical agentskills.io format);
 agents become Codex agent TOML (body → `developer_instructions`, model alias → Codex model +
@@ -181,6 +183,10 @@ merely already in sync still succeeds). Name collisions: a real skill always win
 command (skipped with a warning). `gsd-*` excluded by default. No MCP merge / no CLAUDE.md→AGENTS.md (v1).
 A source file whose frontmatter is not valid YAML exports with the block stripped and a warning naming
 the file line/column (v2.58.4); the usual cause is `argument-hint: [a] [b...]` — quote it to fix.
+Hooks are a separate, deliberate export: `export-hooks` is NOT part of `export-all` (hooks execute
+code on every tool call) and merges into `~/.codex/hooks.json` rather than owning it — entries SCCS
+did not write are left alone. Run `/hooks` in Codex after exporting; until you approve there, the
+new or changed entries do not run.
 
 ### Convert Fish config to PowerShell or zsh; regenerate hub README
 ```bash

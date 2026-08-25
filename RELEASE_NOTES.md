@@ -1,5 +1,20 @@
 # Release Notes
 
+## Version 2.59.0 (25.08.2026)
+
+### Added (Codex hooks export)
+
+- **`sccs integrations codex export-hooks` merges the `hooks` block of `~/.claude/settings.json` into `~/.codex/hooks.json`** — the file Codex actually reads, not `~/.codex/hooks/hooks.json` (the plugin path, a common trap). Claude has 19 hook events; Codex has 11; **10 transfer**: `PreToolUse`, `PostToolUse`, `PermissionRequest`, `PreCompact`, `SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop`, `UserPromptSubmit`, `Stop`. Everything else — `PostToolUseFailure`, `Notification`, `PostToolBatch` included — is dropped with a warning naming the event. Of Claude's four handler types, only `type: "command"` is portable; `http`, `prompt` and `agent` handlers are dropped, also with a warning. Matchers are exported **verbatim, never rewritten**: Codex only fires tool events for `Bash`, `apply_patch` (aliases `Edit`/`Write`) and MCP names, so a Claude matcher naming `Read`/`Grep`/`Glob`/etc. gets a warning that those alternatives can never fire there — the entry starts working on its own once Codex's tool coverage widens, which is exactly why the matcher is left alone rather than "fixed".
+- **Scripts are never copied.** Exported commands keep pointing at `~/.claude/hooks/` — one script, one source of truth, and no risk of the two copies drifting.
+- **The merge is non-destructive.** Unlike the skill/agent/command exports (one file per artefact, safe to overwrite), `hooks.json` is a file the user also edits by hand, so SCCS tracks ownership instead of owning the file outright: every entry it writes is keyed on `(event, matcher, command)` in `~/.config/sccs/.codex_hooks_state.yaml`, and only keys in that state are ever touched. A hook removed from Claude's settings disappears from `hooks.json` on the next export too. **Known limitation:** editing an exported entry's command text directly in `hooks.json` changes its ownership key, so SCCS no longer recognizes it as its own — the next export recreates the original next to your edit. Hand-adding a sibling handler to a group SCCS still owns is now safer than that: the group reads as hand-edited, and the owned entry inside it is left alone and *suppressed with a warning* on re-export rather than appended a second time. Either way, the supported path is to edit hooks in Claude Code and re-export, not to hand-edit `hooks.json`.
+- **Serialization is byte-stable.** Codex records hook trust against the hash of each definition — a document that churns on every run (key order, group order) would force the user back through Codex's trust review even when nothing actually changed. Event order, group order and key order inside each group/handler are therefore pinned, not incidental to `json.dumps`. A no-op export reports "already up to date" and touches neither the file nor its mtime.
+- **Deliberately excluded from `export-all`.** Skills, agents and commands are inert until used; hooks execute code on every matching tool call. Wiring that into the "export everything" command would mean a single `export-all` could start running new commands without the deliberate step `export-hooks` is designed to be. `codex status` gets a `Hooks:` section (add/update/remove counts) so the gap is still visible without running the export.
+- **The trust step is not optional.** After any export — first run or a later change — Codex will not execute a new or modified hook until you run `/hooks` inside Codex and approve it there. `export-hooks` prints that reminder every time it writes.
+
+### Tests
+
+Real-world fixture tests exercise the translation, merge and CLI against representative `settings.json`/`hooks.json` shapes, including the hand-edited-group suppression case above. Full suite: 1572 passed.
+
 ## Version 2.58.4 (25.08.2026)
 
 ### Fixed (frontmatter parsing)

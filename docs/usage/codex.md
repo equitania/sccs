@@ -63,6 +63,48 @@ python3 -c "import json,pathlib;print([m['slug'] for m in json.loads(pathlib.Pat
 
 **Unlesbares Frontmatter** *(seit v2.58.4)*: Lässt sich der Frontmatter-Block einer Quelldatei nicht als YAML lesen, wird er beim Export **abgetrennt** (statt im Body zu landen, wo er ein zweites Frontmatter erzeugt hätte) und die Warnung nennt Ursache und Fundstelle: `invalid YAML in frontmatter: expected <block end>, but found '[' (line 3, column 29)` — Zeilen- und Spaltenangabe beziehen sich auf die **Datei**. Häufigster Auslöser ist `argument-hint: [a] [b...]`: das ist Claude Codes dokumentierte Syntax, aber kein gültiges YAML. Fix an der Quelle: in Anführungszeichen setzen — `argument-hint: "[a] [b...]"` parst sauber und Claude Code zeigt es unverändert an.
 
+### Hooks exportieren
+
+`sccs integrations codex export-hooks` überträgt die Hook-Einträge aus
+`~/.claude/settings.json` nach `~/.codex/hooks.json`.
+
+**Zehn Events sind übertragbar**: `PreToolUse`, `PostToolUse`,
+`PermissionRequest`, `PreCompact`, `SessionStart`, `SessionEnd`,
+`SubagentStart`, `SubagentStop`, `UserPromptSubmit`, `Stop`. Alles andere —
+darunter `PostToolUseFailure`, `Notification`, `PostToolBatch` — kennt Codex
+nicht und wird mit Warnung verworfen. Von Claudes Handler-Typen ist nur
+`command` übertragbar; `http`, `prompt` und `agent` fallen weg.
+
+**Skripte bleiben, wo sie sind.** Die Kommandos zeigen weiterhin auf
+`~/.claude/hooks/` — ein Skript, eine Quelle der Wahrheit. Codex braucht dafür
+ein vorhandenes `~/.claude/hooks/`.
+
+**Matcher werden unverändert übernommen.** Codex feuert Tool-Events nur für
+`Bash`, `apply_patch` (Aliase `Edit`/`Write`) und MCP-Namen — ein Matcher wie
+`Bash|Read|Grep|Glob` greift dort nur bei `Bash`. Der Export warnt, schreibt den
+Matcher aber nicht um: sobald Codex mehr Werkzeuge abdeckt, greift der Eintrag
+von selbst.
+
+**Deine eigenen Einträge bleiben unangetastet.** SCCS merkt sich in
+`~/.config/sccs/.codex_hooks_state.yaml`, welche Einträge es geschrieben hat,
+und fasst nur diese an. Ein in Claude gelöschter Hook verschwindet beim nächsten
+Export auch hier.
+
+**Nach dem Export: `/hooks` in Codex ausführen.** Codex vertraut Hooks über
+einen Hash und führt neue oder geänderte Einträge erst nach einer Freigabe aus.
+
+**Nicht Teil von `export-all`** — Hooks führen bei jedem Tool-Aufruf Code aus,
+das gehört hinter eine bewusste Entscheidung.
+
+> **Einschränkung:** Bearbeite exportierte Einträge nicht direkt in
+> `hooks.json`. Der Besitz-Schlüssel ist `(Event, Matcher, Kommando)` — änderst
+> du das Kommando eines Eintrags, erkennt SCCS ihn beim nächsten Export nicht
+> mehr als eigenen und legt das Original erneut an, jetzt neben deiner
+> Änderung. Fügst du stattdessen nur einen weiteren Handler in eine bestehende
+> Gruppe ein, erkennt SCCS die Gruppe als fremd bearbeitet, lässt sie
+> unangetastet und überspringt den eigenen Eintrag mit einer Warnung, statt ihn
+> ein zweites Mal einzutragen. Ändere Hooks in Claude Code und exportiere neu.
+
 **Kollisionen (Commands)**: Commands landen im selben Skill-Baum wie Skills. Ein Command, dessen Name mit einem Claude-Skill kollidiert oder dessen Ziel-Verzeichnis ein echter Skill ist (trägt mehr als die verpackte `SKILL.md`), wird **nie geschrieben** — der Skill gewinnt, der Command wird mit Warnung übersprungen. Bereits verpackte Commands (Verzeichnis mit genau einer `SKILL.md`) bleiben re-exportierbar.
 
 **Plugin-Artefakte werden nicht exportiert**: Doctor-gemanagte Skills/Agents/Commands (`gsd-*`, `playwright-cli`) fallen per Default aus `status` und den Export-Befehlen raus. Eigene Patterns ergänzt du über `codex.exclude` (Glob, gegen den Basename). Ein explizites `-s`/`-a`/`-c` umgeht den Exclude. Ein Name, den es in `~/.claude/` gar nicht gibt, bricht seit v2.58.3 mit `No such agent/skill/command` und Exit-Code 1 ab — ein Tippfehler sieht damit nicht mehr wie ein erfolgreicher Lauf ohne Änderungen aus.
@@ -160,6 +202,46 @@ python3 -c "import json,pathlib;print([m['slug'] for m in json.loads(pathlib.Pat
 ```
 
 **Unreadable frontmatter** *(since v2.58.4)*: when a source file's frontmatter block does not parse as YAML, the block is **stripped** on export (rather than left in the body, where it would produce a second frontmatter block) and the warning names cause and position: `invalid YAML in frontmatter: expected <block end>, but found '[' (line 3, column 29)` — line and column refer to the **file**. The most common trigger is `argument-hint: [a] [b...]`: that is Claude Code's documented syntax, but not valid YAML. Fix it at the source by quoting — `argument-hint: "[a] [b...]"` parses cleanly and Claude Code displays it unchanged.
+
+### Exporting Hooks
+
+`sccs integrations codex export-hooks` transfers the hook entries from
+`~/.claude/settings.json` into `~/.codex/hooks.json`.
+
+**Ten events transfer**: `PreToolUse`, `PostToolUse`, `PermissionRequest`,
+`PreCompact`, `SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop`,
+`UserPromptSubmit`, `Stop`. Everything else — including `PostToolUseFailure`,
+`Notification`, `PostToolBatch` — is unknown to Codex and dropped with a
+warning. Of Claude's handler types, only `command` is portable; `http`,
+`prompt` and `agent` are dropped.
+
+**Scripts stay where they are.** The commands keep pointing at
+`~/.claude/hooks/` — one script, one source of truth. Codex needs that
+`~/.claude/hooks/` directory to exist for them to run.
+
+**Matchers are carried over unchanged.** Codex only fires tool events for
+`Bash`, `apply_patch` (aliases `Edit`/`Write`) and MCP names — a matcher like
+`Bash|Read|Grep|Glob` only ever fires there for `Bash`. The export warns but
+does not rewrite the matcher: once Codex covers more tools, the entry starts
+working on its own.
+
+**Your own entries are left alone.** SCCS tracks which entries it wrote in
+`~/.config/sccs/.codex_hooks_state.yaml` and touches only those. A hook
+deleted in Claude disappears here on the next export too.
+
+**After exporting: run `/hooks` in Codex.** Codex trusts hooks by a hash and
+only runs new or changed entries after you approve them.
+
+**Not part of `export-all`** — hooks execute code on every tool call, which
+belongs behind a deliberate decision.
+
+> **Limitation:** do not edit an exported entry directly in `hooks.json`. The
+> ownership key is `(event, matcher, command)` — change an entry's command and
+> SCCS no longer recognizes it as its own on the next export, so it recreates
+> the original next to your edit. Add another handler to an existing group
+> instead, and SCCS treats the group as hand-edited, leaves it alone, and
+> skips re-adding its own entry with a warning rather than writing it a second
+> time. Edit hooks in Claude Code and re-export instead.
 
 **Collisions (commands)**: commands land in the same skill tree as skills. A command whose name collides with a Claude skill, or whose target directory is a real skill (carries more than the wrapped `SKILL.md`), is **never written** — the skill wins and the command is skipped with a warning. Previously wrapped commands (a directory holding exactly one `SKILL.md`) stay re-exportable.
 
