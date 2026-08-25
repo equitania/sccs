@@ -23,6 +23,11 @@ from sccs.convert.frontmatter import (
     render_frontmatter,
 )
 
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+    import tomli as tomllib  # type: ignore[no-redef]
+
 # The exact shape that triggered the bug: `argument-hint` uses Claude Code's
 # documented bracket syntax, which is not valid YAML (two flow sequences on one
 # line). The `description` above it is real and was being reported as absent.
@@ -149,8 +154,6 @@ class TestConvertersRejectStackedFrontmatter:
         assert not any("has no 'description'" in w for w in warnings)
 
     def test_codex_agent_body_has_no_leftover_fence(self, tmp_path):
-        import tomllib
-
         from sccs.integrations.codex import _render_agent
 
         path = self._write(tmp_path, "broken.md", REAL_WORLD_BROKEN)
