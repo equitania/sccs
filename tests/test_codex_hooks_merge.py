@@ -126,6 +126,41 @@ class TestMerge:
         assert any("backup.sh" in w for w in warnings)
         assert not any("no longer found" in w for w in warnings)
 
+    def test_stray_non_dict_element_prevents_replacement(self):
+        """Finding 1b: group_keys() silently skips a non-dict element when
+
+        computing keys, which used to let _is_managed treat a group as fully
+        owned even though it holds something SCCS never wrote (a bare string
+        hand-appended to a group it wrote outright). Replacing such a group
+        would discard that element with no warning — Finding 1's failure
+        mode one level down. It must now be classified as foreign instead.
+        """
+        state = CodexHooksState(keys={("PostToolUse", "Edit|Write", "quality-gate.py")})
+        mixed = {
+            "matcher": "Edit|Write",
+            "hooks": [
+                {"type": "command", "command": "quality-gate.py"},
+                "user-added-string",
+            ],
+        }
+        existing = {"hooks": {"PostToolUse": [mixed]}}
+
+        document, _, warnings = merge_hooks(existing, MANAGED, state)
+        groups = document["hooks"]["PostToolUse"]
+
+        assert groups == [mixed]  # untouched, stray element included verbatim
+        assert "user-added-string" in groups[0]["hooks"]
+        assert any("quality-gate.py" in w for w in warnings)
+
+    def test_group_with_only_non_dict_elements_stays_foreign(self):
+        # No regression: group_keys() already returned [] for a group with no
+        # dict handlers at all, so it was foreign before this fix too — must
+        # keep behaving exactly the same.
+        odd = {"matcher": "Bash", "hooks": ["not-a-dict", 5, None]}
+        existing = {"hooks": {"PreToolUse": [odd]}}
+        document, _, _ = merge_hooks(existing, {}, CodexHooksState())
+        assert document["hooks"]["PreToolUse"] == [odd]
+
 
 class TestSerialization:
     def test_output_is_valid_json_with_trailing_newline(self):
@@ -485,3 +520,100 @@ class TestNoOpGuard:
 
         write_hooks_plan(plan2, hooks_path, manager)
         assert json.loads(hooks_path.read_text())["hooks"] == {}
+
+
+class TestPartialAccounting:
+    """Finding 1b end-to-end: a group SCCS owns must not be replaced — and
+
+    its stray content discarded — just because group_keys() silently skipped
+    an element it could not turn into a key.
+    """
+
+    def _settings(self, tmp_path, hooks):
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+        return path
+
+    def test_hand_added_stray_element_survives_a_full_export_cycle(self, tmp_path):
+        """The re-reviewer's exact repro: export, hand-append a bare string
+
+        into the managed group's `hooks` list, re-export with Claude
+        unchanged. The string must still be present in the written file.
+        """
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan, write_hooks_plan
+
+        settings = self._settings(tmp_path, MANAGED)
+        hooks_path = tmp_path / "hooks.json"
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        plan, _ = build_hooks_plan(settings, hooks_path, manager)
+        write_hooks_plan(plan, hooks_path, manager)
+
+        doc = json.loads(hooks_path.read_text())
+        doc["hooks"]["PostToolUse"][0]["hooks"].append("user-added-string")
+        hooks_path.write_text(json.dumps(doc), encoding="utf-8")
+
+        plan2, error = build_hooks_plan(settings, hooks_path, manager)
+        assert error is None
+        assert any("quality-gate.py" in w for w in plan2.warnings)
+
+        write_error = write_hooks_plan(plan2, hooks_path, manager)
+        assert write_error is None
+
+        written = json.loads(hooks_path.read_text())
+        handlers = written["hooks"]["PostToolUse"][0]["hooks"]
+        assert "user-added-string" in handlers
+        assert {"type": "command", "command": "quality-gate.py"} in handlers
+
+    def test_group_with_only_non_dict_elements_stays_foreign(self, tmp_path):
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan, write_hooks_plan
+
+        settings = self._settings(tmp_path, {})
+        hooks_path = tmp_path / "hooks.json"
+        odd_group = {"matcher": "Bash", "hooks": ["not-a-dict"]}
+        hooks_path.write_text(json.dumps({"hooks": {"PreToolUse": [odd_group]}}), encoding="utf-8")
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        plan, error = build_hooks_plan(settings, hooks_path, manager)
+        assert error is None
+        assert plan.document["hooks"]["PreToolUse"] == [odd_group]
+
+        write_error = write_hooks_plan(plan, hooks_path, manager)
+        assert write_error is None
+        written = json.loads(hooks_path.read_text())
+        assert written["hooks"]["PreToolUse"] == [odd_group]
+
+    def test_ordinary_managed_group_is_still_replaced(self, tmp_path):
+        """The common path must not regress: a fully-accountable managed
+
+        group that state already owns is still replaced on re-export (e.g.
+        after a timeout value changes), not frozen in place forever.
+        """
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan, write_hooks_plan
+
+        settings = self._settings(tmp_path, MANAGED)
+        hooks_path = tmp_path / "hooks.json"
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        plan, _ = build_hooks_plan(settings, hooks_path, manager)
+        write_hooks_plan(plan, hooks_path, manager)
+
+        updated_managed = {
+            "PostToolUse": [
+                {
+                    "matcher": "Edit|Write",
+                    "hooks": [{"type": "command", "command": "quality-gate.py", "timeout": 30}],
+                }
+            ]
+        }
+        settings.write_text(json.dumps({"hooks": updated_managed}), encoding="utf-8")
+
+        plan2, error = build_hooks_plan(settings, hooks_path, manager)
+        assert error is None
+        assert plan2.unchanged is False
+
+        write_error = write_hooks_plan(plan2, hooks_path, manager)
+        assert write_error is None
+
+        written = json.loads(hooks_path.read_text())
+        assert written["hooks"]["PostToolUse"][0]["hooks"][0]["timeout"] == 30

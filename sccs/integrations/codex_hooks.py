@@ -104,12 +104,40 @@ def group_keys(event: str, group: dict) -> list[HookKey]:
     return keys
 
 
+def _has_unaccountable_handler(group: dict) -> bool:
+    """True when the group's `hooks` list holds an element group_keys() cannot turn into a key.
+
+    That means: not a dict, or a dict without a string `command`. group_keys()
+    skips such elements silently — fine for read-only bookkeeping (a partial
+    key set is still useful there), but a group containing one must never be
+    classified as fully understood, or that silent skip becomes a silent
+    DELETE the moment the group is replaced.
+    """
+    handlers = group.get("hooks")
+    if not isinstance(handlers, list):
+        return False
+    return any(not (isinstance(handler, dict) and isinstance(handler.get("command"), str)) for handler in handlers)
+
+
 def _is_managed(event: str, group: dict, state: CodexHooksState) -> bool:
-    """True when every handler in the group is one SCCS wrote.
+    """True when every handler in the group is one SCCS wrote AND every element in it is accounted for.
 
     All-or-nothing on purpose: a group mixing managed and foreign handlers was
-    hand-edited, and rewriting half of it would mangle the user's work.
+    hand-edited, and rewriting half of it would mangle the user's work. The
+    accounting check closes the same hole from the other side: group_keys()
+    silently skips a handler it cannot turn into a key, so a group whose
+    accountable handlers all happen to be state-owned would otherwise look
+    100% managed while actually containing something SCCS has never seen —
+    e.g. a bare string hand-appended to a group it wrote outright. Replacing
+    such a group would discard that element with no warning, which is exactly
+    finding 1's failure mode one level down. A group like that is therefore
+    left classified as foreign: it is preserved untouched, and the accountable
+    managed handler(s) inside it are suppressed on re-export via the existing
+    "found inside a group that was edited inside Codex" path below, the same
+    as any other hand-extended group.
     """
+    if _has_unaccountable_handler(group):
+        return False
     keys = group_keys(event, group)
     return bool(keys) and all(key in state.keys for key in keys)
 

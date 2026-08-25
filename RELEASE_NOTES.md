@@ -13,7 +13,7 @@
 
 ### Tests
 
-Real-world fixture tests exercise the translation, merge and CLI against representative `settings.json`/`hooks.json` shapes, including the hand-edited-group suppression case above. Full suite: 1572 passed.
+Real-world fixture tests exercise the translation, merge and CLI against representative `settings.json`/`hooks.json` shapes, including the hand-edited-group suppression case above, a malformed-target refusal that leaves the file byte-identical, unwritable-target error handling, a true-no-op guard, and a group containing an element SCCS cannot account for (a stray non-dict handler) staying untouched rather than being silently replaced. Full suite: 1586 passed.
 
 ## Version 2.58.4 (25.08.2026)
 
