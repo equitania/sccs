@@ -117,6 +117,45 @@ class TestExportHooks:
         assert result.exit_code == 1
         assert hooks_path.read_text() == "[]"
 
+    def test_unwritable_target_exits_nonzero_with_a_clean_message(self, tmp_path):
+        """Finding 2: no raw traceback on an unwritable ~/.codex/."""
+        settings, hooks_path, state_path = _env(tmp_path)
+        # A file sitting where hooks.json's parent directory needs to be
+        # forces hooks_path.parent.mkdir() to raise, same as a read-only dir.
+        blocker = hooks_path.parent
+        blocker.rmdir()
+        blocker.write_text("not a directory", encoding="utf-8")
+        with (
+            patch("sccs.cli._codex_hooks_paths", return_value=(settings, hooks_path)),
+            patch("sccs.cli._codex_hooks_state_path", return_value=state_path),
+            patch("sccs.cli._make_codex_detector") as detector,
+        ):
+            detector.return_value.is_installed.return_value = True
+            result = CliRunner().invoke(cli, ["integrations", "codex", "export-hooks"])
+        assert result.exit_code == 1
+        output = _plain(result.output)
+        assert "Traceback" not in output
+        assert "hooks.json" in output
+
+    def test_true_no_op_reports_nothing_to_export(self, tmp_path):
+        """Finding 3: zero Claude hooks + no existing target must not claim a write."""
+        (tmp_path / ".codex").mkdir()
+        (tmp_path / ".claude").mkdir()
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        hooks_path = tmp_path / ".codex" / "hooks.json"
+        state_path = tmp_path / "state.yaml"
+        with (
+            patch("sccs.cli._codex_hooks_paths", return_value=(settings, hooks_path)),
+            patch("sccs.cli._codex_hooks_state_path", return_value=state_path),
+            patch("sccs.cli._make_codex_detector") as detector,
+        ):
+            detector.return_value.is_installed.return_value = True
+            result = CliRunner().invoke(cli, ["integrations", "codex", "export-hooks"])
+        assert result.exit_code == 0
+        assert "up to date" in _plain(result.output)
+        assert not hooks_path.exists()
+
     def test_export_all_does_not_touch_hooks(self):
         """export-all dispatches exactly skills, agents, commands — never hooks.
 

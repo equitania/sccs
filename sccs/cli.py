@@ -2805,7 +2805,10 @@ def codex_export_hooks(ctx: click.Context, dry_run: bool) -> None:
         console.print_success("Hooks are already up to date in Codex")
         return
 
-    write_hooks_plan(plan, hooks_path, state_manager, dry_run=dry_run)
+    write_error = write_hooks_plan(plan, hooks_path, state_manager, dry_run=dry_run)
+    if write_error is not None:
+        console.print_error(write_error)
+        sys.exit(1)
 
     if not dry_run:
         console.print_success(f"\nWrote {hooks_path}")

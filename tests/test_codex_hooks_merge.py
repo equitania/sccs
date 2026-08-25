@@ -230,6 +230,38 @@ class TestReaders:
         _, error = read_codex_hooks(path)
         assert error is not None
 
+    def test_event_value_that_is_an_object_instead_of_a_list_is_refused(self, tmp_path):
+        """Finding 1 (CRITICAL): a dict where a list belongs used to be silently
+
+        dropped by merge_hooks (`.get(event, []) or []` folds the truthy dict
+        to `[]`), erasing the user's entry on the next write with no warning.
+        The reader must refuse instead.
+        """
+        from sccs.integrations.codex_hooks import read_codex_hooks
+
+        path = tmp_path / "hooks.json"
+        path.write_text(
+            json.dumps({"hooks": {"PreToolUse": {"matcher": "Bash", "hooks": []}}}),
+            encoding="utf-8",
+        )
+        document, error = read_codex_hooks(path)
+        assert document == {}
+        assert error is not None and "PreToolUse" in error
+
+    def test_event_list_containing_a_non_object_element_is_refused(self, tmp_path):
+        """A bare string inside an event's list would silently vanish too —
+
+        merge_hooks' `if not isinstance(group, dict): continue` never
+        re-appends it to the preserved foreign groups.
+        """
+        from sccs.integrations.codex_hooks import read_codex_hooks
+
+        path = tmp_path / "hooks.json"
+        path.write_text(json.dumps({"hooks": {"PreToolUse": ["not-a-group"]}}), encoding="utf-8")
+        document, error = read_codex_hooks(path)
+        assert document == {}
+        assert error is not None and "PreToolUse[0]" in error
+
 
 class TestPlanAndWrite:
     def _settings(self, tmp_path, hooks):
@@ -328,3 +360,128 @@ class TestPlanAndWrite:
         plan, error = build_hooks_plan(settings, hooks_path, manager)
         assert plan is None
         assert error is not None
+
+    def test_malformed_event_shape_aborts_the_plan_and_writes_nothing(self, tmp_path):
+        """Finding 1 end-to-end: the exact reproduction from the review.
+
+        `{"PreToolUse": {"matcher": "Bash", "hooks": []}}` used to pass the
+        reader, get folded away by merge_hooks, and vanish from the file on
+        the next write with `plan.warnings == []`. Now the plan must abort and
+        the target file must be byte-for-byte untouched.
+        """
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan
+
+        settings = self._settings(tmp_path, MANAGED)
+        hooks_path = tmp_path / "hooks.json"
+        original_bytes = json.dumps({"hooks": {"PreToolUse": {"matcher": "Bash", "hooks": []}}}).encode("utf-8")
+        hooks_path.write_bytes(original_bytes)
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        plan, error = build_hooks_plan(settings, hooks_path, manager)
+        assert plan is None
+        assert error is not None and "PreToolUse" in error
+
+        # There is no plan to hand write_hooks_plan in this case — the CLI
+        # never calls it when build_hooks_plan errors (see codex_export_hooks).
+        # The invariant under test is that the abort happened before any write,
+        # so the file on disk is exactly what it was.
+        assert hooks_path.read_bytes() == original_bytes
+
+
+class TestWriteErrors:
+    """Finding 2: the write path must never leak a raw traceback."""
+
+    def _settings(self, tmp_path, hooks):
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+        return path
+
+    def test_unwritable_hooks_parent_returns_a_clean_error(self, tmp_path):
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan, write_hooks_plan
+
+        settings = self._settings(tmp_path, MANAGED)
+        # A regular file sitting where the hooks.json parent directory needs
+        # to be: mkdir(parents=True) raises FileExistsError (an OSError
+        # subclass), the same failure class a read-only ~/.codex/ produces.
+        blocker = tmp_path / "blocked"
+        blocker.write_text("not a directory", encoding="utf-8")
+        hooks_path = blocker / "hooks.json"
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        plan, error = build_hooks_plan(settings, hooks_path, manager)
+        assert error is None
+        assert plan is not None
+
+        write_error = write_hooks_plan(plan, hooks_path, manager)
+        assert write_error is not None
+        assert "hooks.json" in write_error
+        assert not hooks_path.exists()
+
+    def test_state_save_failure_still_reports_an_error(self, tmp_path):
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan, write_hooks_plan
+
+        settings = self._settings(tmp_path, MANAGED)
+        hooks_path = tmp_path / "hooks.json"
+        # Same trick for the state path's parent: the hooks file write
+        # succeeds first, then the state save hits the blocked parent.
+        blocker = tmp_path / "state_blocked"
+        blocker.write_text("not a directory", encoding="utf-8")
+        manager = CodexHooksStateManager(state_path=blocker / "state.yaml")
+
+        plan, error = build_hooks_plan(settings, hooks_path, manager)
+        assert error is None
+
+        write_error = write_hooks_plan(plan, hooks_path, manager)
+        assert write_error is not None
+        assert "ownership state" in write_error
+        # The hooks file itself was written successfully before the failure.
+        assert hooks_path.exists()
+        assert json.loads(hooks_path.read_text())["hooks"] == MANAGED
+
+
+class TestNoOpGuard:
+    """Finding 3: a genuine no-op must not write a file or claim success falsely."""
+
+    def _settings(self, tmp_path, hooks):
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+        return path
+
+    def test_zero_hooks_and_no_target_file_is_a_true_no_op(self, tmp_path):
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan, write_hooks_plan
+
+        settings = self._settings(tmp_path, {})
+        hooks_path = tmp_path / "hooks.json"
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        plan, error = build_hooks_plan(settings, hooks_path, manager)
+        assert error is None
+        assert plan.unchanged is True
+
+        write_error = write_hooks_plan(plan, hooks_path, manager)
+        assert write_error is None
+        assert not hooks_path.exists()
+
+    def test_removing_every_claude_hook_still_rewrites_an_existing_target(self, tmp_path):
+        """The self-correcting case must keep working: once a target file
+
+        exists with SCCS-managed content, removing every hook on the Claude
+        side must still strip that content out on the next export.
+        """
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan, write_hooks_plan
+
+        hooks_path = tmp_path / "hooks.json"
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        settings = self._settings(tmp_path, MANAGED)
+        plan, _ = build_hooks_plan(settings, hooks_path, manager)
+        write_hooks_plan(plan, hooks_path, manager)
+        assert hooks_path.exists()
+
+        settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        plan2, _ = build_hooks_plan(settings, hooks_path, manager)
+        assert plan2.unchanged is False
+        assert plan2.removed == ["PostToolUse / quality-gate.py"]
+
+        write_hooks_plan(plan2, hooks_path, manager)
+        assert json.loads(hooks_path.read_text())["hooks"] == {}

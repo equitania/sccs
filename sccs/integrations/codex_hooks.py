@@ -300,8 +300,22 @@ def read_codex_hooks(path: Path) -> tuple[dict, str | None]:
     if not isinstance(data, dict):
         return {}, f"{path} does not contain a JSON object — refusing to overwrite it"
     hooks = data.get("hooks")
-    if hooks is not None and not isinstance(hooks, dict):
-        return {}, f"{path}: 'hooks' is not an object — refusing to overwrite it"
+    if hooks is not None:
+        if not isinstance(hooks, dict):
+            return {}, f"{path}: 'hooks' is not an object — refusing to overwrite it"
+        # Every event must map to a list of group objects. Anything else — a
+        # dict where a list belongs, a list holding a non-dict element — is
+        # exactly the shape merge_hooks silently drops today (`.get(event, [])
+        # or []` folds a truthy dict to `[]`; `isinstance(group, dict)` skips
+        # a bare string). Refusing here is what turns that silent drop into a
+        # loud one, per the module's "never destroy what we did not write"
+        # invariant.
+        for event, groups in hooks.items():
+            if not isinstance(groups, list):
+                return {}, f"{path}: 'hooks.{event}' is not an array — refusing to overwrite it"
+            for index, group in enumerate(groups):
+                if not isinstance(group, dict):
+                    return {}, f"{path}: 'hooks.{event}[{index}]' is not an object — refusing to overwrite it"
     return data, None
 
 
@@ -340,6 +354,13 @@ def build_hooks_plan(
         current = ""
     updated = sorted(_label(key) for key in kept) if (rendered != current and kept) else []
 
+    # Nothing to export and nothing out there to touch: writing `{"hooks": {}}`
+    # into a file that never existed is a no-op dressed up as a change. Guarded
+    # on `state.keys` too so a genuine "user removed every hook" re-export
+    # (target file exists, or SCCS still owns entries somewhere) still falls
+    # through to a real write instead of silently stranding stale ownership.
+    no_op = not managed and not existing and not state.keys
+
     plan = CodexHooksPlan(
         added=added,
         updated=updated,
@@ -347,7 +368,7 @@ def build_hooks_plan(
         warnings=warnings,
         document=document,
         state=new_state,
-        unchanged=(rendered == current),
+        unchanged=(rendered == current) or no_op,
     )
     return plan, None
 
@@ -358,10 +379,31 @@ def write_hooks_plan(
     state_manager: CodexHooksStateManager,
     *,
     dry_run: bool = False,
-) -> None:
-    """Write the merged document and record the new ownership state."""
+) -> str | None:
+    """Write the merged document and record the new ownership state.
+
+    Returns an error message on failure, None on success. The two writes are
+    intentionally sequenced hooks-file-then-state: `atomic_write` makes the
+    hooks file update all-or-nothing, so if it fails nothing changed on disk.
+    If it succeeds but the state save then fails, the just-written entries are
+    simply not recorded as ours — the next plan treats them as a foreign group
+    (preserved, re-export suppressed with a warning) rather than duplicating
+    or losing anything. The reverse order risks the state claiming ownership
+    of entries that were never actually written, which can lead to real
+    duplicates on the next export.
+    """
     if dry_run or plan.unchanged:
-        return
-    hooks_path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(hooks_path, serialize_hooks_document(plan.document), mode=0o600)
-    state_manager.save(plan.state)
+        return None
+    try:
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(hooks_path, serialize_hooks_document(plan.document), mode=0o600)
+    except (OSError, ValueError) as exc:
+        return f"Cannot write {hooks_path}: {exc}"
+    try:
+        state_manager.save(plan.state)
+    except (OSError, ValueError) as exc:
+        return (
+            f"Wrote {hooks_path}, but could not save the ownership state: {exc} — "
+            "the next export will treat these entries as foreign until this is fixed"
+        )
+    return None
