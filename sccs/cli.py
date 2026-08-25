@@ -2580,6 +2580,27 @@ def _resolve_codex_model_maps() -> tuple[dict, dict]:
     return config.codex.effective_model_map, config.codex.effective_reasoning_effort_map
 
 
+def _codex_hooks_paths() -> tuple[Path, Path]:
+    """(claude settings.json, codex hooks.json), honouring codex.base_dir."""
+    from sccs.utils.paths import expand_path
+
+    settings = Path.home() / ".claude" / "settings.json"
+    try:
+        config = load_config()
+    except (FileNotFoundError, Exception):  # noqa: BLE001 — defensive fallback
+        return settings, Path.home() / ".codex" / "hooks.json"
+    base = getattr(config.codex, "base_dir", None)
+    codex_home = expand_path(base) if base else Path.home() / ".codex"
+    return settings, codex_home / "hooks.json"
+
+
+def _codex_hooks_state_path() -> Path:
+    """Where the hook-ownership state lives. Split out so tests can redirect it."""
+    from sccs.integrations.codex_hooks import DEFAULT_CODEX_HOOKS_STATE_PATH
+
+    return DEFAULT_CODEX_HOOKS_STATE_PATH
+
+
 @codex_group.command("status")
 @click.pass_context
 def codex_status(ctx: click.Context) -> None:
@@ -2615,6 +2636,20 @@ def codex_status(ctx: click.Context) -> None:
             else:
                 label = "[red]missing[/red]"
             console.print(f"  {gap.name} — {label}")
+
+    from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan
+
+    settings_path, hooks_path = _codex_hooks_paths()
+    plan, hooks_error = build_hooks_plan(
+        settings_path, hooks_path, CodexHooksStateManager(state_path=_codex_hooks_state_path())
+    )
+    console.print("\n[bold]Hooks:[/bold]")
+    if hooks_error is not None or plan is None:
+        console.print(f"  [red]{hooks_error}[/red]")
+    elif plan.unchanged:
+        console.print("  [dim]up to date[/dim]")
+    else:
+        console.print(f"  {len(plan.added)} to add · {len(plan.updated)} to update · {len(plan.removed)} to remove")
 
 
 def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
@@ -2708,11 +2743,74 @@ def codex_export_commands(ctx: click.Context, dry_run: bool, overwrite: bool, co
 @click.option("--overwrite/--no-overwrite", default=True, help="Update existing artefacts (default: yes)")
 @click.pass_context
 def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool) -> None:
-    """Export skills, agents and commands to Codex in one run."""
+    """Export skills, agents and commands to Codex in one run.
+
+    Hooks are NOT included — they execute code on every tool call, so they need
+    a deliberate `sccs integrations codex export-hooks`.
+    """
     console = ctx.obj["console"]
     for kind in ("skills", "agents", "commands"):
         console.print(f"[bold]Exporting {kind}…[/bold]")
         _run_codex_export(ctx, kind, dry_run, overwrite, ())
+
+
+@codex_group.command("export-hooks")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
+@click.pass_context
+def codex_export_hooks(ctx: click.Context, dry_run: bool) -> None:
+    """Export Claude hook entries into ~/.codex/hooks.json.
+
+    Merges into the file rather than owning it: entries SCCS did not write are
+    left alone. Deliberately NOT part of `export-all` — hooks execute code on
+    every tool call, so they stay behind their own command.
+    """
+    from sccs.integrations.codex_hooks import (
+        CodexHooksStateManager,
+        build_hooks_plan,
+        write_hooks_plan,
+    )
+
+    console = ctx.obj["console"]
+    detector = _make_codex_detector()
+    if not detector.is_installed():
+        console.print_error("Codex is not installed (~/.codex/ not found)")
+        sys.exit(1)
+
+    settings_path, hooks_path = _codex_hooks_paths()
+    state_manager = CodexHooksStateManager(state_path=_codex_hooks_state_path())
+
+    plan, error = build_hooks_plan(settings_path, hooks_path, state_manager)
+    if error is not None:
+        console.print_error(error)
+        sys.exit(1)
+    assert plan is not None  # error is None iff plan is not, per build_hooks_plan's contract
+
+    if dry_run:
+        console.print_info("Dry run — no files will be written\n")
+
+    for label, names, colour in (
+        ("Would add" if dry_run else "Added", plan.added, "green"),
+        ("Would update" if dry_run else "Updated", plan.updated, "yellow"),
+        ("Would remove" if dry_run else "Removed", plan.removed, "red"),
+    ):
+        for name in names:
+            console.print(f"  [{colour}]{label}:[/{colour}] {name}")
+
+    if plan.warnings:
+        console.print(f"\n[yellow]Warnings ({len(plan.warnings)}):[/yellow]")
+        for warning in plan.warnings:
+            console.print(f"  [yellow]![/yellow] {warning}")
+
+    if plan.unchanged:
+        console.print_success("Hooks are already up to date in Codex")
+        return
+
+    write_hooks_plan(plan, hooks_path, state_manager, dry_run=dry_run)
+
+    if not dry_run:
+        console.print_success(f"\nWrote {hooks_path}")
+        # Codex trusts hooks by hash, so a fresh export always needs review.
+        console.print_info("Run /hooks in Codex to review and trust the new entries — until then they do not run")
 
 
 # --- Doctor command group ---
