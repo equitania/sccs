@@ -165,10 +165,14 @@ class TestRealWorldSettings:
         assert any("Read" in w and "Grep" in w and "Glob" in w for w in matcher_warns)
 
     def test_quality_gate_survives_without_a_warning_about_itself(self):
-        converted, _ = convert_hooks_block(self.SETTINGS_HOOKS)
+        converted, warnings = convert_hooks_block(self.SETTINGS_HOOKS)
         group = converted["PostToolUse"][0]
         assert group["matcher"] == "Edit|Write"
         assert group["hooks"][0]["command"].endswith('quality-gate.py"')
+        # "Edit|Write" is fully reachable in Codex — no matcher warning should
+        # name either of its tokens.
+        matcher_warns = [w for w in warnings if "matcher names" in w]
+        assert not any("Edit" in w or "Write" in w for w in matcher_warns)
 
     def test_both_session_start_groups_survive(self):
         converted, _ = convert_hooks_block(self.SETTINGS_HOOKS)
