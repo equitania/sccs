@@ -180,3 +180,151 @@ class TestStateManager:
         path = tmp_path / ".codex_hooks_state.yaml"
         CodexHooksStateManager(state_path=path).save(CodexHooksState(keys={("Stop", "", "a.sh")}))
         assert path.stat().st_mode & 0o777 == 0o600
+
+
+class TestReaders:
+    def test_reads_the_hooks_block(self, tmp_path):
+        from sccs.integrations.codex_hooks import read_claude_hooks
+
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"hooks": MANAGED, "other": 1}), encoding="utf-8")
+        hooks, error = read_claude_hooks(path)
+        assert error is None
+        assert hooks == MANAGED
+
+    def test_missing_settings_file_is_an_error(self, tmp_path):
+        from sccs.integrations.codex_hooks import read_claude_hooks
+
+        hooks, error = read_claude_hooks(tmp_path / "nope.json")
+        assert hooks == {}
+        assert error is not None
+
+    def test_settings_without_hooks_block_is_empty_not_an_error(self, tmp_path):
+        from sccs.integrations.codex_hooks import read_claude_hooks
+
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+        hooks, error = read_claude_hooks(path)
+        assert (hooks, error) == ({}, None)
+
+    def test_missing_codex_file_is_an_empty_document(self, tmp_path):
+        from sccs.integrations.codex_hooks import read_codex_hooks
+
+        document, error = read_codex_hooks(tmp_path / "hooks.json")
+        assert (document, error) == ({}, None)
+
+    def test_codex_file_holding_an_array_is_refused(self, tmp_path):
+        from sccs.integrations.codex_hooks import read_codex_hooks
+
+        path = tmp_path / "hooks.json"
+        path.write_text("[1, 2, 3]", encoding="utf-8")
+        document, error = read_codex_hooks(path)
+        assert document == {}
+        assert error is not None and "object" in error
+
+    def test_codex_file_with_invalid_json_is_refused(self, tmp_path):
+        from sccs.integrations.codex_hooks import read_codex_hooks
+
+        path = tmp_path / "hooks.json"
+        path.write_text("{not json", encoding="utf-8")
+        _, error = read_codex_hooks(path)
+        assert error is not None
+
+
+class TestPlanAndWrite:
+    def _settings(self, tmp_path, hooks):
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+        return path
+
+    def test_plan_reports_additions(self, tmp_path):
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan
+
+        settings = self._settings(tmp_path, MANAGED)
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+        plan, error = build_hooks_plan(settings, tmp_path / "hooks.json", manager)
+        assert error is None
+        assert plan.added == ["PostToolUse / quality-gate.py"]
+        assert plan.removed == []
+        assert not plan.unchanged
+
+    def test_write_then_replan_is_unchanged(self, tmp_path):
+        from sccs.integrations.codex_hooks import (
+            CodexHooksStateManager,
+            build_hooks_plan,
+            write_hooks_plan,
+        )
+
+        settings = self._settings(tmp_path, MANAGED)
+        hooks_path = tmp_path / "hooks.json"
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        plan, _ = build_hooks_plan(settings, hooks_path, manager)
+        write_hooks_plan(plan, hooks_path, manager)
+        first_bytes = hooks_path.read_bytes()
+
+        plan2, _ = build_hooks_plan(settings, hooks_path, manager)
+        assert plan2.unchanged
+        write_hooks_plan(plan2, hooks_path, manager)
+        assert hooks_path.read_bytes() == first_bytes
+
+    def test_dry_run_writes_nothing(self, tmp_path):
+        from sccs.integrations.codex_hooks import (
+            CodexHooksStateManager,
+            build_hooks_plan,
+            write_hooks_plan,
+        )
+
+        settings = self._settings(tmp_path, MANAGED)
+        hooks_path = tmp_path / "hooks.json"
+        state_path = tmp_path / "state.yaml"
+        manager = CodexHooksStateManager(state_path=state_path)
+        plan, _ = build_hooks_plan(settings, hooks_path, manager)
+        write_hooks_plan(plan, hooks_path, manager, dry_run=True)
+        assert not hooks_path.exists()
+        assert not state_path.exists()
+
+    def test_removed_claude_hook_is_reported_and_written(self, tmp_path):
+        from sccs.integrations.codex_hooks import (
+            CodexHooksStateManager,
+            build_hooks_plan,
+            write_hooks_plan,
+        )
+
+        hooks_path = tmp_path / "hooks.json"
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+
+        settings = self._settings(tmp_path, MANAGED)
+        plan, _ = build_hooks_plan(settings, hooks_path, manager)
+        write_hooks_plan(plan, hooks_path, manager)
+
+        settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        plan2, _ = build_hooks_plan(settings, hooks_path, manager)
+        assert plan2.removed == ["PostToolUse / quality-gate.py"]
+        write_hooks_plan(plan2, hooks_path, manager)
+        assert json.loads(hooks_path.read_text())["hooks"] == {}
+
+    def test_hooks_file_is_written_0600(self, tmp_path):
+        from sccs.integrations.codex_hooks import (
+            CodexHooksStateManager,
+            build_hooks_plan,
+            write_hooks_plan,
+        )
+
+        settings = self._settings(tmp_path, MANAGED)
+        hooks_path = tmp_path / "hooks.json"
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+        plan, _ = build_hooks_plan(settings, hooks_path, manager)
+        write_hooks_plan(plan, hooks_path, manager)
+        assert hooks_path.stat().st_mode & 0o777 == 0o600
+
+    def test_malformed_target_aborts_the_plan(self, tmp_path):
+        from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan
+
+        settings = self._settings(tmp_path, MANAGED)
+        hooks_path = tmp_path / "hooks.json"
+        hooks_path.write_text("[]", encoding="utf-8")
+        manager = CodexHooksStateManager(state_path=tmp_path / "state.yaml")
+        plan, error = build_hooks_plan(settings, hooks_path, manager)
+        assert plan is None
+        assert error is not None

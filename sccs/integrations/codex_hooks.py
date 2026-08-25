@@ -235,3 +235,133 @@ def serialize_hooks_document(document: dict) -> str:
             groups.append(ordered_group)
         normalized[event] = groups
     return json.dumps({"hooks": normalized}, indent=2, ensure_ascii=False) + "\n"
+
+
+@dataclass
+class CodexHooksPlan:
+    """What an export would change in ~/.codex/hooks.json."""
+
+    added: list[str] = field(default_factory=list)
+    updated: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    document: dict = field(default_factory=dict)
+    state: CodexHooksState = field(default_factory=CodexHooksState)
+    unchanged: bool = False
+
+
+def _label(key: HookKey) -> str:
+    """Human-readable name for one hook entry: 'Event / command'."""
+    return f"{key[0]} / {key[2]}"
+
+
+def read_claude_hooks(settings_path: Path) -> tuple[dict, str | None]:
+    """Read the `hooks` block from ~/.claude/settings.json.
+
+    A file without a hooks block is not an error — there is simply nothing to
+    export. A missing or unreadable file is.
+    """
+    try:
+        raw = settings_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return {}, f"Cannot read {settings_path}: {exc}"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {}, f"{settings_path} is not valid JSON: {exc}"
+    if not isinstance(data, dict):
+        return {}, f"{settings_path} does not contain a JSON object"
+    hooks = data.get("hooks")
+    if hooks is None:
+        return {}, None
+    if not isinstance(hooks, dict):
+        return {}, f"{settings_path}: 'hooks' is not an object"
+    return hooks, None
+
+
+def read_codex_hooks(path: Path) -> tuple[dict, str | None]:
+    """Read ~/.codex/hooks.json. A missing file is an empty document.
+
+    Anything present but not shaped like a hooks document is an ERROR, never a
+    reason to overwrite: the file may hold work we cannot interpret.
+    """
+    if not path.exists():
+        return {}, None
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return {}, f"Cannot read {path}: {exc}"
+    if not raw.strip():
+        return {}, None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {}, f"{path} is not valid JSON: {exc} — refusing to overwrite it"
+    if not isinstance(data, dict):
+        return {}, f"{path} does not contain a JSON object — refusing to overwrite it"
+    hooks = data.get("hooks")
+    if hooks is not None and not isinstance(hooks, dict):
+        return {}, f"{path}: 'hooks' is not an object — refusing to overwrite it"
+    return data, None
+
+
+def build_hooks_plan(
+    settings_path: Path,
+    hooks_path: Path,
+    state_manager: CodexHooksStateManager,
+) -> tuple[CodexHooksPlan | None, str | None]:
+    """Work out what an export would change. Returns (plan, error)."""
+    from sccs.convert.claude_to_codex_hooks import convert_hooks_block
+
+    claude_hooks, error = read_claude_hooks(settings_path)
+    if error is not None:
+        return None, error
+
+    existing, error = read_codex_hooks(hooks_path)
+    if error is not None:
+        return None, error
+
+    managed, warnings = convert_hooks_block(claude_hooks)
+    state = state_manager.load()
+    document, new_state, merge_warnings = merge_hooks(existing, managed, state)
+    warnings.extend(merge_warnings)
+
+    added = sorted(_label(key) for key in new_state.keys - state.keys)
+    removed = sorted(_label(key) for key in state.keys - new_state.keys)
+    kept = new_state.keys & state.keys
+
+    # "Updated" is measured on bytes, not on keys: a key that survived can still
+    # differ in timeout or ordering, and that difference is what re-triggers the
+    # Codex trust review.
+    rendered = serialize_hooks_document(document)
+    try:
+        current = hooks_path.read_text(encoding="utf-8")
+    except OSError:
+        current = ""
+    updated = sorted(_label(key) for key in kept) if (rendered != current and kept) else []
+
+    plan = CodexHooksPlan(
+        added=added,
+        updated=updated,
+        removed=removed,
+        warnings=warnings,
+        document=document,
+        state=new_state,
+        unchanged=(rendered == current),
+    )
+    return plan, None
+
+
+def write_hooks_plan(
+    plan: CodexHooksPlan,
+    hooks_path: Path,
+    state_manager: CodexHooksStateManager,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Write the merged document and record the new ownership state."""
+    if dry_run or plan.unchanged:
+        return
+    hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(hooks_path, serialize_hooks_document(plan.document), mode=0o600)
+    state_manager.save(plan.state)
