@@ -34,7 +34,7 @@ from sccs.convert.claude_to_opencode import (
     convert_mcp_server,
     match_models,
 )
-from sccs.convert.frontmatter import parse_frontmatter, render_frontmatter
+from sccs.convert.frontmatter import parse_frontmatter_ex, render_frontmatter
 from sccs.doctor.runner import run_opencode_models
 from sccs.utils.paths import atomic_write, create_backup, ensure_dir, matches_any_pattern
 
@@ -341,15 +341,21 @@ def resolve_model_map(config=None, *, discover: bool = True, cc_tokens: list[str
 
 
 def _render_agent(cc_path: Path, model_map: dict[str, str] | None = None) -> tuple[str, list[str]]:
-    meta, body = parse_frontmatter(cc_path.read_text(encoding="utf-8"))
-    oc_meta, warnings = convert_agent_frontmatter(meta, model_map)
-    return render_frontmatter(oc_meta, body), warnings
+    # parse_frontmatter_ex, not parse_frontmatter: we render our own frontmatter
+    # below, so an unparsable block must be stripped rather than left in the
+    # body — otherwise the output carries two stacked frontmatter blocks.
+    parsed = parse_frontmatter_ex(cc_path.read_text(encoding="utf-8"))
+    oc_meta, warnings = convert_agent_frontmatter(parsed.metadata, model_map, parse_error=parsed.error)
+    return render_frontmatter(oc_meta, parsed.body), warnings
 
 
 def _render_command(cc_path: Path, model_map: dict[str, str] | None = None) -> tuple[str, list[str]]:
-    meta, body = parse_frontmatter(cc_path.read_text(encoding="utf-8"))
-    oc_meta, warnings = convert_command_frontmatter(meta, model_map)
-    return render_frontmatter(oc_meta, body), warnings
+    # See _render_agent for why this uses parse_frontmatter_ex.
+    parsed = parse_frontmatter_ex(cc_path.read_text(encoding="utf-8"))
+    oc_meta, warnings = convert_command_frontmatter(parsed.metadata, model_map)
+    if parsed.error is not None:
+        warnings.insert(0, f"{parsed.error} — no fields could be read from it")
+    return render_frontmatter(oc_meta, parsed.body), warnings
 
 
 # --------------------------------------------------------------------------- #

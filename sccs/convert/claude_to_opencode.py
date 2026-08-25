@@ -308,22 +308,30 @@ def tools_to_permission(allowed_tools: object) -> tuple[dict | None, list[str]]:
 # the name from the filename).
 
 
-def convert_agent_frontmatter(cc_meta: dict, model_map: dict[str, str] | None = None) -> tuple[dict, list[str]]:
+def convert_agent_frontmatter(
+    cc_meta: dict, model_map: dict[str, str] | None = None, *, parse_error: str | None = None
+) -> tuple[dict, list[str]]:
     """Transform Claude agent frontmatter into OpenCode agent frontmatter.
 
     Args:
-        cc_meta: the Claude agent frontmatter dict.
+        cc_meta: the Claude agent frontmatter dict (empty when unreadable).
         model_map: effective alias->'provider/model' map (see map_model).
+        parse_error: set when the source HAS a frontmatter block that failed to
+            parse. Suppresses the "has no description" warning, which is false
+            and misleading when the field exists but could not be read.
 
     Returns (oc_meta, warnings).
     """
     warnings: list[str] = []
     oc_meta: dict[str, object] = {}
 
+    if parse_error is not None:
+        warnings.append(f"{parse_error} — no fields could be read from it (description, model, tools)")
+
     description = cc_meta.get("description")
     if description:
         oc_meta["description"] = description
-    else:
+    elif parse_error is None:
         warnings.append("agent has no 'description' — OpenCode requires one for markdown agents")
 
     # Sub-agents are the closest analog to Claude Code agents.

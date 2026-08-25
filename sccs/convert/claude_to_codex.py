@@ -156,8 +156,18 @@ def convert_agent_frontmatter(
     cc_meta: dict,
     model_map: dict[str, str] | None = None,
     reasoning_map: dict[str, str] | None = None,
+    *,
+    parse_error: str | None = None,
 ) -> tuple[dict, list[str]]:
     """Transform Claude agent frontmatter into Codex agent TOML fields.
+
+    Args:
+        cc_meta: the parsed Claude frontmatter (empty dict when unreadable).
+        model_map / reasoning_map: see :func:`map_model`.
+        parse_error: set when the source HAS a frontmatter block that could not
+            be parsed. It changes what the missing-field warnings say: "has no
+            description" is a lie when the description exists and merely could
+            not be read, and it sends the user looking in the wrong place.
 
     Returns (codex_meta, warnings). ``codex_meta`` holds the optional scalar
     fields (description, model, model_reasoning_effort, sandbox_mode); the
@@ -167,10 +177,16 @@ def convert_agent_frontmatter(
     warnings: list[str] = []
     codex_meta: dict[str, str] = {}
 
+    if parse_error is not None:
+        warnings.append(
+            f"{parse_error} — no fields could be read, so description/model/tools are all "
+            "unavailable and a placeholder description is emitted"
+        )
+
     description = cc_meta.get("description")
     if description:
         codex_meta["description"] = str(description)
-    else:
+    elif parse_error is None:
         warnings.append("agent has no 'description' — a placeholder is emitted (Codex requires one)")
 
     model, effort, model_warnings = map_model(cc_meta.get("model"), model_map, reasoning_map)
@@ -189,7 +205,9 @@ def convert_agent_frontmatter(
     return codex_meta, warnings
 
 
-def wrap_command_as_skill(name: str, cc_meta: dict, body: str) -> tuple[dict, str, list[str]]:
+def wrap_command_as_skill(
+    name: str, cc_meta: dict, body: str, *, parse_error: str | None = None
+) -> tuple[dict, str, list[str]]:
     """Wrap a Claude command as a Codex skill (agentskills.io SKILL.md).
 
     Codex custom prompts are deprecated; the official migration target for
@@ -201,10 +219,14 @@ def wrap_command_as_skill(name: str, cc_meta: dict, body: str) -> tuple[dict, st
     """
     warnings: list[str] = []
 
+    if parse_error is not None:
+        warnings.append(f"{parse_error} — no fields could be read, so a placeholder description is emitted")
+
     description = cc_meta.get("description")
     if not description:
         description = f"Claude Code command '{name}'"
-        warnings.append("command has no 'description' — a placeholder is emitted (skills require one)")
+        if parse_error is None:
+            warnings.append("command has no 'description' — a placeholder is emitted (skills require one)")
 
     skill_meta = {"name": name, "description": str(description)}
 

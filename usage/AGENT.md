@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.58.3  ·  **Python:** ≥3.10
+- **Version:** 2.58.4  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -179,6 +179,8 @@ against the installed CLI; override via `codex.model_map`. A name passed to `-s`
 does not exist in `~/.claude/` fails with `No such agent/skill/command` and exit 1 (a name that is
 merely already in sync still succeeds). Name collisions: a real skill always wins over a same-named
 command (skipped with a warning). `gsd-*` excluded by default. No MCP merge / no CLAUDE.md→AGENTS.md (v1).
+A source file whose frontmatter is not valid YAML exports with the block stripped and a warning naming
+the file line/column (v2.58.4); the usual cause is `argument-hint: [a] [b...]` — quote it to fix.
 
 ### Convert Fish config to PowerShell or zsh; regenerate hub README
 ```bash

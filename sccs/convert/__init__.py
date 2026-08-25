@@ -15,7 +15,12 @@ from sccs.convert.claude_to_opencode import (
 )
 from sccs.convert.fish_to_pwsh import ConversionReport, FishToPwshConverter
 from sccs.convert.fish_to_zsh import FishToZshConverter, ZshConversionReport
-from sccs.convert.frontmatter import parse_frontmatter, render_frontmatter
+from sccs.convert.frontmatter import (
+    FrontmatterParse,
+    parse_frontmatter,
+    parse_frontmatter_ex,
+    render_frontmatter,
+)
 
 __all__ = [
     "DEFAULT_OPENCODE_MODEL_MAP",
@@ -30,7 +35,9 @@ __all__ = [
     "convert_mcp_server",
     "map_model",
     "match_models",
+    "FrontmatterParse",
     "parse_frontmatter",
+    "parse_frontmatter_ex",
     "render_frontmatter",
     "tools_to_permission",
 ]

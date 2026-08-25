@@ -61,6 +61,8 @@ Ob die Zuordnung noch zur installierten CLI passt, verrät der lokale Modell-Cac
 python3 -c "import json,pathlib;print([m['slug'] for m in json.loads(pathlib.Path.home().joinpath('.codex/models_cache.json').read_text())['models']])"
 ```
 
+**Unlesbares Frontmatter** *(seit v2.58.4)*: Lässt sich der Frontmatter-Block einer Quelldatei nicht als YAML lesen, wird er beim Export **abgetrennt** (statt im Body zu landen, wo er ein zweites Frontmatter erzeugt hätte) und die Warnung nennt Ursache und Fundstelle: `invalid YAML in frontmatter: expected <block end>, but found '[' (line 3, column 29)` — Zeilen- und Spaltenangabe beziehen sich auf die **Datei**. Häufigster Auslöser ist `argument-hint: [a] [b...]`: das ist Claude Codes dokumentierte Syntax, aber kein gültiges YAML. Fix an der Quelle: in Anführungszeichen setzen — `argument-hint: "[a] [b...]"` parst sauber und Claude Code zeigt es unverändert an.
+
 **Kollisionen (Commands)**: Commands landen im selben Skill-Baum wie Skills. Ein Command, dessen Name mit einem Claude-Skill kollidiert oder dessen Ziel-Verzeichnis ein echter Skill ist (trägt mehr als die verpackte `SKILL.md`), wird **nie geschrieben** — der Skill gewinnt, der Command wird mit Warnung übersprungen. Bereits verpackte Commands (Verzeichnis mit genau einer `SKILL.md`) bleiben re-exportierbar.
 
 **Plugin-Artefakte werden nicht exportiert**: Doctor-gemanagte Skills/Agents/Commands (`gsd-*`, `playwright-cli`) fallen per Default aus `status` und den Export-Befehlen raus. Eigene Patterns ergänzt du über `codex.exclude` (Glob, gegen den Basename). Ein explizites `-s`/`-a`/`-c` umgeht den Exclude. Ein Name, den es in `~/.claude/` gar nicht gibt, bricht seit v2.58.3 mit `No such agent/skill/command` und Exit-Code 1 ab — ein Tippfehler sieht damit nicht mehr wie ein erfolgreicher Lauf ohne Änderungen aus.
@@ -156,6 +158,8 @@ To check the map against the installed CLI, read the model catalogue Codex cache
 ```fish
 python3 -c "import json,pathlib;print([m['slug'] for m in json.loads(pathlib.Path.home().joinpath('.codex/models_cache.json').read_text())['models']])"
 ```
+
+**Unreadable frontmatter** *(since v2.58.4)*: when a source file's frontmatter block does not parse as YAML, the block is **stripped** on export (rather than left in the body, where it would produce a second frontmatter block) and the warning names cause and position: `invalid YAML in frontmatter: expected <block end>, but found '[' (line 3, column 29)` — line and column refer to the **file**. The most common trigger is `argument-hint: [a] [b...]`: that is Claude Code's documented syntax, but not valid YAML. Fix it at the source by quoting — `argument-hint: "[a] [b...]"` parses cleanly and Claude Code displays it unchanged.
 
 **Collisions (commands)**: commands land in the same skill tree as skills. A command whose name collides with a Claude skill, or whose target directory is a real skill (carries more than the wrapped `SKILL.md`), is **never written** — the skill wins and the command is skipped with a warning. Previously wrapped commands (a directory holding exactly one `SKILL.md`) stay re-exportable.
 

@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 2.58.4 (25.08.2026)
+
+### Fixed (frontmatter parsing)
+
+- **A command whose frontmatter did not parse was exported with TWO stacked frontmatter blocks, and the warning blamed the wrong thing.** Found by the first real Codex export run. `~/.claude/commands/s.md` carries `argument-hint: [skill-name] [optional-additional-skills...]` — Claude Code's *documented* bracket syntax for argument hints, and not valid YAML (two flow sequences on one line). `yaml.safe_load` raises, `parse_frontmatter` caught it and returned the **entire document, fences included**, as the body. The command wrapper then prepended its own header, so `~/.agents/skills/s/SKILL.md` ended up with four `---` lines. Worse, every field was lost with it: the export reported "command has no 'description'" about a file that plainly has one, sending anyone who reads that warning to look in the wrong place.
+- **The fix is a second function, not a changed contract.** `parse_frontmatter_ex()` returns `(metadata, body, error)`: when a *terminated* block fails to parse, the block is stripped from the body and `error` says why — the structure is unambiguous in that case (both fences present), only the content is unreadable. The Codex and OpenCode converters, which emit their own frontmatter, now use it. `parse_frontmatter()` keeps its old behaviour on purpose: `doctor/scope_patch.py` uses parse→render as a **pair**, and `render_frontmatter({}, body)` returns the body unchanged — so a `gsd-*` prompt with unparsable frontmatter keeps that frontmatter through a scope patch. Changing the shared function would have made the doctor silently delete frontmatter from externally-delivered prompt files.
+- **Missing-field warnings no longer lie.** `convert_agent_frontmatter` and `wrap_command_as_skill` (Codex) and `convert_agent_frontmatter` (OpenCode) take a `parse_error` argument. When set, the "has no 'description'" warning is replaced by one naming the actual cause: `invalid YAML in frontmatter: expected <block end>, but found '[' (line 3, column 29)`. The position is reported in **file** coordinates, not block-relative ones, so it matches what the editor shows — a block-relative number would be one line off, every time.
+- **A Markdown document opening with a horizontal rule is still never touched.** `---\n# Heading\n---` parses as a YAML comment, i.e. `None` rather than an error, and comes back unchanged. Only a genuine `YAMLError` strips the block — stripping the non-mapping case would delete authored content.
+
+### Tests
+
+15 new tests in the new `tests/test_frontmatter.py` — the two contracts side by side, the file-coordinate line number, the horizontal-rule guard, a scope-patch-style round trip proving frontmatter survives, and end-to-end checks that the Codex and OpenCode renderers emit exactly one block. Full suite: 1510 passed.
+
+### Note
+
+If one of your own commands or agents trips this, the source-side fix is to quote the value: `argument-hint: "[skill-name] [optional-additional-skills...]"`. Claude Code displays it unchanged, and it parses as YAML.
+
 ## Version 2.58.3 (25.08.2026)
 
 ### Fixed (Codex export)

@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from sccs.convert.claude_to_codex import convert_agent_frontmatter, wrap_command_as_skill
-from sccs.convert.frontmatter import parse_frontmatter, render_frontmatter
+from sccs.convert.frontmatter import parse_frontmatter_ex, render_frontmatter
 from sccs.convert.toml_write import render_codex_agent_toml
 from sccs.utils.hashing import quick_compare
 from sccs.utils.paths import atomic_write, ensure_dir, matches_any_pattern, safe_copy
@@ -355,9 +355,17 @@ def _render_agent(
     model_map: dict[str, str] | None = None,
     reasoning_map: dict[str, str] | None = None,
 ) -> tuple[str, list[str]]:
-    """Render a CC agent Markdown file as a Codex agent TOML document."""
-    meta, body = parse_frontmatter(cc_path.read_text(encoding="utf-8"))
-    codex_meta, warnings = convert_agent_frontmatter(meta, model_map, reasoning_map)
+    """Render a CC agent Markdown file as a Codex agent TOML document.
+
+    Uses ``parse_frontmatter_ex`` rather than ``parse_frontmatter``: we emit our
+    OWN frontmatter/TOML header, so a block that failed to parse must not be
+    left in the body (that produced documents with two stacked headers).
+    """
+    parsed = parse_frontmatter_ex(cc_path.read_text(encoding="utf-8"))
+    body = parsed.body
+    codex_meta, warnings = convert_agent_frontmatter(
+        parsed.metadata, model_map, reasoning_map, parse_error=parsed.error
+    )
     name = cc_path.stem
     description = codex_meta.get("description") or f"Claude Code agent '{name}'"
     document = render_codex_agent_toml(
@@ -372,9 +380,12 @@ def _render_agent(
 
 
 def _render_command(name: str, cc_path: Path) -> tuple[str, list[str]]:
-    """Render a CC command Markdown file as a wrapped Codex SKILL.md."""
-    meta, body = parse_frontmatter(cc_path.read_text(encoding="utf-8"))
-    skill_meta, body, warnings = wrap_command_as_skill(name, meta, body)
+    """Render a CC command Markdown file as a wrapped Codex SKILL.md.
+
+    See ``_render_agent`` for why this uses ``parse_frontmatter_ex``.
+    """
+    parsed = parse_frontmatter_ex(cc_path.read_text(encoding="utf-8"))
+    skill_meta, body, warnings = wrap_command_as_skill(name, parsed.metadata, parsed.body, parse_error=parsed.error)
     return render_frontmatter(skill_meta, body), warnings
 
 
