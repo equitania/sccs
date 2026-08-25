@@ -117,13 +117,16 @@ class TestExportHooks:
         assert result.exit_code == 1
         assert hooks_path.read_text() == "[]"
 
-    def test_export_all_does_not_touch_hooks(self, tmp_path):
-        """Hooks execute code — they stay behind their own command."""
-        settings, hooks_path, state_path = _env(tmp_path)
-        with (
-            patch("sccs.cli._codex_hooks_paths", return_value=(settings, hooks_path)),
-            patch("sccs.cli._make_codex_detector") as detector,
-        ):
-            detector.return_value.is_installed.return_value = False
+    def test_export_all_does_not_touch_hooks(self):
+        """export-all dispatches exactly skills, agents, commands — never hooks.
+
+        Asserts on the dispatched `kind` values directly rather than on a
+        hooks-file side effect: with `is_installed=False` the loop's first
+        `_run_codex_export` call would `sys.exit(1)` before a second kind is
+        ever reached, so a filesystem assertion here would pass even if
+        "hooks" were added to the loop.
+        """
+        with patch("sccs.cli._run_codex_export") as run_export:
             CliRunner().invoke(cli, ["integrations", "codex", "export-all"])
-        assert not hooks_path.exists()
+        kinds = [call.args[1] for call in run_export.call_args_list]
+        assert kinds == ["skills", "agents", "commands"]
