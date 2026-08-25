@@ -146,14 +146,51 @@ def merge_hooks(
                 continue  # replaced by the current conversion below
             foreign.append(group)
 
-        groups = foreign + list(managed.get(event, []))
+        # Keys already present in a foreign group at this event: the group was
+        # hand-edited (e.g. the user added a second handler to a group we used
+        # to own outright), which is why _is_managed above no longer classifies
+        # it as ours. Re-appending the managed copy of such a key would fire it
+        # twice, deterministically, forever — so it must be suppressed here
+        # rather than appended below. A key found this way is not vanished
+        # either, so it must not trigger the "no longer found" warning.
+        foreign_keys: set[HookKey] = set()
+        for group in foreign:
+            foreign_keys.update(group_keys(event, group))
+        seen_state_keys.update(state.keys & foreign_keys)
+
+        managed_groups: list[dict] = []
+        for group in managed.get(event, []):
+            handlers = group.get("hooks") if isinstance(group, dict) else None
+            if not isinstance(handlers, list):
+                managed_groups.append(group)
+                continue
+            matcher = group.get("matcher")
+            matcher_str = matcher if isinstance(matcher, str) else ""
+            kept_handlers = []
+            for handler in handlers:
+                handler_key = None
+                if isinstance(handler, dict) and isinstance(handler.get("command"), str):
+                    handler_key = (event, matcher_str, handler["command"])
+                if handler_key is not None and handler_key in foreign_keys:
+                    warnings.append(
+                        f"managed hook not re-exported: {event} / {handler['command']} — found inside a "
+                        "group that was edited inside Codex, left as is to avoid duplicating it"
+                    )
+                    continue
+                kept_handlers.append(handler)
+            if kept_handlers:
+                managed_groups.append({**group, "hooks": kept_handlers})
+
+        groups = foreign + managed_groups
         if groups:
             merged[event] = groups
 
     # A key we own but cannot find in the target: it is no longer there under the
     # identity we tracked it by. This only reports the fact — it does not say
     # whether the entry is about to be re-created, since that depends on whether
-    # the source (managed) still has it too.
+    # the source (managed) still has it too. Keys found inside a foreign group
+    # (see above) are excluded via seen_state_keys — they are present, just no
+    # longer exclusively ours.
     for key in sorted(state.keys - seen_state_keys):
         warnings.append(
             f"previously exported hook no longer found in hooks.json: {key[0]} / {key[2]} — "

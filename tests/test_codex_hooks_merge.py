@@ -100,6 +100,32 @@ class TestMerge:
         document, _, _ = merge_hooks({}, {}, CodexHooksState())
         assert document == {"hooks": {}}
 
+    def test_hand_extended_group_does_not_duplicate_the_owned_handler(self):
+        # Regression: state owns backup.sh alone. The user hand-adds a second
+        # handler to that same group inside Codex, which makes the group read
+        # as foreign (mixed ownership). The managed copy of backup.sh must not
+        # be re-appended as a second group, or it fires twice on every run.
+        managed = {"PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "backup.sh"}]}]}
+        state = CodexHooksState(keys={("PostToolUse", "Bash", "backup.sh")})
+        hand_extended = {
+            "matcher": "Bash",
+            "hooks": [
+                {"type": "command", "command": "backup.sh"},
+                {"type": "command", "command": "user-added.sh"},
+            ],
+        }
+        existing = {"hooks": {"PostToolUse": [hand_extended]}}
+
+        document, _, warnings = merge_hooks(existing, managed, state)
+        groups = document["hooks"]["PostToolUse"]
+
+        commands = [handler["command"] for group in groups for handler in group["hooks"]]
+        assert commands.count("backup.sh") == 1
+        assert commands.count("user-added.sh") == 1
+        assert groups == [hand_extended]  # the user's group survives untouched
+        assert any("backup.sh" in w for w in warnings)
+        assert not any("no longer found" in w for w in warnings)
+
 
 class TestSerialization:
     def test_output_is_valid_json_with_trailing_newline(self):
