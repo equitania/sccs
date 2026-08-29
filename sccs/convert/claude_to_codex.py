@@ -65,6 +65,18 @@ DEFAULT_CODEX_REASONING_EFFORT_MAP: dict[str, str] = {
     "haiku": "low",
 }
 
+_VALID_REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+
+
+def validate_reasoning_effort_map(reasoning_map: dict[str, str]) -> list[str]:
+    """Return actionable errors for values Codex cannot interpret."""
+    return [
+        f"{alias}: invalid reasoning effort '{effort}'"
+        for alias, effort in sorted(reasoning_map.items())
+        if effort not in _VALID_REASONING_EFFORTS
+    ]
+
+
 # CC permits `model: inherit` (use the parent/main model). Codex has no such
 # token — omitting `model` makes the agent fall back to the configured default,
 # which is the closest equivalent.
@@ -134,8 +146,10 @@ def tools_to_sandbox_mode(allowed_tools: object) -> tuple[str | None, list[str]]
     Codex has no per-tool permission object — access is governed by
     `sandbox_mode` (read-only | workspace-write | danger-full-access) and the
     approval policy. The only faithful mapping is: an allowlist containing
-    exclusively read-only tools -> `sandbox_mode = "read-only"`. Anything else
-    is dropped with ONE collected warning (Codex's own default applies).
+    exclusively read-only tools -> `sandbox_mode = "read-only"`. An allowlist
+    that permits any mutation maps to `workspace-write`, the least permissive
+    Codex sandbox that can still write. This intentionally does not inherit a
+    potentially broader global Codex default such as danger-full-access.
 
     Returns (sandbox_mode_or_None, warnings).
     """
@@ -146,9 +160,9 @@ def tools_to_sandbox_mode(allowed_tools: object) -> tuple[str | None, list[str]]
     if all(t.lower() in _READ_ONLY_TOOLS for t in tokens):
         return "read-only", []
 
-    return None, [
-        "Claude 'tools' allowlist has no Codex equivalent beyond read-only — dropped "
-        "(Codex governs access via sandbox_mode/approval_policy)"
+    return "workspace-write", [
+        "Claude 'tools' allowlist is only approximately represented as workspace-write — "
+        "Codex has no per-tool equivalent; review approval_policy separately"
     ]
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sccs.integrations.codex import (
     CodexDetector,
+    CodexExportState,
     convert_agents_to_codex,
     convert_commands_to_codex,
     export_skills_to_codex,
@@ -99,6 +100,38 @@ class TestSkillExport:
         assert result.created == ["two"]
         assert not (detector.skills_dir / "one").exists()
 
+    def test_foreign_target_is_a_conflict_not_an_automatic_update(self, tmp_path):
+        detector = _detector(tmp_path)
+        _write_skill(detector, "my-skill")
+        target = detector.skills_dir / "my-skill"
+        target.mkdir()
+        (target / "SKILL.md").write_text("foreign", encoding="utf-8")
+
+        gaps = detector.get_skill_gaps(state=CodexExportState())
+        assert gaps[0].collision
+        assert "not managed by SCCS" in gaps[0].warnings[0]
+
+    def test_owned_target_can_be_updated(self, tmp_path):
+        detector = _detector(tmp_path)
+        source = _write_skill(detector, "my-skill")
+        state = CodexExportState()
+        export_skills_to_codex(detector.get_skill_gaps(state=state), state=state)
+
+        (source / "SKILL.md").write_text("changed", encoding="utf-8")
+        gaps = detector.get_skill_gaps(state=state)
+        assert len(gaps) == 1
+        assert not gaps[0].collision
+
+    def test_symlink_inside_source_skill_is_blocked(self, tmp_path):
+        detector = _detector(tmp_path)
+        skill = detector._cc_skills_dir / "linked"
+        skill.mkdir()
+        (skill / "SKILL.md").symlink_to(tmp_path / "outside.md")
+
+        gaps = detector.get_skill_gaps()
+        assert gaps[0].blocked
+        assert "symlink" in gaps[0].warnings[0]
+
 
 class TestAgentExport:
     def test_agent_lands_as_toml(self, tmp_path):
@@ -128,6 +161,15 @@ class TestAgentExport:
         result = convert_agents_to_codex(detector.get_agent_gaps())
         assert "bare" in result.warnings
         assert any("description" in w for w in result.warnings["bare"])
+
+    def test_non_utf8_agent_is_reported_not_raised(self, tmp_path):
+        detector = _detector(tmp_path)
+        (detector._cc_agents_dir / "broken.md").write_bytes(b"\xff")
+
+        gaps = detector.get_agent_gaps()
+        assert gaps[0].blocked
+        result = convert_agents_to_codex(gaps)
+        assert result.skipped == ["broken"]
 
 
 class TestCommandExport:

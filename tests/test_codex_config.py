@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from sccs.config.loader import _merge_with_defaults
 from sccs.config.schema import CodexConfig, SccsConfig
 from sccs.convert.claude_to_codex import (
@@ -32,6 +34,10 @@ class TestCodexConfig:
     def test_reasoning_effort_override(self):
         config = CodexConfig(reasoning_effort_map={"sonnet": "xhigh"})
         assert config.effective_reasoning_effort_map == {"sonnet": "xhigh"}
+
+    def test_invalid_reasoning_effort_is_rejected_by_config(self):
+        with pytest.raises(ValueError, match="invalid reasoning effort"):
+            CodexConfig(reasoning_effort_map={"sonnet": "turbo"})
 
     def test_sccs_config_default_factory(self):
         config = SccsConfig.model_validate({"repository": {"path": "/tmp/repo"}})

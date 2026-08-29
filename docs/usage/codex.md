@@ -49,9 +49,26 @@ sccs integrations codex export-commands -c finalize
 sccs integrations codex export-all
 ```
 
-**Agent-Konvertierung**: Der Markdown-Body wird zu `developer_instructions`, `description` wird übernommen, das Claude-Modell-Alias (`sonnet`/`opus`/`haiku`) wird auf ein Codex-Modell plus `model_reasoning_effort` gemappt. Eine `tools:`-Allowlist, die nur Lese-Tools enthält, wird zu `sandbox_mode = "read-only"`; alles andere wird mit EINER Warnung verworfen (Codex steuert Zugriff über `sandbox_mode`/`approval_policy`, nicht pro Tool).
+Codex zeigt Skills nicht als Claude-ähnliche Slash-Command-Liste. Nach dem
+Export werden sie kontextabhängig aktiviert; einen bestimmten Skill forderst du
+explizit mit `$<skill-name>` an. Starte eine neue Codex-Sitzung, falls deren
+Skill-Liste bereits gecacht ist.
 
-**Modell-Mapping ist statisch**: Codex hat — anders als OpenCode — keinen Discovery-Befehl. Die mitgelieferte Zuordnung (`opus`/`sonnet` → `gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`, Effort `high`/`medium`/`low`) veraltet mit der Zeit; korrigiere sie über `codex.model_map`/`codex.extra_model_map` in der Config. Unbekannte Werte werden mit Warnung unverändert durchgereicht.
+**Sichere Updates:** SCCS merkt sich die Ziele, die es selbst erzeugt hat, in
+`~/.config/sccs/.codex_export_state.yaml`. Ein bereits vorhandenes oder in
+Codex manuell geändertes Ziel wird als Konflikt übersprungen, nicht ersetzt.
+Updates SCCS-verwalteter Ziele sind ebenfalls nur mit `--overwrite` (oder
+`--force`) aktiv; der Default erzeugt neue Artefakte, überschreibt aber nichts. Skill-Verzeichnisse
+mit Symlinks werden nicht exportiert, weil Links außerhalb des Quelldirectory
+in Codex unzuverlässig oder kaputt wären.
+
+**Agent-Konvertierung**: Der Markdown-Body wird zu `developer_instructions`, `description` wird übernommen, das Claude-Modell-Alias (`sonnet`/`opus`/`haiku`) wird auf ein Codex-Modell plus `model_reasoning_effort` gemappt. Eine `tools:`-Allowlist, die nur Lese-Tools enthält, wird zu `sandbox_mode = "read-only"`; jede andere Allowlist wird konservativ zu `workspace-write` und mit einer Warnung markiert. Codex hat keine per-Tool-Entsprechung — prüfe daher die gewünschte `approval_policy` separat.
+
+**Modell-Mapping wird vor Agentenexport geprüft**: Die mitgelieferte Zuordnung
+(`opus`/`sonnet` → `gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`, Effort
+`high`/`medium`/`low`) wird gegen `~/.codex/models_cache.json` validiert, wenn
+der Cache vorhanden ist. Ein nicht vorhandener Modell-Slug bricht den
+Agentenexport ab; ohne Cache meldet SCCS die fehlende Prüfung ausdrücklich.
 
 Die Zuordnung folgt einer Regel: Alle drei Aliase zeigen auf die **aktuelle Top-Modellfamilie** und unterscheiden sich nur im `model_reasoning_effort` — ein Claude-Tier ist ein Tiefen-Signal, und genau das drückt Codex über den Effort aus. Ein Alias wird nie auf das kleine Modell einer älteren Generation gemappt.
 
@@ -189,9 +206,25 @@ sccs integrations codex export-commands -c finalize
 sccs integrations codex export-all
 ```
 
-**Agent conversion**: the Markdown body becomes `developer_instructions`, `description` carries over, the Claude model alias (`sonnet`/`opus`/`haiku`) is mapped to a Codex model plus `model_reasoning_effort`. A `tools:` allowlist containing only read-only tools becomes `sandbox_mode = "read-only"`; anything else is dropped with ONE warning (Codex governs access via `sandbox_mode`/`approval_policy`, not per tool).
+Codex does not show skills as a Claude-style slash-command list. After export,
+skills activate contextually; request a specific one explicitly with
+`$<skill-name>`. Start a new Codex session if its skill list has already been
+cached.
 
-**Model mapping is static**: unlike OpenCode, Codex has no discovery command. The bundled map (`opus`/`sonnet` → `gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`, effort `high`/`medium`/`low`) will age; correct it via `codex.model_map`/`codex.extra_model_map` in the config. Unknown values pass through unchanged with a warning.
+**Safe updates:** SCCS records targets it created in
+`~/.config/sccs/.codex_export_state.yaml`. A pre-existing or manually edited
+Codex target is treated as a conflict and skipped, never replaced. Updates to
+SCCS-managed targets also require `--overwrite` (or `--force`); by default only new artefacts
+are created. Skill directories containing symlinks are not exported because
+links outside the source directory would be unreliable or broken in Codex.
+
+**Agent conversion**: the Markdown body becomes `developer_instructions`, `description` carries over, the Claude model alias (`sonnet`/`opus`/`haiku`) is mapped to a Codex model plus `model_reasoning_effort`. A `tools:` allowlist containing only read-only tools becomes `sandbox_mode = "read-only"`; every other allowlist is conservatively mapped to `workspace-write` and marked with a warning. Codex has no per-tool equivalent, so review the desired `approval_policy` separately.
+
+**Model mapping is checked before agent export**: the bundled map
+(`opus`/`sonnet` → `gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`, effort
+`high`/`medium`/`low`) is validated against `~/.codex/models_cache.json` when
+the cache exists. A missing model slug stops the agent export; SCCS explicitly
+warns when no cache is available for validation.
 
 The map follows one rule: all three aliases point at the **current top model family** and differ only in `model_reasoning_effort` — a Claude tier is a depth signal, and effort is exactly how Codex expresses depth. An alias is never mapped onto an older generation's small model.
 

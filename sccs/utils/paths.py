@@ -133,18 +133,29 @@ def safe_copy(
 
     if source.is_dir():
         temp_dest = dest.with_suffix(temp_suffix)
+        displaced_dest = dest.with_suffix(f".previous.{os.getpid()}")
         try:
             if temp_dest.exists():
                 shutil.rmtree(temp_dest)
+            if displaced_dest.exists():
+                shutil.rmtree(displaced_dest)
             # symlinks=True preserves nested symlinks as links rather than dereferencing them,
             # so a hostile link inside a skill directory can't leak target file contents.
             shutil.copytree(source, temp_dest, symlinks=True)
-            # Remove existing destination if it exists
+            # A non-empty directory cannot be atomically replaced on every
+            # platform. Move it aside first, then restore it if activating the
+            # staged copy fails. This avoids the former delete-then-replace
+            # data-loss window.
             if dest.exists():
-                shutil.rmtree(dest)
-            # os.replace is atomic and overwrites on POSIX *and* Windows,
-            # whereas Path.rename fails under Windows when dest exists.
-            os.replace(temp_dest, dest)
+                os.replace(dest, displaced_dest)
+            try:
+                os.replace(temp_dest, dest)
+            except OSError:
+                if displaced_dest.exists() and not dest.exists():
+                    os.replace(displaced_dest, dest)
+                raise
+            if displaced_dest.exists():
+                shutil.rmtree(displaced_dest)
         except (FileExistsError, PermissionError, OSError):
             # Cleanup on failure
             if temp_dest.exists():

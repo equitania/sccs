@@ -82,6 +82,7 @@ class TestCodexGroup:
         output = _plain(result.output)
         assert "Dry run" in output
         assert "Would create" in output
+        assert "$<skill-name>" in output
         assert not (dirs["skills"] / "my-skill").exists()
 
 

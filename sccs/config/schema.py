@@ -287,6 +287,18 @@ class CodexConfig(BaseModel):
         ),
     )
 
+    @field_validator("reasoning_effort_map")
+    @classmethod
+    def validate_reasoning_efforts(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value is None:
+            return value
+        from sccs.convert.claude_to_codex import validate_reasoning_effort_map
+
+        errors = validate_reasoning_effort_map(value)
+        if errors:
+            raise ValueError("; ".join(errors))
+        return value
+
     @property
     def effective_model_map(self) -> dict[str, str]:
         """Bundled default (or full override) merged with extra_model_map."""

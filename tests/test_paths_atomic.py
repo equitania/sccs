@@ -71,6 +71,30 @@ class TestSafeCopyOverwritesExistingFile:
 
         assert (dst / "file.txt").read_text(encoding="utf-8") == "from src"
 
+    def test_directory_update_restores_existing_destination_if_swap_fails(self, tmp_path: Path, monkeypatch) -> None:
+        src = tmp_path / "src_dir"
+        dst = tmp_path / "dst_dir"
+        src.mkdir()
+        dst.mkdir()
+        (src / "new.txt").write_text("new", encoding="utf-8")
+        (dst / "old.txt").write_text("old", encoding="utf-8")
+
+        original_replace = os.replace
+        calls = 0
+
+        def fail_second_replace(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("simulated swap failure")
+            return original_replace(source, destination)
+
+        monkeypatch.setattr(os, "replace", fail_second_replace)
+        with pytest.raises(OSError, match="simulated swap failure"):
+            safe_copy(src, dst)
+
+        assert (dst / "old.txt").read_text(encoding="utf-8") == "old"
+
 
 class TestNoLegacyRename:
     """Defence-in-depth: scan the source for `os.rename` / `.rename(` outside

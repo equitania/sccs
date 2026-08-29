@@ -2580,6 +2580,26 @@ def _resolve_codex_model_maps() -> tuple[dict, dict]:
     return config.codex.effective_model_map, config.codex.effective_reasoning_effort_map
 
 
+def _codex_export_state_path() -> Path:
+    """State file that marks targets SCCS is allowed to update."""
+    from sccs.integrations.codex import DEFAULT_CODEX_EXPORT_STATE_PATH
+
+    return DEFAULT_CODEX_EXPORT_STATE_PATH
+
+
+def _codex_export_state_manager():
+    from sccs.integrations.codex import CodexExportStateManager
+
+    return CodexExportStateManager(state_path=_codex_export_state_path())
+
+
+def _validate_codex_models(detector, model_map: dict) -> tuple[list[str], list[str]]:
+    """Check model slugs when Codex has a local model catalogue."""
+    from sccs.integrations.codex import validate_model_map_against_cache
+
+    return validate_model_map_against_cache(model_map, detector._codex_dir / "models_cache.json")
+
+
 def _codex_hooks_paths() -> tuple[Path, Path]:
     """(claude settings.json, codex hooks.json), honouring codex.base_dir."""
     from sccs.utils.paths import expand_path
@@ -2618,9 +2638,15 @@ def codex_status(ctx: click.Context) -> None:
 
     exclude = _resolve_codex_excludes()
     model_map, reasoning_map = _resolve_codex_model_maps()
-    skill_gaps = detector.get_skill_gaps(exclude_patterns=exclude)
-    agent_gaps = detector.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude)
-    command_gaps = detector.get_command_gaps(exclude_patterns=exclude)
+    model_errors, model_warnings = _validate_codex_models(detector, model_map)
+    for warning in model_warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
+    for error in model_errors:
+        console.print(f"[red]Model configuration error:[/red] {error}")
+    state = _codex_export_state_manager().load()
+    skill_gaps = detector.get_skill_gaps(exclude_patterns=exclude, state=state)
+    agent_gaps = detector.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude, state=state)
+    command_gaps = detector.get_command_gaps(exclude_patterns=exclude, state=state)
 
     for title, gaps in (
         ("Skills to export", skill_gaps),
@@ -2629,7 +2655,9 @@ def codex_status(ctx: click.Context) -> None:
     ):
         console.print(f"\n[bold]{title} ({len(gaps)}):[/bold]")
         for gap in gaps:
-            if getattr(gap, "collision", False):
+            if getattr(gap, "blocked", False):
+                label = "[red]blocked — skipped[/red]"
+            elif getattr(gap, "collision", False):
                 label = "[red]collision — skipped[/red]"
             elif gap.needs_update:
                 label = "[yellow]outdated[/yellow]"
@@ -2674,16 +2702,25 @@ def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
     # a specific artefact by name, even a doctor-managed one).
     exclude = None if selected_names else _resolve_codex_excludes()
     selected = list(selected_names) if selected_names else None
+    state_manager = _codex_export_state_manager()
+    state = state_manager.load()
 
     if kind == "agents":
         model_map, reasoning_map = _resolve_codex_model_maps()
-        gaps = detector.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude)
+        model_errors, model_warnings = _validate_codex_models(detector, model_map)
+        for warning in model_warnings:
+            console.print_info(warning)
+        if model_errors:
+            for error in model_errors:
+                console.print_error(error)
+            sys.exit(1)
+        gaps = detector.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude, state=state)
         export_fn, unit = convert_agents_to_codex, "agents"
     elif kind == "commands":
-        gaps = detector.get_command_gaps(exclude_patterns=exclude)
+        gaps = detector.get_command_gaps(exclude_patterns=exclude, state=state)
         export_fn, unit = convert_commands_to_codex, "commands"
     else:
-        gaps = detector.get_skill_gaps(exclude_patterns=exclude)
+        gaps = detector.get_skill_gaps(exclude_patterns=exclude, state=state)
         export_fn, unit = export_skills_to_codex, "skills"
 
     if selected:
@@ -2704,45 +2741,69 @@ def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
     if dry_run:
         console.print_info("Dry run — no files will be written\n")
 
-    result = export_fn(gaps, dry_run=dry_run, overwrite_existing=overwrite, selected=selected)
+    result = export_fn(gaps, dry_run=dry_run, overwrite_existing=overwrite, selected=selected, state=state)
+    if not dry_run and (result.created or result.updated):
+        try:
+            state_manager.save(state)
+        except OSError as exc:
+            result.errors["state"] = f"export completed but could not persist SCCS ownership state: {exc}"
     _print_conversion_result(console, result, dry_run=dry_run, verbose=ctx.obj["verbose"], unit=unit)
+    if kind == "skills" and (result.created or result.updated):
+        console.print_info(
+            "Codex activates skills contextually. Request one explicitly with $<skill-name>; "
+            "start a new Codex session if its skill list is cached."
+        )
 
 
 @codex_group.command("export-skills")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("--overwrite/--no-overwrite", default=True, help="Update existing skills (default: yes)")
+@click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing skills (default: no)")
+@click.option("--force", is_flag=True, help="Alias for --overwrite; never replaces foreign Codex targets")
 @click.option("-s", "--skill", "skills", multiple=True, help="Limit to specific skill (repeatable)")
 @click.pass_context
-def codex_export_skills(ctx: click.Context, dry_run: bool, overwrite: bool, skills: tuple[str, ...]) -> None:
-    """Copy Claude skills into Codex skills (~/.agents/skills/)."""
-    _run_codex_export(ctx, "skills", dry_run, overwrite, skills)
+def codex_export_skills(
+    ctx: click.Context, dry_run: bool, overwrite: bool, force: bool, skills: tuple[str, ...]
+) -> None:
+    """Copy Claude skills into Codex skills (~/.agents/skills/).
+
+    Codex activates skills contextually; request one explicitly as
+    ``$<skill-name>``. Start a new session if its available-skill list is cached.
+    """
+    _run_codex_export(ctx, "skills", dry_run, overwrite or force, skills)
 
 
 @codex_group.command("export-agents")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("--overwrite/--no-overwrite", default=True, help="Update existing agents (default: yes)")
+@click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing agents (default: no)")
+@click.option("--force", is_flag=True, help="Alias for --overwrite; never replaces foreign Codex targets")
 @click.option("-a", "--agent", "agents", multiple=True, help="Limit to specific agent (repeatable)")
 @click.pass_context
-def codex_export_agents(ctx: click.Context, dry_run: bool, overwrite: bool, agents: tuple[str, ...]) -> None:
+def codex_export_agents(
+    ctx: click.Context, dry_run: bool, overwrite: bool, force: bool, agents: tuple[str, ...]
+) -> None:
     """Convert Claude agents into Codex agent TOML files (~/.codex/agents/)."""
-    _run_codex_export(ctx, "agents", dry_run, overwrite, agents)
+    _run_codex_export(ctx, "agents", dry_run, overwrite or force, agents)
 
 
 @codex_group.command("export-commands")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("--overwrite/--no-overwrite", default=True, help="Update existing commands (default: yes)")
+@click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing commands (default: no)")
+@click.option("--force", is_flag=True, help="Alias for --overwrite; never replaces foreign Codex targets")
 @click.option("-c", "--command", "commands", multiple=True, help="Limit to specific command (repeatable)")
 @click.pass_context
-def codex_export_commands(ctx: click.Context, dry_run: bool, overwrite: bool, commands: tuple[str, ...]) -> None:
+def codex_export_commands(
+    ctx: click.Context, dry_run: bool, overwrite: bool, force: bool, commands: tuple[str, ...]
+) -> None:
     """Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md)."""
-    _run_codex_export(ctx, "commands", dry_run, overwrite, commands)
+    _run_codex_export(ctx, "commands", dry_run, overwrite or force, commands)
 
 
 @codex_group.command("export-all")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("--overwrite/--no-overwrite", default=True, help="Update existing artefacts (default: yes)")
+@click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing artefacts (default: no)")
+@click.option("--force", is_flag=True, help="Alias for --overwrite; never replaces foreign Codex targets")
 @click.pass_context
-def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool) -> None:
+def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool, force: bool) -> None:
     """Export skills, agents and commands to Codex in one run.
 
     Hooks are NOT included — they execute code on every tool call, so they need
@@ -2751,7 +2812,7 @@ def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool) -> None
     console = ctx.obj["console"]
     for kind in ("skills", "agents", "commands"):
         console.print(f"[bold]Exporting {kind}…[/bold]")
-        _run_codex_export(ctx, kind, dry_run, overwrite, ())
+        _run_codex_export(ctx, kind, dry_run, overwrite or force, ())
 
 
 @codex_group.command("export-hooks")

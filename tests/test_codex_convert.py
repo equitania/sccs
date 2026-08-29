@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from sccs.convert.claude_to_codex import (
@@ -10,6 +12,7 @@ from sccs.convert.claude_to_codex import (
     convert_agent_frontmatter,
     map_model,
     tools_to_sandbox_mode,
+    validate_reasoning_effort_map,
     wrap_command_as_skill,
 )
 from sccs.convert.toml_write import (
@@ -17,6 +20,7 @@ from sccs.convert.toml_write import (
     toml_basic_string,
     toml_multiline_string,
 )
+from sccs.integrations.codex import validate_model_map_against_cache
 
 try:  # Python 3.11+
     import tomllib
@@ -69,6 +73,17 @@ class TestMapModel:
         assert effort == "xhigh"
         assert warnings == []
 
+    def test_invalid_reasoning_effort_is_reported(self):
+        assert validate_reasoning_effort_map({"sonnet": "turbo"}) == ["sonnet: invalid reasoning effort 'turbo'"]
+
+    def test_model_map_rejects_slug_missing_from_available_cache(self, tmp_path):
+        cache = tmp_path / "models_cache.json"
+        cache.write_text(json.dumps({"models": [{"slug": "gpt-current"}]}), encoding="utf-8")
+
+        errors, warnings = validate_model_map_against_cache({"sonnet": "retired-model"}, cache)
+        assert errors == ["sonnet: model 'retired-model' is not in Codex's local model cache"]
+        assert warnings == []
+
 
 # --------------------------------------------------------------------------- #
 # tools_to_sandbox_mode
@@ -91,9 +106,9 @@ class TestToolsToSandboxMode:
 
     def test_mutating_tools_dropped_with_single_warning(self):
         mode, warnings = tools_to_sandbox_mode("Read, Write, Edit, Bash")
-        assert mode is None
+        assert mode == "workspace-write"
         assert len(warnings) == 1
-        assert "no Codex equivalent" in warnings[0]
+        assert "workspace-write" in warnings[0]
 
 
 # --------------------------------------------------------------------------- #
