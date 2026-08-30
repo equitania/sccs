@@ -52,6 +52,17 @@ Mermaid, because generated images render labels unreliably — wrong text in a
 technical diagram is worse than no diagram. If you receive a diagram brief,
 return that recommendation instead of an image.
 
+## Shell
+
+You run inside a tmux session under **bash**, not fish. Commands you execute
+yourself must be POSIX syntax: `export VAR=value`, `VAR=$(command)`, heredocs
+are available.
+
+Snippets you hand to a human — runbooks, instructions, anything meant to be
+copied into a terminal — are **fish** instead: `set -x VAR value`,
+`set VAR (command)`, no heredocs, no `VAR=value` prefix. Which syntax applies
+is decided by who types the command, not by who wrote it.
+
 ## Working Rules
 
 - Ask the brief's questions before generating, not after: aspect ratio,

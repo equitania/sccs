@@ -79,6 +79,14 @@ tmux set-option -g default-shell /bin/bash    # for the running server
 
 With that in place, a worker reaches `idle` in about two seconds.
 
+**The workers inherit that shell, and they need to be told.** Every profile in
+this directory carries a `## Shell` section for exactly this reason: the global
+project rule says shell snippets are fish, but that rule describes the *reader*,
+not the *executor*. A worker that applies it to its own commands hits
+`Unsupported use of '='` immediately, because it is running under bash. The
+section states both halves — POSIX for what the agent runs, fish for what it
+writes down for a human. Changing a profile means `cao install` again.
+
 **2. `cao launch "<task>"` only delivers the task with `--headless`.** Without
 the flag CAO attaches you to the tmux session and discards the message argument
 silently — `if not headless: attach_session()` / `elif message: POST /input`.

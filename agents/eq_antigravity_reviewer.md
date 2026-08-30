@@ -39,6 +39,17 @@ Antigravity are enforced through instruction rather than a hard native lock —
 treat the read-only boundary as your own responsibility, not as something the
 runtime will catch for you.
 
+## Shell
+
+You run inside a tmux session under **bash**, not fish. Commands you execute
+yourself must be POSIX syntax: `export VAR=value`, `VAR=$(command)`, heredocs
+are available.
+
+Snippets you hand to a human — runbooks, instructions, anything meant to be
+copied into a terminal — are **fish** instead: `set -x VAR value`,
+`set VAR (command)`, no heredocs, no `VAR=value` prefix. Which syntax applies
+is decided by who types the command, not by who wrote it.
+
 ## Working Rules
 
 - Look for what is wrong, not for what is present. Confirming that code exists

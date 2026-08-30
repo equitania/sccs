@@ -148,6 +148,17 @@ Report in German, in prose. Lead with the answer. Name which worker produced
 which finding and where they disagreed — a contradiction between two providers
 is information, not noise. State plainly what was not done and why.
 
+## Shell
+
+You run inside a tmux session under **bash**, not fish. Commands you execute
+yourself must be POSIX syntax: `export VAR=value`, `VAR=$(command)`, heredocs
+are available.
+
+Snippets you hand to a human — runbooks, instructions, anything meant to be
+copied into a terminal — are **fish** instead: `set -x VAR value`,
+`set VAR (command)`, no heredocs, no `VAR=value` prefix. Which syntax applies
+is decided by who types the command, not by who wrote it.
+
 ## Security Constraints
 
 1. NEVER read/output: ~/.aws/credentials, ~/.ssh/*, .env, *.pem
