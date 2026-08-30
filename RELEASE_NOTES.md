@@ -1,5 +1,21 @@
 # Release Notes
 
+## Version 2.60.0 (30.08.2026)
+
+### Added (capacity probe)
+
+- **`sccs capacity [--json] [--offline]` reports remaining plan quota per agent CLI**, so an orchestrator (CAO) can route work by capacity instead of guessing. Both metered CLIs expose their quota only from inside an interactive session — `/status` in Codex, `/usage` in Antigravity — which is exactly where an orchestrator cannot reach; this command gets at the same numbers from outside.
+- **The three sources differ in trustworthiness, and the payload says which is which.** `codex` is `session-cache`: the `rate_limits` event in the newest rollout under `~/.codex/sessions/`, free and instant but only as fresh as your last Codex session (a snapshot older than one 5-hour window is flagged as such). `antigravity` is `live` via `agy -p "/usage"` — `agy` has no `usage` subcommand, but print mode expands slash commands; that is a real request against the account, hence `--offline`. `claude_code` is `assumed`: it keeps no on-disk quota cache and `/usage` is interactive only, so **no numbers are invented** and it is reported as the fallback reserve.
+- **Routing advice is derived in code, not left to a prompt**, so it is testable and identical on every host. `image_generation` falls back `codex` → `antigravity` → `paid-api`, because both plans already include image generation and the billed API should be the last resort. `parallel_workers_ok` goes false when any weekly window drops below 20 %.
+- **Antigravity's Gemini pool and the Claude/GPT models it resells are billed separately**, which is why scopes are a list. This matters for routing: when the Gemini quota is tight the fallback reviewer is **Codex, not Antigravity running a Claude model** — the latter would make Anthropic review its own work and defeat the point of cross-provider review. The report states that explicitly in `constraints`.
+- **Two deliberate asymmetries.** Providers disagree on which half of the fraction they report (Codex emits used, Antigravity emits remaining), so every window carries both and derives the missing one. And `unknown` is kept distinct from `tight`: missing data is not evidence of exhaustion, so an unreadable quota still routes work to that provider rather than pushing it onto the billed API.
+- **Exhaustion is detected, not inferred from silence.** Codex signals a spent plan quota by replacing both windows with `null`, flipping `limit_id` to `"premium"` and emptying the credit balance — at the same moment its TUI prints "You've hit your usage limit". A windowless payload therefore means either "nothing known" or "nothing left", and the first version conflated them: the provider vanished from the table entirely (the render loop iterated windows, of which there were none) and routing read it as `unknown`, which is deliberately treated as routable — so the report recommended Codex for image work while it was rate-limited for another three hours. Now `is_codex_exhausted()` requires the null windows **and** an empty credit balance before declaring exhaustion (null windows alone stay `unknown`, so a healthy provider is never diverted away from), `ProviderCapacity.exhausted` blocks every routing slot, parallel workers are barred, and a windowless provider always gets a table row.
+- Every probe degrades instead of raising — a missing binary, an unparsable table or a timeout yields `source: "unavailable"` plus an error string, and the report still answers. New usage guide: `docs/usage/capacity.md`.
+
+### Tests
+
+28 new tests covering both parsers against output captured from the real CLIs, the expired-window rollover, corrupt and multi-snapshot rollout files, offline skipping, runner failure, and each routing rule — including the "tight Gemini must not fall back to a Claude model" case. All probes are exercised through injected fakes so the suite stays platform-independent (CI runs on Linux, where none of the agent CLIs exist). Full suite: 1622 passed.
+
 ## Version 2.59.0 (25.08.2026)
 
 ### Added (Codex hooks export)

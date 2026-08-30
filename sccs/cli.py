@@ -438,6 +438,39 @@ def log(ctx: click.Context, last: int) -> None:
         console.print(f"  {item.category}:{item.name} - {action} ({item.last_synced})")
 
 
+@cli.command()
+@click.option(
+    "--offline",
+    is_flag=True,
+    help="Skip probes that make a network call (Antigravity's /usage)",
+)
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of Rich tables")
+@click.pass_context
+def capacity(ctx: click.Context, offline: bool, output_json: bool) -> None:
+    """Show remaining plan quota per agent CLI, with routing advice.
+
+    \b
+    Intended for a CAO supervisor deciding which worker to delegate to:
+        sccs capacity --json
+
+    \b
+    Sources differ in freshness, and the payload says which is which:
+        codex        read from its own session records (free, may be stale)
+        antigravity  live via `agy -p "/usage"` (costs one tiny request)
+        claude_code  not machine-readable; reported as the fallback reserve
+    """
+    from sccs.capacity import build_report
+
+    console = ctx.obj["console"]
+    report = build_report(offline=offline)
+
+    if output_json:
+        emit_json(report)
+        return
+
+    console.print_capacity_report(report)
+
+
 # Config subcommands
 @cli.group()
 def config() -> None:

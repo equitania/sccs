@@ -17,6 +17,7 @@ finden sich themenspezifisch in den anderen Usage-Docs:
 - Memory Bridge → [memory-bridge.md](memory-bridge.md)
 - Kategorien → [categories.md](categories.md)
 - OpenCode-Integration → [opencode.md](opencode.md)
+- Kapazitätssonde → [capacity.md](capacity.md)
 
 ```bash
 # Synchronisierung
@@ -65,6 +66,11 @@ sccs doctor install              # Installiert fehlende Komponenten (Confirm pro
 sccs doctor install --yes        # Skip Confirms (CI use only)
 sccs doctor update               # Plugins + npx-Tools aktualisieren
 
+# Kapazität (verbleibendes Plan-Kontingent je Agent-CLI)
+sccs capacity                    # Rich-Tabelle + Routing-Empfehlung
+sccs capacity --json             # Einzeiliges JSON für Orchestrator/GUI
+sccs capacity --offline          # Ohne Netzwerk-Probe (Antigravity /usage)
+
 # Integrationen (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
 sccs integrations status                       # Integrations-Report
 sccs integrations opencode status              # OpenCode: Installation + offene Konvertierungen
@@ -94,6 +100,7 @@ in the other usage docs:
 - Memory Bridge → [memory-bridge.md](memory-bridge.md)
 - Categories → [categories.md](categories.md)
 - OpenCode integration → [opencode.md](opencode.md)
+- Capacity probe → [capacity.md](capacity.md)
 
 ```bash
 # Synchronization

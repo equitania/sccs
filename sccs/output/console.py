@@ -439,6 +439,96 @@ class Console:
             if get_current_platform() == "macos":
                 self._console.print("  [dim]○ Claude Desktop — not detected[/dim]")
 
+    @staticmethod
+    def _format_reset(window) -> str:
+        """Render a window's reset as time-until, which is what a router acts on.
+
+        Absolute ISO timestamps are in the JSON payload for anyone who needs
+        them; in a terminal column they only get truncated.
+        """
+        if window.expired:
+            return "[dim]rolled over[/dim]"
+        minutes = window.resets_in_minutes
+        if minutes is None:
+            return "-"
+        if minutes < 60:
+            return f"{minutes}min"
+        if minutes < 1440:
+            return f"{minutes // 60}h"
+        return f"{minutes // 1440}d"
+
+    def print_capacity_report(self, report) -> None:
+        """Print remaining plan quota per provider plus the derived routing advice.
+
+        Args:
+            report: A sccs.capacity.schema.CapacityReport.
+        """
+        from sccs.capacity.schema import LOW_REMAINING_PERCENT
+
+        table = Table(title="Agent capacity", show_header=True, header_style="bold")
+        table.add_column("Provider")
+        table.add_column("Scope")
+        table.add_column("Window")
+        table.add_column("Remaining", justify="right")
+        table.add_column("Resets in", justify="right")
+        table.add_column("Source", style="dim")
+
+        # Providers with no readable windows get one compact row; their reason
+        # goes below the table so a long note cannot wrap the grid apart.
+        footnotes: list[str] = []
+
+        for provider in report.providers:
+            # A provider with no windows must still get a row. Codex reports an
+            # exhausted plan by nulling both windows, and a scope-only loop
+            # silently dropped it from the table — the one moment the reader
+            # most needs to see it.
+            windowless = not any(scope.windows for scope in provider.scopes)
+            if windowless:
+                if not provider.installed:
+                    reason = "not installed"
+                elif provider.exhausted:
+                    reason = "[red]QUOTA SPENT[/red]"
+                    footnotes.append(f"{provider.provider}: {provider.note or 'plan quota spent'}")
+                else:
+                    reason = "no readable quota"
+                    footnotes.append(f"{provider.provider}: {provider.error or provider.note or 'no data'}")
+                remaining = "[red]0%[/red]" if provider.exhausted else "-"
+                table.add_row(provider.provider, reason, "-", remaining, "-", provider.source)
+                continue
+            for scope in provider.scopes:
+                for window in scope.windows:
+                    remaining = window.effective_remaining
+                    if remaining is None:
+                        cell = "[dim]?[/dim]"
+                    else:
+                        colour = "red" if remaining < LOW_REMAINING_PERCENT else "green"
+                        cell = f"[{colour}]{remaining:.0f}%[/{colour}]"
+                    table.add_row(
+                        provider.provider,
+                        scope.name,
+                        window.name,
+                        cell,
+                        self._format_reset(window),
+                        provider.source,
+                    )
+
+        self._console.print(table)
+        for note in footnotes:
+            # highlight=False: Rich's automatic path/number highlighting turns
+            # "/usage" and version-like tokens into stray colour inside prose.
+            self._console.print(f"  [dim]{note}[/dim]", highlight=False)
+
+        routing = report.routing
+        if routing is None:
+            return
+        parallel = "[green]yes[/green]" if routing.parallel_workers_ok else "[red]no[/red]"
+        self._console.print("\n[bold]Routing advice:[/bold]")
+        self._console.print(f"  Image generation      {routing.image_generation}")
+        self._console.print(f"  Independent reviewer  {routing.independent_reviewer}")
+        self._console.print(f"  Parallel workers      {parallel}")
+        for note in routing.constraints:
+            self._console.print(f"  [yellow]![/yellow] {note}")
+
 
 def create_console(*, verbose: bool = False, colored: bool = True) -> Console:
     """
