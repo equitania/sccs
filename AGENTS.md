@@ -43,7 +43,6 @@ sccs/
 ├── git/                  # Validated git operations, divergence resolver
 └── utils/                # atomic_write, hashing, logging, platform helpers
 
-agents/                   # CAO agent profiles — see agents/README.md
 docs/usage/               # User-facing guides, German and English
 tests/                    # 25 files; test_doctor.py and test_capacity.py are largest
 ```
@@ -142,4 +141,3 @@ single line via `click.echo`, never through the ANSI-forcing Rich console. See
 - `CLAUDE.md` — the same ground with the full per-release feature archaeology
 - `RELEASE_NOTES.md` — why each change was made, in prose
 - `docs/usage/` — user-facing guides, including `capacity.md` and `codex.md`
-- `agents/README.md` — the CAO agent fleet and its operational traps
