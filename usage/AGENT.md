@@ -22,6 +22,8 @@
 - Auto-commit / auto-push / auto-pull around sync, gated by config and per-run flags.
 - Timestamped backups before every overwrite; dry-run preview on every mutating command.
 - Selective ZIP export/import of items for deploying configs to other machines (zip-slip-safe import).
+- Report how much plan quota each orchestrated agent CLI has left (`sccs capacity`), with the
+  provenance of every number, so a supervisor routes by remaining capacity instead of guessing.
 - "Doctor": inspect & repair a Claude Code environment (Node, `claude` CLI, plugins, npx tools,
   bundled skills, Playwright browsers, filesystem permissions, statusline) — CI-friendly.
 - Push Claude agents/commands/MCP servers into OpenCode (`~/.config/opencode/`), with model mapping.
@@ -40,6 +42,7 @@
 
 | Command | Purpose | Args / Flags |
 |---|---|---|
+| `sccs capacity` | Remaining plan quota per agent CLI (codex from its session rollout, antigravity live via `agy -p "/usage"`, claude_code assumed), plus derived routing advice: image-generation target, independent reviewer, parallel-worker gate. | --json, --offline |
 | `sccs capability-card` | Print this capability card to stdout (raw Markdown, live version injected) — primary self-description surface for agents. | — |
 | `sccs categories disable` | Disable a category. | CATEGORY_NAME |
 | `sccs categories enable` | Enable a category. | CATEGORY_NAME |
@@ -265,6 +268,9 @@ sccs config show               # current config; also: validate | edit | init [-
   Implementation: `sccs/output/json_emit.py`. Use these for GUI/automation consumption instead of
   scraping the Rich text. `doctor check --json` carries `statusline_presets` (every known preset with
   `installed`/`is_active`/`is_configured`/`version`) next to the `status_lines` integrity check.
+- **`sccs capacity --json`**: per-provider quota windows (both `used_percent` and remaining, since providers
+  disagree on which half they report), a `source` naming each number's provenance (`session-cache` / `live` /
+  `assumed` / `unavailable`), and a `routing` block. `unknown` is deliberately distinct from `tight`.
 - **Self-serve card:** `sccs capability-card` → this card as raw Markdown (self-description; version
   always live-injected).
 - **Non-interactive escapes:** `config init --repo-path PATH` bypasses the interactive prompt.
