@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sccs.integrations.skill_limits import check_skill_file
 from sccs.utils.hashing import quick_compare
 from sccs.utils.paths import ensure_dir, matches_any_pattern, safe_copy
 
@@ -60,6 +61,9 @@ class PiArtifactGap:
     dst_exists: bool
     needs_update: bool
     is_dir: bool
+    # Reasons Pi will refuse to load the copy. The copy itself stays correct,
+    # so these are reported, never blocking.
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -172,6 +176,10 @@ class PiDetector:
                         dst_exists=dst_exists,
                         needs_update=needs_update,
                         is_dir=True,
+                        warnings=[
+                            f"{problem} — Pi will not load this skill"
+                            for problem in check_skill_file(skill_dir / "SKILL.md")
+                        ],
                     )
                 )
         return gaps
@@ -287,6 +295,9 @@ def _materialize_pi(
         result.target_dir_created = True
 
     for gap in gaps:
+        if gap.warnings:
+            result.warnings[gap.name] = list(gap.warnings)
+
         if gap.dst_exists and not overwrite_existing:
             result.skipped.append(gap.name)
             continue

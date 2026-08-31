@@ -100,7 +100,7 @@ class TestSkillExport:
         assert result.created == ["two"]
         assert not (detector.skills_dir / "one").exists()
 
-    def test_foreign_target_is_a_conflict_not_an_automatic_update(self, tmp_path):
+    def test_foreign_target_is_flagged_not_automatically_updated(self, tmp_path):
         detector = _detector(tmp_path)
         _write_skill(detector, "my-skill")
         target = detector.skills_dir / "my-skill"
@@ -108,8 +108,63 @@ class TestSkillExport:
         (target / "SKILL.md").write_text("foreign", encoding="utf-8")
 
         gaps = detector.get_skill_gaps(state=CodexExportState())
-        assert gaps[0].collision
-        assert "not managed by SCCS" in gaps[0].warnings[0]
+        assert gaps[0].foreign_target
+        # Not a collision: that guard is absolute, this one is releasable.
+        assert not gaps[0].collision
+        assert "was not written by SCCS" in gaps[0].warnings[0]
+
+    def test_foreign_target_survives_plain_overwrite(self, tmp_path):
+        """--overwrite governs targets SCCS wrote; it must not touch foreign ones."""
+        detector = _detector(tmp_path)
+        _write_skill(detector, "my-skill")
+        target = detector.skills_dir / "my-skill"
+        target.mkdir()
+        (target / "SKILL.md").write_text("foreign", encoding="utf-8")
+
+        result = export_skills_to_codex(detector.get_skill_gaps(state=CodexExportState()), overwrite_existing=True)
+        assert result.skipped == ["my-skill"]
+        assert (target / "SKILL.md").read_text(encoding="utf-8") == "foreign"
+        assert "--replace-foreign" in " ".join(result.warnings["my-skill"])
+
+    def test_replace_foreign_refreshes_the_target(self, tmp_path):
+        detector = _detector(tmp_path)
+        _write_skill(detector, "my-skill")
+        target = detector.skills_dir / "my-skill"
+        target.mkdir()
+        (target / "SKILL.md").write_text("foreign", encoding="utf-8")
+
+        state = CodexExportState()
+        result = export_skills_to_codex(detector.get_skill_gaps(state=state), replace_foreign=True, state=state)
+        assert result.updated == ["my-skill"]
+        assert (target / "SKILL.md").read_text(encoding="utf-8") != "foreign"
+        # Ownership is recorded, so the next run is a plain update.
+        assert state.owns("skills", "my-skill", target)
+
+    def test_replace_foreign_is_inert_without_a_foreign_target(self, tmp_path):
+        """The escape hatch must not become a second --overwrite."""
+        detector = _detector(tmp_path)
+        source = _write_skill(detector, "my-skill")
+        state = CodexExportState()
+        export_skills_to_codex(detector.get_skill_gaps(state=state), state=state)
+
+        (source / "SKILL.md").write_text("changed", encoding="utf-8")
+        result = export_skills_to_codex(
+            detector.get_skill_gaps(state=state), overwrite_existing=False, replace_foreign=True, state=state
+        )
+        assert result.skipped == ["my-skill"]
+
+    def test_replace_foreign_never_releases_a_command_collision(self, tmp_path):
+        """A real skill claiming the slot is an absolute guard, not a releasable one."""
+        detector = _detector(tmp_path)
+        _write_skill(detector, "shared-name")
+        command = detector._cc_commands_dir
+        command.mkdir(parents=True, exist_ok=True)
+        (command / "shared-name.md").write_text("---\ndescription: c\n---\nbody\n", encoding="utf-8")
+
+        gaps = [g for g in detector.get_command_gaps() if g.name == "shared-name"]
+        assert gaps and gaps[0].collision
+        result = convert_commands_to_codex(gaps, replace_foreign=True, overwrite_existing=True)
+        assert result.skipped == ["shared-name"]
 
     def test_owned_target_can_be_updated(self, tmp_path):
         detector = _detector(tmp_path)

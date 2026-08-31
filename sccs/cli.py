@@ -2410,6 +2410,23 @@ def _resolve_pi_base_dir():
     return expand_path(base) if base else None
 
 
+def _print_skill_limit_violations(console, cc_skills_dir, exclude, target: str) -> None:
+    """Report skills the target CLI will refuse to load.
+
+    Deliberately independent of gap detection: an offending skill that has
+    already been copied is in sync, produces no gap, and would otherwise never
+    be mentioned again — while the target keeps dropping it.
+    """
+    from sccs.integrations.skill_limits import scan_claude_skills
+
+    violations = scan_claude_skills(cc_skills_dir, exclude_patterns=exclude)
+    if not violations:
+        return
+    console.print(f"\n[bold]Skills {target} will not load ({len(violations)}):[/bold]")
+    for name, problems in violations.items():
+        console.print(f"  [yellow]{name}[/yellow] — {'; '.join(problems)}")
+
+
 def _make_pi_detector():
     """Build a PiDetector honouring the configured base_dir override."""
     from sccs.integrations.pi import PiDetector
@@ -2445,6 +2462,8 @@ def pi_status(ctx: click.Context) -> None:
         for gap in gaps:
             label = "[yellow]outdated[/yellow]" if gap.needs_update else "[red]missing[/red]"
             console.print(f"  {gap.name} — {label}")
+
+    _print_skill_limit_violations(console, detector._cc_skills_dir, exclude, "Pi")
 
 
 def _run_pi_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
@@ -2692,11 +2711,15 @@ def codex_status(ctx: click.Context) -> None:
                 label = "[red]blocked — skipped[/red]"
             elif getattr(gap, "collision", False):
                 label = "[red]collision — skipped[/red]"
+            elif getattr(gap, "foreign_target", False):
+                label = "[yellow]outdated — foreign target, needs --replace-foreign[/yellow]"
             elif gap.needs_update:
                 label = "[yellow]outdated[/yellow]"
             else:
                 label = "[red]missing[/red]"
             console.print(f"  {gap.name} — {label}")
+
+    _print_skill_limit_violations(console, detector._cc_skills_dir, exclude, "Codex")
 
     from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan
 
@@ -2713,7 +2736,7 @@ def codex_status(ctx: click.Context) -> None:
         console.print(f"  {len(plan.added)} to add · {len(plan.updated)} to update · {len(plan.removed)} to remove")
 
 
-def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
+def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names, replace_foreign=False) -> None:
     """Shared body for the three Codex export commands.
 
     kind is one of 'skills', 'agents', 'commands'. Prints the result and exits
@@ -2737,7 +2760,6 @@ def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
     selected = list(selected_names) if selected_names else None
     state_manager = _codex_export_state_manager()
     state = state_manager.load()
-
     if kind == "agents":
         model_map, reasoning_map = _resolve_codex_model_maps()
         model_errors, model_warnings = _validate_codex_models(detector, model_map)
@@ -2774,7 +2796,14 @@ def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
     if dry_run:
         console.print_info("Dry run — no files will be written\n")
 
-    result = export_fn(gaps, dry_run=dry_run, overwrite_existing=overwrite, selected=selected, state=state)
+    result = export_fn(
+        gaps,
+        dry_run=dry_run,
+        overwrite_existing=overwrite,
+        replace_foreign=replace_foreign,
+        selected=selected,
+        state=state,
+    )
     if not dry_run and (result.created or result.updated):
         try:
             state_manager.save(state)
@@ -2791,52 +2820,87 @@ def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names) -> None:
 @codex_group.command("export-skills")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
 @click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing skills (default: no)")
-@click.option("--force", is_flag=True, help="Alias for --overwrite; never replaces foreign Codex targets")
+@click.option("--force", is_flag=True, help="Alias for --overwrite; foreign targets need --replace-foreign")
+@click.option(
+    "--replace-foreign",
+    is_flag=True,
+    help="Also replace targets SCCS did not write (may discard hand edits at the target)",
+)
 @click.option("-s", "--skill", "skills", multiple=True, help="Limit to specific skill (repeatable)")
 @click.pass_context
 def codex_export_skills(
-    ctx: click.Context, dry_run: bool, overwrite: bool, force: bool, skills: tuple[str, ...]
+    ctx: click.Context,
+    dry_run: bool,
+    overwrite: bool,
+    force: bool,
+    replace_foreign: bool,
+    skills: tuple[str, ...],
 ) -> None:
     """Copy Claude skills into Codex skills (~/.agents/skills/).
 
     Codex activates skills contextually; request one explicitly as
     ``$<skill-name>``. Start a new session if its available-skill list is cached.
     """
-    _run_codex_export(ctx, "skills", dry_run, overwrite or force, skills)
+    _run_codex_export(ctx, "skills", dry_run, overwrite or force, skills, replace_foreign)
 
 
 @codex_group.command("export-agents")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
 @click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing agents (default: no)")
-@click.option("--force", is_flag=True, help="Alias for --overwrite; never replaces foreign Codex targets")
+@click.option("--force", is_flag=True, help="Alias for --overwrite; foreign targets need --replace-foreign")
+@click.option(
+    "--replace-foreign",
+    is_flag=True,
+    help="Also replace targets SCCS did not write (may discard hand edits at the target)",
+)
 @click.option("-a", "--agent", "agents", multiple=True, help="Limit to specific agent (repeatable)")
 @click.pass_context
 def codex_export_agents(
-    ctx: click.Context, dry_run: bool, overwrite: bool, force: bool, agents: tuple[str, ...]
+    ctx: click.Context,
+    dry_run: bool,
+    overwrite: bool,
+    force: bool,
+    replace_foreign: bool,
+    agents: tuple[str, ...],
 ) -> None:
     """Convert Claude agents into Codex agent TOML files (~/.codex/agents/)."""
-    _run_codex_export(ctx, "agents", dry_run, overwrite or force, agents)
+    _run_codex_export(ctx, "agents", dry_run, overwrite or force, agents, replace_foreign)
 
 
 @codex_group.command("export-commands")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
 @click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing commands (default: no)")
-@click.option("--force", is_flag=True, help="Alias for --overwrite; never replaces foreign Codex targets")
+@click.option("--force", is_flag=True, help="Alias for --overwrite; foreign targets need --replace-foreign")
+@click.option(
+    "--replace-foreign",
+    is_flag=True,
+    help="Also replace targets SCCS did not write (may discard hand edits at the target)",
+)
 @click.option("-c", "--command", "commands", multiple=True, help="Limit to specific command (repeatable)")
 @click.pass_context
 def codex_export_commands(
-    ctx: click.Context, dry_run: bool, overwrite: bool, force: bool, commands: tuple[str, ...]
+    ctx: click.Context,
+    dry_run: bool,
+    overwrite: bool,
+    force: bool,
+    replace_foreign: bool,
+    commands: tuple[str, ...],
 ) -> None:
     """Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md)."""
-    _run_codex_export(ctx, "commands", dry_run, overwrite or force, commands)
+    _run_codex_export(ctx, "commands", dry_run, overwrite or force, commands, replace_foreign)
 
 
 @codex_group.command("export-all")
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
 @click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing artefacts (default: no)")
-@click.option("--force", is_flag=True, help="Alias for --overwrite; never replaces foreign Codex targets")
+@click.option("--force", is_flag=True, help="Alias for --overwrite; foreign targets need --replace-foreign")
+@click.option(
+    "--replace-foreign",
+    is_flag=True,
+    help="Also replace targets SCCS did not write (may discard hand edits at the target)",
+)
 @click.pass_context
-def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool, force: bool) -> None:
+def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool, force: bool, replace_foreign: bool) -> None:
     """Export skills, agents and commands to Codex in one run.
 
     Hooks are NOT included — they execute code on every tool call, so they need
@@ -2845,7 +2909,7 @@ def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool, force: 
     console = ctx.obj["console"]
     for kind in ("skills", "agents", "commands"):
         console.print(f"[bold]Exporting {kind}…[/bold]")
-        _run_codex_export(ctx, kind, dry_run, overwrite or force, ())
+        _run_codex_export(ctx, kind, dry_run, overwrite or force, (), replace_foreign)
 
 
 @codex_group.command("export-hooks")

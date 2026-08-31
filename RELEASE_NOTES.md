@@ -1,5 +1,24 @@
 # Release Notes
 
+## Version 2.61.0 (31.08.2026)
+
+### Fixed (Codex export: a drifted foreign target could not be refreshed at all)
+
+- **`--overwrite` never reached a target SCCS did not write.** The ownership guard from v2.53.0 is right to exist — an unrelated Codex skill must not be replaced merely because a Claude skill shares its name — but it was modelled as a `collision`, and the writer skips every collision *before* it looks at `--overwrite`. There was therefore no flag, and no combination of flags, that could refresh a target once it had drifted; the only way out was deleting it by hand. Found on a real host where eight skills had been sitting stale for up to five days while every export reported success.
+- **The guard is now releasable, but by its own switch.** `--replace-foreign` is deliberately NOT wired to `--overwrite`: the two mark different risks — a stale target SCCS wrote versus one that may hold somebody's hand edits — so they stay independent and never imply each other. A foreign target is governed by `--replace-foreign` alone, an owned one by `--overwrite` alone. The absolute guard is untouched: a command whose skill slot is claimed by a real skill is still never written, `--replace-foreign` included.
+- **The warning now states the outcome instead of predicting it.** It used to read "not overwritten" while the gap builder had no way of knowing whether the run would overwrite; it now names the fact ("target differs and was not written by SCCS") and the writer appends what actually happened. `codex status` labels such an entry `outdated — foreign target, needs --replace-foreign` rather than hiding it among plain collisions.
+
+### Added (export limits: the target's own rules, checked at the source)
+
+- **Both exports now name the skills the target will refuse to load.** Pi, Codex and Claude Code share the agentskills.io SKILL.md format and all three silently drop a skill whose frontmatter breaks the shared limits — description over 1024 characters, name over 64, unparsable YAML. Because both exports copy verbatim, the copy is byte-correct and the export reports success while the skill never loads on the other side. Checking the source is the only place that false success can be caught.
+- **Real driver:** Pi 0.84.4 rejected 14 of 74 skills at startup — 12 for an over-long description, 2 for frontmatter YAML could not parse — after `export-all` had reported all of them written.
+- **The check runs independently of gap detection** (`sccs/integrations/skill_limits.py`), which is the point: an offending skill that has already been copied is in sync, produces no gap, and would never be mentioned again while the target keeps dropping it. `integrations pi status` and `integrations codex status` therefore print a standing "Skills <target> will not load" section, and the export additionally attaches the reason to the affected gap. Reported, never blocking — the copy itself is correct.
+- A non-mapping frontmatter block (`---\n# heading\n---`, a Markdown horizontal rule) is reported as missing frontmatter, never as broken YAML — the same distinction `parse_frontmatter_ex` makes, for the same reason.
+
+### Tests
+
+- 20 new tests (1652 total): `tests/test_skill_limits.py` (16) covers the limit boundary, folded-scalar descriptions, the horizontal-rule case and the directory scan; `tests/test_codex_export.py` gains the four foreign-target cases, including proof that `--replace-foreign` stays inert without a foreign target and never releases a command collision.
+
 ## Version 2.60.0 (30.08.2026)
 
 ### Added (capacity probe)

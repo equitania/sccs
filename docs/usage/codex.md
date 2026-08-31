@@ -54,13 +54,24 @@ Export werden sie kontextabhängig aktiviert; einen bestimmten Skill forderst du
 explizit mit `$<skill-name>` an. Starte eine neue Codex-Sitzung, falls deren
 Skill-Liste bereits gecacht ist.
 
-**Sichere Updates:** SCCS merkt sich die Ziele, die es selbst erzeugt hat, in
-`~/.config/sccs/.codex_export_state.yaml`. Ein bereits vorhandenes oder in
-Codex manuell geändertes Ziel wird als Konflikt übersprungen, nicht ersetzt.
-Updates SCCS-verwalteter Ziele sind ebenfalls nur mit `--overwrite` (oder
-`--force`) aktiv; der Default erzeugt neue Artefakte, überschreibt aber nichts. Skill-Verzeichnisse
-mit Symlinks werden nicht exportiert, weil Links außerhalb des Quelldirectory
-in Codex unzuverlässig oder kaputt wären.
+**Sichere Updates — zwei Schalter für zwei Risiken:** SCCS merkt sich die Ziele,
+die es selbst erzeugt hat, in `~/.config/sccs/.codex_export_state.yaml`.
+Ein Update eines SCCS-eigenen Ziels braucht `--overwrite` (oder `--force`).
+Ein Ziel, das SCCS **nicht** geschrieben hat — vorhanden oder in Codex von Hand
+geändert — braucht das eigene `--replace-foreign`, weil dort fremde Handarbeit
+liegen kann. Die beiden Schalter implizieren einander bewusst nicht; ohne den
+passenden bleibt ein vorhandenes Ziel unangetastet. Absolut bleibt dagegen die
+Kollisionsregel: ein Command, dessen Skill-Platz von einem echten Skill belegt
+ist, wird nie geschrieben — auch `--replace-foreign` hebt das nicht auf.
+Skill-Verzeichnisse mit Symlinks werden nicht exportiert, weil Links außerhalb
+des Quelldirectory in Codex unzuverlässig oder kaputt wären.
+
+**Was Codex ablehnen wird, wird vorher benannt.** Skills werden wortgleich
+kopiert — eine Description über 1024 Zeichen, ein Name über 64 Zeichen oder ein
+unparsbares Frontmatter kommt also unverändert am Ziel an, und Codex lädt den
+Skill stillschweigend nicht. `codex status` und der Export melden solche Skills
+namentlich mit der gemessenen Länge. Das ist ein Hinweis, kein Abbruch: die
+Kopie selbst ist korrekt.
 
 **Agent-Konvertierung**: Der Markdown-Body wird zu `developer_instructions`, `description` wird übernommen, das Claude-Modell-Alias (`sonnet`/`opus`/`haiku`) wird auf ein Codex-Modell plus `model_reasoning_effort` gemappt. Eine `tools:`-Allowlist, die nur Lese-Tools enthält, wird zu `sandbox_mode = "read-only"`; jede andere Allowlist wird konservativ zu `workspace-write` und mit einer Warnung markiert. Codex hat keine per-Tool-Entsprechung — prüfe daher die gewünschte `approval_policy` separat.
 
@@ -211,12 +222,22 @@ skills activate contextually; request a specific one explicitly with
 `$<skill-name>`. Start a new Codex session if its skill list has already been
 cached.
 
-**Safe updates:** SCCS records targets it created in
-`~/.config/sccs/.codex_export_state.yaml`. A pre-existing or manually edited
-Codex target is treated as a conflict and skipped, never replaced. Updates to
-SCCS-managed targets also require `--overwrite` (or `--force`); by default only new artefacts
-are created. Skill directories containing symlinks are not exported because
-links outside the source directory would be unreliable or broken in Codex.
+**Safe updates — two switches for two risks:** SCCS records the targets it
+created in `~/.config/sccs/.codex_export_state.yaml`. Updating a target SCCS owns
+requires `--overwrite` (or `--force`). A target SCCS did **not** write —
+pre-existing, or edited by hand in Codex — requires the separate
+`--replace-foreign`, because it may carry somebody's edits. The two deliberately
+do not imply each other; without the matching one an existing target is left
+alone. The collision rule stays absolute: a command whose skill slot is claimed
+by a real skill is never written, `--replace-foreign` included. Skill directories
+containing symlinks are not exported because links outside the source directory
+would be unreliable or broken in Codex.
+
+**What Codex will reject is named up front.** Skills are copied verbatim, so a
+description over 1024 characters, a name over 64, or unparsable frontmatter
+arrives unchanged — and Codex silently declines to load it. `codex status` and
+the export name such skills with the measured length. This is a report, not a
+failure: the copy itself is correct.
 
 **Agent conversion**: the Markdown body becomes `developer_instructions`, `description` carries over, the Claude model alias (`sonnet`/`opus`/`haiku`) is mapped to a Codex model plus `model_reasoning_effort`. A `tools:` allowlist containing only read-only tools becomes `sandbox_mode = "read-only"`; every other allowlist is conservatively mapped to `workspace-write` and marked with a warning. Codex has no per-tool equivalent, so review the desired `approval_policy` separately.
 

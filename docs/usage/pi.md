@@ -52,6 +52,17 @@ sccs integrations pi export-commands -c finalize
 sccs integrations pi export-all
 ```
 
+**Was Pi ablehnen wird, wird vorher benannt.** Skills werden wortgleich kopiert, und Pi erzwingt
+dieselben agentskills.io-Grenzen wie Claude Code: Description höchstens 1024 Zeichen, Name höchstens
+64, Frontmatter parsbares YAML. Ein Verstoß in der Quelle kommt also unverändert am Ziel an — die
+Kopie ist byte-genau richtig, und Pi lädt den Skill trotzdem nicht. `pi status` führt solche Skills
+deshalb dauerhaft unter „Skills Pi will not load" mit der gemessenen Länge auf, auch wenn nichts
+mehr zu exportieren ist; der Export hängt den Grund zusätzlich an den betroffenen Eintrag. Ein
+Hinweis, kein Abbruch. Behoben wird es in der Quelle unter `~/.claude/skills/`, nicht im Ziel.
+
+Eine Description, die als gefalteter Block (`description: >-`) geschrieben ist, zählt nach dem
+Falten — die kurzen Zeilen in der Datei sagen nichts über die Länge des Werts.
+
 **Plugin-Artefakte werden nicht exportiert**: Doctor-gemanagte Skills/Agents/Commands (`gsd-*`, `playwright-cli` — dasselbe Managed-Registry, das auch der Sync ausschließt) fallen per Default aus `status` und den Export-Befehlen raus. So landen nur deine eigenen Artefakte in Pi, nicht die vom get-shit-done-Plugin installierten. Eigene Patterns ergänzt du über `pi.exclude` (Glob, gegen den Basename). Ein explizites `-s <name>` / `-a <name>` / `-c <name>` umgeht den Exclude — so exportierst du gezielt auch ein gemanagtes Artefakt.
 
 ### Konfiguration
@@ -123,6 +134,17 @@ sccs integrations pi export-commands -c finalize
 # Everything in one run
 sccs integrations pi export-all
 ```
+
+**What Pi will reject is named up front.** Skills are copied verbatim, and Pi enforces the same
+agentskills.io limits as Claude Code: description at most 1024 characters, name at most 64,
+frontmatter that parses as YAML. A violation in the source therefore arrives unchanged — the copy is
+byte-correct and Pi still declines to load the skill. `pi status` keeps such skills listed under
+"Skills Pi will not load" with the measured length even when nothing is left to export, and the
+export attaches the reason to the affected entry. A report, not a failure. Fix it in the source
+under `~/.claude/skills/`, not in the target.
+
+A description written as a folded block (`description: >-`) counts after folding — the short lines in
+the file say nothing about the length of the value.
 
 **Plugin artefacts are not exported**: doctor-managed skills/agents/commands (`gsd-*`, `playwright-cli` — the same managed registry the sync engine excludes) are dropped from `status` and the export commands by default, so only your own artefacts reach Pi rather than the ones installed by the get-shit-done plugin. Add your own patterns via `pi.exclude` (glob, matched against the basename). An explicit `-s <name>` / `-a <name>` / `-c <name>` bypasses the exclude, so you can still export a managed artefact on purpose.
 

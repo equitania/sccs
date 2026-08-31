@@ -29,7 +29,8 @@
 - Push Claude agents/commands/MCP servers into OpenCode (`~/.config/opencode/`), with model mapping.
 - Push Claude skills/agents/commands one-way into Pi (`~/.pi/agent/`) and OpenAI Codex
   (skills verbatim → `~/.agents/skills/`, agents → `~/.codex/agents/*.toml`, commands wrapped as skills),
-  preserving foreign Codex targets and requiring an explicit overwrite for SCCS-managed updates.
+  requiring `--overwrite` for SCCS-managed targets and the separate `--replace-foreign` for targets
+  SCCS did not write. Both exports also name the skills the target will refuse to load.
 - Convert a Fish shell config into a PowerShell profile or a native zsh profile (best-effort
   function translation, `uname`-guarded platform files); generate a hub README for the repo.
 - Park a whole extension's artefacts (skills, agents, hooks, statusline) with `profile off`, without
@@ -73,10 +74,10 @@
 | `sccs integrations pi export-commands` | Copy Claude commands into Pi prompt templates (~/.pi/agent/prompts/). | -n/--dry-run, --overwrite/--no-overwrite, -c/--command TEXT |
 | `sccs integrations pi export-all` | Export skills, agents and commands to Pi in one run. | -n/--dry-run, --overwrite/--no-overwrite |
 | `sccs integrations pi status` | Show Pi installation and export gaps. | — |
-| `sccs integrations codex export-skills` | Copy Claude skills into Codex skills (~/.agents/skills/). | -n/--dry-run, --overwrite/--no-overwrite, --force, -s/--skill TEXT |
-| `sccs integrations codex export-agents` | Convert Claude agents into Codex agent TOML files (~/.codex/agents/). | -n/--dry-run, --overwrite/--no-overwrite, --force, -a/--agent TEXT |
-| `sccs integrations codex export-commands` | Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md). | -n/--dry-run, --overwrite/--no-overwrite, --force, -c/--command TEXT |
-| `sccs integrations codex export-all` | Export skills, agents and commands to Codex in one run. | -n/--dry-run, --overwrite/--no-overwrite, --force |
+| `sccs integrations codex export-skills` | Copy Claude skills into Codex skills (~/.agents/skills/). | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign, -s/--skill TEXT |
+| `sccs integrations codex export-agents` | Convert Claude agents into Codex agent TOML files (~/.codex/agents/). | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign, -a/--agent TEXT |
+| `sccs integrations codex export-commands` | Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md). | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign, -c/--command TEXT |
+| `sccs integrations codex export-all` | Export skills, agents and commands to Codex in one run. | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign |
 | `sccs integrations codex export-hooks` | Merge Claude hook entries into ~/.codex/hooks.json. | -n/--dry-run |
 | `sccs integrations codex status` | Show Codex installation and export gaps. | — |
 | `sccs integrations status` | Show detailed integration status. | — |
@@ -172,6 +173,7 @@ sccs integrations codex status                    # skills/agents/commands still
 sccs integrations codex export-skills --dry-run
 sccs integrations codex export-all                # skills verbatim → ~/.agents/skills/, agents → ~/.codex/agents/*.toml
 sccs integrations codex export-all --overwrite    # update targets SCCS previously created
+sccs integrations codex export-skills --replace-foreign  # also replace targets SCCS did NOT write
 sccs integrations codex export-agents -a reviewer # one agent only (bypasses gsd-* exclude)
 sccs integrations codex export-hooks --dry-run   # 10 shared events; others dropped with a warning
 ```
@@ -183,8 +185,12 @@ skills (Codex prompts are deprecated). Bundled model map (v2.58.3): `opus`/`sonn
 ONE current model family and differ only in reasoning effort — Codex has no discovery *command*,
 but caches a catalogue at `~/.codex/models_cache.json` (one `slug` per entry) to validate the map
 before agent export; a missing configured slug aborts the export. SCCS tracks the targets it creates
-in `~/.config/sccs/.codex_export_state.yaml`: foreign or hand-edited targets are skipped, while
-updates to SCCS-managed targets require `--overwrite` (or `--force`). A name passed to `-s`/`-a`/`-c`
+in `~/.config/sccs/.codex_export_state.yaml`. Two independent switches, because they cover two
+different risks: `--overwrite` (or `--force`) updates targets SCCS recorded as its own, while
+`--replace-foreign` is required for a target SCCS did not write — one that may hold hand edits.
+Neither implies the other. Both exports additionally report skills the target will refuse to load
+(description > 1024 chars, name > 64, unparsable frontmatter) — reported, never blocking, and shown
+in `status` even when nothing is left to export. A name passed to `-s`/`-a`/`-c`
 that does not exist in `~/.claude/` fails with `No such agent/skill/command` and exit 1 (a name that is
 merely already in sync still succeeds). Name collisions: a real skill always wins over a same-named
 command (skipped with a warning). `gsd-*` excluded by default. No MCP merge / no CLAUDE.md→AGENTS.md (v1).
@@ -235,8 +241,10 @@ sccs config show               # current config; also: validate | edit | init [-
 - **Destructive / overwriting:**
   - `sync --force local|repo` overwrites the losing side; `sync --force newer` decides by mtime — no per-item prompt.
   - `import --overwrite` replaces existing files (a timestamped backup is made *unless* `--no-backup`).
-  - Codex exports never replace foreign targets. `--overwrite`/`--force` updates only targets recorded
-    as SCCS-managed; without either option, existing targets are skipped.
+  - Codex exports keep the two overwrite risks apart: `--overwrite`/`--force` updates only targets
+    recorded as SCCS-managed, `--replace-foreign` is needed for a target SCCS did not write (it may
+    carry hand edits). Without the matching option, an existing target is skipped. A command whose
+    skill slot is claimed by a real skill is never written — `--replace-foreign` does not release that.
   - `doctor optimize --strict` *removes* foreign plugins/MCP servers; doctor's hook removal / statusline
     rewrite are confirm-gated — `--yes` skips those confirms too. Use `--yes` only in CI.
   - Mutating commands honour `-n/--dry-run` (or `--dry-run`) — preview first when unsure.

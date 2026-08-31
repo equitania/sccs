@@ -34,6 +34,7 @@ import yaml
 from sccs.convert.claude_to_codex import convert_agent_frontmatter, wrap_command_as_skill
 from sccs.convert.frontmatter import parse_frontmatter_ex, render_frontmatter
 from sccs.convert.toml_write import render_codex_agent_toml
+from sccs.integrations.skill_limits import check_skill_file
 from sccs.utils.hashing import directory_hash, file_hash, quick_compare
 from sccs.utils.paths import atomic_write, ensure_dir, matches_any_pattern, safe_copy
 
@@ -41,6 +42,13 @@ from sccs.utils.paths import atomic_write, ensure_dir, matches_any_pattern, safe
 _SKIP_PATTERNS = ("_", ".")
 _LOCAL_SUFFIX = ".local.md"
 DEFAULT_CODEX_EXPORT_STATE_PATH = Path.home() / ".config" / "sccs" / ".codex_export_state.yaml"
+
+# Stated as a fact about the target, not as a verdict on the outcome: whether
+# the target is kept or refreshed depends on --replace-foreign, which the gap
+# builder cannot know. The writer appends the outcome.
+FOREIGN_TARGET_WARNING = "target differs and was not written by SCCS"
+FOREIGN_TARGET_KEPT = "kept — pass --replace-foreign to replace it from the source"
+FOREIGN_TARGET_REPLACED = "replaced from the source (--replace-foreign)"
 
 
 @dataclass
@@ -64,6 +72,14 @@ class CodexArtifactGap:
     directory copy; file gaps carry the already-converted target content so the
     writer does not have to re-run the conversion. ``collision`` marks a
     command whose skill slot is claimed by a real skill — never written.
+
+    ``foreign_target`` is a WEAKER guard than ``collision``: the target exists,
+    differs from the source and carries no ownership record, so a default run
+    leaves it alone. Unlike a collision it is releasable, but by its OWN switch
+    (``--replace-foreign``), never by ``--overwrite``: the two mark different
+    risks — a stale target SCCS wrote versus one that may hold somebody's hand
+    edits. Without a release of some kind a drifted target could never be
+    refreshed except by deleting it by hand.
     """
 
     name: str
@@ -76,6 +92,7 @@ class CodexArtifactGap:
     warnings: list[str] = field(default_factory=list)
     collision: bool = False
     blocked: bool = False
+    foreign_target: bool = False
 
 
 @dataclass
@@ -300,8 +317,18 @@ class CodexDetector:
                 continue
 
             if not dst_exists or needs_update:
+                # The copy will be byte-correct; these say Codex will refuse to
+                # load the result anyway. Reported, never blocking.
+                limit_warnings = [
+                    f"{problem} — Codex will not load this skill"
+                    for problem in check_skill_file(skill_dir / "SKILL.md")
+                ]
                 if dst_exists and needs_update and state is not None and not state.owns("skills", name, dst):
-                    gaps.append(_foreign_target_gap(name, skill_dir, dst, is_dir=True, converted_content=None))
+                    gaps.append(
+                        _foreign_target_gap(
+                            name, skill_dir, dst, is_dir=True, converted_content=None, warnings=limit_warnings
+                        )
+                    )
                     continue
                 gaps.append(
                     CodexArtifactGap(
@@ -311,6 +338,7 @@ class CodexDetector:
                         dst_exists=dst_exists,
                         needs_update=needs_update,
                         is_dir=True,
+                        warnings=limit_warnings,
                     )
                 )
         return gaps
@@ -568,8 +596,8 @@ def _foreign_target_gap(
         needs_update=True,
         is_dir=is_dir,
         converted_content=converted_content,
-        warnings=[*(warnings or []), "target differs and is not managed by SCCS — not overwritten"],
-        collision=True,
+        warnings=[*(warnings or []), FOREIGN_TARGET_WARNING],
+        foreign_target=True,
     )
 
 
@@ -652,12 +680,19 @@ def export_skills_to_codex(
     *,
     dry_run: bool = False,
     overwrite_existing: bool = True,
+    replace_foreign: bool = False,
     selected: list[str] | None = None,
     state: CodexExportState | None = None,
 ) -> CodexExportResult:
     """Materialise CC skill directories into ~/.agents/skills/."""
     return _materialize_codex(
-        gaps, dry_run=dry_run, overwrite_existing=overwrite_existing, selected=selected, kind="skills", state=state
+        gaps,
+        dry_run=dry_run,
+        overwrite_existing=overwrite_existing,
+        replace_foreign=replace_foreign,
+        selected=selected,
+        kind="skills",
+        state=state,
     )
 
 
@@ -666,12 +701,19 @@ def convert_agents_to_codex(
     *,
     dry_run: bool = False,
     overwrite_existing: bool = True,
+    replace_foreign: bool = False,
     selected: list[str] | None = None,
     state: CodexExportState | None = None,
 ) -> CodexExportResult:
     """Materialise converted agent gaps into ~/.codex/agents/."""
     return _materialize_codex(
-        gaps, dry_run=dry_run, overwrite_existing=overwrite_existing, selected=selected, kind="agents", state=state
+        gaps,
+        dry_run=dry_run,
+        overwrite_existing=overwrite_existing,
+        replace_foreign=replace_foreign,
+        selected=selected,
+        kind="agents",
+        state=state,
     )
 
 
@@ -680,12 +722,19 @@ def convert_commands_to_codex(
     *,
     dry_run: bool = False,
     overwrite_existing: bool = True,
+    replace_foreign: bool = False,
     selected: list[str] | None = None,
     state: CodexExportState | None = None,
 ) -> CodexExportResult:
     """Materialise wrapped command gaps into ~/.agents/skills/<name>/SKILL.md."""
     return _materialize_codex(
-        gaps, dry_run=dry_run, overwrite_existing=overwrite_existing, selected=selected, kind="commands", state=state
+        gaps,
+        dry_run=dry_run,
+        overwrite_existing=overwrite_existing,
+        replace_foreign=replace_foreign,
+        selected=selected,
+        kind="commands",
+        state=state,
     )
 
 
@@ -694,6 +743,7 @@ def _materialize_codex(
     *,
     dry_run: bool,
     overwrite_existing: bool,
+    replace_foreign: bool,
     selected: list[str] | None,
     kind: str,
     state: CodexExportState | None,
@@ -708,17 +758,33 @@ def _materialize_codex(
         return result
 
     for gap in gaps:
-        if gap.warnings:
-            result.warnings[gap.name] = gap.warnings
+        warnings = list(gap.warnings)
 
         if gap.collision or gap.blocked:
             # A real skill claims this slot — never written (see detector).
+            if warnings:
+                result.warnings[gap.name] = warnings
             result.skipped.append(gap.name)
             continue
 
-        if gap.dst_exists and not overwrite_existing:
+        # Two risk classes, two switches, no interaction between them: a target
+        # SCCS wrote is governed by --overwrite alone, a foreign one — which may
+        # hold somebody's hand edits — by --replace-foreign alone.
+        if gap.foreign_target:
+            if not replace_foreign:
+                warnings.append(FOREIGN_TARGET_KEPT)
+                result.warnings[gap.name] = warnings
+                result.skipped.append(gap.name)
+                continue
+            warnings.append(FOREIGN_TARGET_REPLACED)
+        elif gap.dst_exists and not overwrite_existing:
+            if warnings:
+                result.warnings[gap.name] = warnings
             result.skipped.append(gap.name)
             continue
+
+        if warnings:
+            result.warnings[gap.name] = warnings
 
         if not gap.is_dir and not gap.converted_content:
             result.errors[gap.name] = "no converted content (source unreadable)"
