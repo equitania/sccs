@@ -1,5 +1,19 @@
 # Release Notes
 
+## Version 2.62.0 (31.08.2026)
+
+### Added (one pass across every installed assistant)
+
+- **`sccs integrations sync-all` detects which agent CLIs are on this machine and exports to all of them in one confirmed pass.** Keeping four assistants current previously meant running up to twelve separate export commands and remembering which ones exist here; missing one is how a target drifts unnoticed. The command shows a single combined plan — assistant, location, pending counts — asks once, and applies it. `-n/--dry-run` stops after the plan, `-y/--yes` skips the question, `-t/--target` limits to one assistant, `--json` emits the plan and the outcome as one line.
+- **It updates existing targets by default, unlike the individual export commands.** A collection command that only ever created new artefacts would keep nothing current, which is the entire reason for it to exist. The one thing it does not do by default is replace a target SCCS did not write — that may hold somebody's hand edits, and a convenience command is the worst place to discard those silently. Such targets are counted and named in the plan; `--replace-foreign` releases them.
+- **Codex hooks stay out**, for the same reason `codex export-all` omits them: a hook runs code on every matching tool call and deserves a deliberate command. The plan says so rather than leaving it to be discovered.
+- **One assistant cannot sink or hide the others.** A detection failure is recorded against that target and reported as an error — never as "not installed", which means something different — while the remaining assistants still plan and run. An export failure is reported and the pass continues to the next assistant, with exit code 1 at the end.
+- The adapters (`sccs/integrations/sync_all.py`) wrap the SAME detectors and writers the individual commands use, so there is one export path per target rather than two that can drift apart. What the module adds is detection, aggregation and a single confirmation.
+
+### Tests
+
+- 33 new tests (1685 total): orchestration against fake targets (failure isolation, flag propagation, idle/absent targets), adapter wiring against real Pi and Codex detectors on `tmp_path` (a typo in a method name survives every orchestration test), and the CLI surface (unknown target, dry-run, declined confirmation, `--json` never prompting, non-zero exit on failure).
+
 ## Version 2.61.0 (31.08.2026)
 
 ### Fixed (Codex export: a drifted foreign target could not be refreshed at all)

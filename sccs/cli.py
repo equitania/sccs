@@ -3938,6 +3938,181 @@ def statusline_install(ctx: click.Context, name: str, yes: bool, use: bool) -> N
     console.print_info("Start a new Claude Code session to see it.")
 
 
+@integrations_group.command("sync-all")
+@click.option("-n", "--dry-run", is_flag=True, help="Show the plan without writing anything")
+@click.option("-y", "--yes", is_flag=True, help="Skip the confirmation")
+@click.option(
+    "--replace-foreign",
+    is_flag=True,
+    help="Also replace Codex targets SCCS did not write (may discard hand edits at the target)",
+)
+@click.option("-t", "--target", "only", multiple=True, help="Limit to one assistant: antigravity/opencode/pi/codex")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def integrations_sync_all(
+    ctx: click.Context, dry_run: bool, yes: bool, replace_foreign: bool, only: tuple[str, ...], as_json: bool
+) -> None:
+    """Export Claude artefacts to every installed agent CLI in one pass.
+
+    Detects which assistants are on this machine, shows one combined plan and
+    asks once. Unlike the individual export commands this updates existing
+    SCCS-managed targets by default — a collection command that only created
+    new artefacts would keep nothing current.
+
+    Codex hooks are NOT included; they run code on every matching tool call and
+    need the deliberate `sccs integrations codex export-hooks`.
+    """
+    from sccs.integrations.sync_all import (
+        apply_plans,
+        collect_plans,
+        has_errors,
+        outcomes_to_dict,
+        plans_to_dict,
+    )
+
+    console = ctx.obj["console"]
+    targets = _build_sync_all_targets()
+
+    if only:
+        known = {t.key for t in targets}
+        unknown = sorted(name for name in only if name not in known)
+        if unknown:
+            message = f"No such target: {', '.join(unknown)} (known: {', '.join(sorted(known))})"
+            if as_json:
+                emit_json_error(message)
+            else:
+                console.print_error(message)
+            sys.exit(1)
+        targets = [t for t in targets if t.key in set(only)]
+
+    plans = collect_plans(targets)
+    installed = [p for p in plans if p.installed]
+    actionable = [p for p in installed if p.pending and not p.error]
+
+    if not as_json:
+        _render_sync_all_plan(console, plans)
+
+    if not actionable:
+        if as_json:
+            emit_json({"success": True, "plan": plans_to_dict(plans), "applied": []})
+        else:
+            console.print_success("Every installed assistant is already up to date")
+        return
+
+    total = sum(p.pending for p in actionable)
+    if dry_run:
+        if as_json:
+            emit_json({"success": True, "dry_run": True, "plan": plans_to_dict(plans), "applied": []})
+        else:
+            console.print_info(f"Dry run — {total} update(s) across {len(actionable)} assistant(s), nothing written")
+        return
+
+    if not yes and not as_json:
+        question = f"Apply {total} update(s) across {len(actionable)} assistant(s)?"
+        if not console.confirm(question, default=False):
+            console.print_info("Nothing was written")
+            return
+
+    outcomes = apply_plans(targets, plans, dry_run=False, replace_foreign=replace_foreign)
+
+    if as_json:
+        emit_json(
+            {
+                "success": not has_errors(outcomes),
+                "plan": plans_to_dict(plans),
+                "applied": outcomes_to_dict(outcomes),
+            }
+        )
+    else:
+        _render_sync_all_outcomes(console, outcomes)
+
+    if has_errors(outcomes):
+        sys.exit(1)
+
+
+def _build_sync_all_targets() -> list:
+    """Assemble one adapter per assistant, configured from the user's config.
+
+    Config resolution stays here so the adapters remain injectable in tests.
+    """
+    from sccs.integrations.detectors import AntigravityDetector
+    from sccs.integrations.opencode import OpenCodeDetector
+    from sccs.integrations.sync_all import AntigravityTarget, CodexTarget, OpenCodeTarget, PiTarget
+
+    codex_model_map, codex_reasoning_map = _resolve_codex_model_maps()
+    return [
+        AntigravityTarget(detector=AntigravityDetector()),
+        OpenCodeTarget(
+            detector=OpenCodeDetector(),
+            model_map=_resolve_opencode_model_map(),
+            exclude=_resolve_opencode_excludes(),
+        ),
+        PiTarget(detector=_make_pi_detector(), exclude=_resolve_pi_excludes()),
+        CodexTarget(
+            detector=_make_codex_detector(),
+            model_map=codex_model_map,
+            reasoning_map=codex_reasoning_map,
+            state_manager=_codex_export_state_manager(),
+            exclude=_resolve_codex_excludes(),
+        ),
+    ]
+
+
+def _shorten_home(path: str | None) -> str:
+    """`/Users/x/.pi/agent` -> `~/.pi/agent`, so a plan line fits 80 columns."""
+    if not path:
+        return ""
+    home = str(Path.home())
+    return "~" + path[len(home) :] if path.startswith(home) else path
+
+
+def _render_sync_all_plan(console, plans) -> None:
+    installed = [p for p in plans if p.installed]
+    console.print(f"\n[bold]Detected {len(installed)} of {len(plans)} assistants:[/bold]")
+
+    width = max((len(p.label) for p in plans), default=8)
+    indent = " " * (width + 4)
+    for plan in plans:
+        label = plan.label.ljust(width)
+        if not plan.installed:
+            console.print(f"  {label}  [dim]not installed[/dim]", highlight=False)
+            continue
+        if plan.error:
+            console.print(f"  {label}  [red]{plan.error}[/red]", highlight=False)
+            continue
+        state = f"[yellow]{plan.summary()}[/yellow]" if plan.pending else "[green]up to date[/green]"
+        # highlight=False throughout: Rich's auto-highlighter recolours path
+        # segments and digits mid-word, which makes the block hard to scan.
+        console.print(f"  {label}  {state}  [dim]{_shorten_home(plan.location)}[/dim]", highlight=False)
+        for note in plan.notes:
+            console.print(f"{indent}[dim]· {note}[/dim]", highlight=False)
+        if plan.foreign:
+            console.print(
+                f"{indent}[yellow]· {len(plan.foreign)} foreign target(s) kept (--replace-foreign to replace)[/yellow]",
+                highlight=False,
+            )
+            console.print(f"{indent}  [dim]{', '.join(plan.foreign)}[/dim]", highlight=False)
+
+
+def _render_sync_all_outcomes(console, outcomes) -> None:
+    console.print("")
+    for outcome in outcomes:
+        parts = []
+        if outcome.created:
+            parts.append(f"{outcome.created} created")
+        if outcome.updated:
+            parts.append(f"{outcome.updated} updated")
+        if outcome.skipped:
+            parts.append(f"{outcome.skipped} skipped")
+        console.print(f"[bold]{outcome.label}[/bold]: {', '.join(parts) or 'no changes'}")
+        for name, problem in outcome.errors.items():
+            console.print(f"  [red]✗ {name}: {problem}[/red]")
+
+    changed = sum(o.changed for o in outcomes)
+    if changed:
+        console.print_success(f"{changed} artefact(s) written across {len(outcomes)} assistant(s)")
+
+
 def main() -> None:
     """Main entry point."""
     cli(obj={})

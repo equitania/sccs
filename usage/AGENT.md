@@ -80,6 +80,7 @@
 | `sccs integrations codex export-all` | Export skills, agents and commands to Codex in one run. | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign |
 | `sccs integrations codex export-hooks` | Merge Claude hook entries into ~/.codex/hooks.json. | -n/--dry-run |
 | `sccs integrations codex status` | Show Codex installation and export gaps. | — |
+| `sccs integrations sync-all` | Export to every installed agent CLI in one confirmed pass. | -n/--dry-run, -y/--yes, --replace-foreign, -t/--target TEXT, --json |
 | `sccs integrations status` | Show detailed integration status. | — |
 | `sccs integrations trust-repo` | Register SCCS repository as trusted in Claude Desktop. | -n/--dry-run |
 | `sccs log` | Show sync history. | --last INTEGER |
@@ -169,6 +170,9 @@ One-way (Claude Code is source of truth). Pi has no subagent concept: skills + a
 
 ### Push artefacts to OpenAI Codex (codex CLI)
 ```bash
+sccs integrations sync-all -n                     # every installed assistant: one plan, nothing written
+sccs integrations sync-all                        # plan, ONE confirmation, export everywhere
+sccs integrations sync-all -t pi --json           # one assistant, machine-readable
 sccs integrations codex status                    # skills/agents/commands still to export
 sccs integrations codex export-skills --dry-run
 sccs integrations codex export-all                # skills verbatim → ~/.agents/skills/, agents → ~/.codex/agents/*.toml
@@ -247,6 +251,9 @@ sccs config show               # current config; also: validate | edit | init [-
     skill slot is claimed by a real skill is never written — `--replace-foreign` does not release that.
   - `doctor optimize --strict` *removes* foreign plugins/MCP servers; doctor's hook removal / statusline
     rewrite are confirm-gated — `--yes` skips those confirms too. Use `--yes` only in CI.
+  - `integrations sync-all` updates existing SCCS-managed targets by DEFAULT (unlike the individual
+    export commands) — that is what makes it a maintenance command. It still never touches a foreign
+    target without `--replace-foreign`, and never exports Codex hooks.
   - Mutating commands honour `-n/--dry-run` (or `--dry-run`) — preview first when unsure.
 - **Backups:** writes land in `~/.config/sccs/backups/<category>/<item>.<timestamp>.bak` before overwrite.
 - **Prerequisites:** `sccs config init` must have produced `~/.config/sccs/config.yaml`; sync needs a valid

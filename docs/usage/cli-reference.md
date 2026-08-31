@@ -73,6 +73,9 @@ sccs capacity --offline          # Ohne Netzwerk-Probe (Antigravity /usage)
 
 # Integrationen (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
 sccs integrations status                       # Integrations-Report
+sccs integrations sync-all -n                  # Alle installierten Assistenten: Plan ohne Schreiben
+sccs integrations sync-all                     # Plan zeigen, EINMAL bestätigen, alles exportieren
+sccs integrations sync-all --replace-foreign   # zusätzlich Codex-Ziele ersetzen, die SCCS nicht schrieb
 sccs integrations opencode status              # OpenCode: Installation + offene Konvertierungen
 sccs integrations opencode map-models          # CC-Modelle den OpenCode-Modellen zuweisen
 sccs integrations opencode export-agents -n    # Agents konvertieren (Vorschau)
@@ -151,6 +154,9 @@ sccs doctor update               # Update plugins + refresh npx tools
 
 # Integrations (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
 sccs integrations status                       # Integration report
+sccs integrations sync-all -n                  # Every installed assistant: plan, write nothing
+sccs integrations sync-all                     # Show the plan, confirm ONCE, export everywhere
+sccs integrations sync-all --replace-foreign   # also replace Codex targets SCCS did not write
 sccs integrations opencode status              # OpenCode: install + outstanding conversions
 sccs integrations opencode map-models          # Assign CC models to OpenCode models
 sccs integrations opencode export-agents -n    # Convert agents (preview)
