@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import ntpath
 import re
+from pathlib import PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -644,6 +646,91 @@ class CliToolSpec(BaseModel):
         return v
 
 
+def _validate_inside_package(v: str, label: str) -> str:
+    """Reject anything that could escape the package directory it is joined to.
+
+    These paths are joined onto a *foreign* installed package and then written.
+    An absolute path or a '..' segment would turn a package patch into a write
+    anywhere on the filesystem, so both are refused at config-parse time rather
+    than at write time.
+    """
+    if not v:
+        raise ValueError(f"{label} must not be empty")
+    p = PurePosixPath(v)
+    if p.is_absolute() or ntpath.isabs(v) or "\\" in v:
+        raise ValueError(f"{label} must be a relative POSIX path: {v!r}")
+    if any(part in ("..", "") for part in p.parts):
+        raise ValueError(f"{label} must not contain '..' segments: {v!r}")
+    return v
+
+
+class CaoPatchSite(BaseModel):
+    """One anchored insertion into a file of the installed CAO package.
+
+    CAO's provider registry is a hard-coded if/elif chain, not a plugin point,
+    so registering a provider means editing the installed package at several
+    sites. Each site is idempotent through `marker`: if the marker is already
+    present the site is skipped, which is what makes a re-run after a
+    `cao update` safe.
+    """
+
+    rel_path: str = Field(description="Path inside the package, e.g. 'models/provider.py'")
+    anchor: str = Field(description="Existing text the insertion is placed directly after")
+    insertion: str = Field(description="Text inserted after the anchor")
+    marker: str = Field(
+        description=(
+            "Idempotency marker. Must appear in `insertion`; when found in the "
+            "target file the site counts as already patched."
+        )
+    )
+
+    @field_validator("rel_path")
+    @classmethod
+    def _validate_rel_path(cls, v: str) -> str:
+        return _validate_inside_package(v, "CaoPatchSite.rel_path")
+
+    @field_validator("anchor", "marker")
+    @classmethod
+    def _validate_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("anchor and marker must not be empty")
+        return v
+
+
+class CaoProviderSpec(BaseModel):
+    """An extra agent provider patched into an installed CAO.
+
+    The provider *source* deliberately lives outside this package (default:
+    the private sync repo, materialised at `~/.config/cao/provider`). SCCS
+    publishes to PyPI and GitHub, and which agent CLIs a fleet routes work
+    across is not something this package carries.
+    """
+
+    name: str = Field(description="Provider id as CAO knows it, e.g. 'pi_cli'")
+    binary: str = Field(description="Binary the provider drives, e.g. 'pi'")
+    source_dir: str = Field(description="Directory holding the provider source (tilde ok)")
+    source_file: str = Field(description="File name inside source_dir, e.g. 'pi_cli.py'")
+    package_subpath: str = Field(description="Destination inside the package, e.g. 'providers/pi_cli.py'")
+    sites: list[CaoPatchSite] = Field(default_factory=list, description="Registration sites to patch")
+
+    @field_validator("name", "binary")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        return _validate_safe_name(v, "CaoProviderSpec name")
+
+    @field_validator("source_file")
+    @classmethod
+    def _validate_source_file(cls, v: str) -> str:
+        if "/" in v or "\\" in v or v in (".", ".."):
+            raise ValueError(f"source_file must be a bare file name: {v!r}")
+        return _validate_inside_package(v, "CaoProviderSpec.source_file")
+
+    @field_validator("package_subpath")
+    @classmethod
+    def _validate_package_subpath(cls, v: str) -> str:
+        return _validate_inside_package(v, "CaoProviderSpec.package_subpath")
+
+
 class DoctorConfig(BaseModel):
     """User-overridable doctor configuration."""
 
@@ -770,6 +857,19 @@ class DoctorConfig(BaseModel):
         default_factory=list,
         description="Additional fully-specified CLI tools appended to the resolved cli_tools.",
     )
+    cao_providers: list[CaoProviderSpec] | None = Field(
+        default=None,
+        description=(
+            "Extra agent providers patched into an installed CAO. None keeps "
+            "DEFAULT_CAO_PROVIDERS; pass [] to disable the check entirely. A "
+            "provider is only ever reported when both CAO and the provider "
+            "source are present on this host."
+        ),
+    )
+    extra_cao_providers: list[CaoProviderSpec] = Field(
+        default_factory=list,
+        description="Additional CAO providers appended to the resolved cao_providers.",
+    )
 
     def effective_plugins(self) -> list[PluginSpec]:
         """Return plugins to check: override or default, plus extras."""
@@ -876,6 +976,18 @@ class DoctorConfig(BaseModel):
             list(self.status_line_checks) if self.status_line_checks is not None else list(DEFAULT_STATUS_LINE_CHECKS)
         )
         return base + list(self.extra_status_line_checks)
+
+    def effective_cao_providers(self) -> list[CaoProviderSpec]:
+        """Resolve the CAO provider patches (defaults unless replaced) + extras.
+
+        Note this list is not itself an opt-in: a provider only ever produces a
+        report row when BOTH an installed CAO and the synced provider source
+        are present on the host (see `CaoDetector`).
+        """
+        from sccs.doctor.defaults import DEFAULT_CAO_PROVIDERS
+
+        base = list(self.cao_providers) if self.cao_providers is not None else list(DEFAULT_CAO_PROVIDERS)
+        return base + list(self.extra_cao_providers)
 
     def effective_cli_tools(self) -> list[CliToolSpec]:
         """Resolve opt-in cli_tools preset names + extras into specs.

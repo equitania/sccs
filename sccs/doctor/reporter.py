@@ -172,6 +172,23 @@ def _cli_tool_row(status: CliToolStatus) -> tuple[str, str, str, str]:
     return (label, _INFO, "", "not installed (optional) — run `sccs doctor install`")
 
 
+def _cao_provider_row(status) -> tuple[str, str, str, str]:
+    """One row per extra provider patched into an installed CAO.
+
+    Only ever rendered when both CAO and the provider source exist on this
+    host, so a red row here always means something actionable: almost always
+    a `cao update` that replaced the package and removed the provider.
+    """
+    label = f"cao provider: {status.spec.name}"
+    binary_note = "" if status.binary_on_path else f" ({status.spec.binary} not on PATH)"
+    if status.state == "patched":
+        return (label, _OK, "", f"patched into {status.package_path}{binary_note}")
+    if status.state == "anchor_lost":
+        return (label, _MISSING, "", "CAO layout changed — see the block below")
+    detail = "removed by a CAO update" if status.state == "missing" else f"{len(status.pending)} file(s) out of date"
+    return (label, _MISSING, "", f"{detail} — run `sccs doctor install`{binary_note}")
+
+
 def _bundled_skill_row(status: BundledSkillStatus) -> tuple[str, str, str, str]:
     label = f"skill: {status.spec.name}"
     if status.skill_md_present:
@@ -206,6 +223,7 @@ def render_doctor_report(
     status_lines: list[StatusLineStatus] | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
+    cao_providers: list | None = None,
     statusline_presets: list | None = None,
     powershell: PowerShellStatus | None = None,
     min_pwsh_major: int = 7,
@@ -248,6 +266,8 @@ def render_doctor_report(
     if cli_tools:
         for cli_st in cli_tools:
             table.add_row(*_cli_tool_row(cli_st))
+    for cao_st in cao_providers or []:
+        table.add_row(*_cao_provider_row(cao_st))
     for sl_preset in statusline_presets or []:
         row = _statusline_preset_row(sl_preset)
         if row is not None:
@@ -444,6 +464,7 @@ def has_problems(
     browser_bundles: list[BrowserBundleStatus] | None = None,
     status_lines: list[StatusLineStatus] | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
+    cao_providers: list | None = None,
 ) -> bool:
     """Return True if any component is missing/outdated or has a permission issue."""
     if not (node.installed and node.meets_minimum):
@@ -465,6 +486,10 @@ def has_problems(
     if status_lines and any(not s.ok for s in status_lines):
         return True
     if gsd_orphans and any(g.has_orphans for g in gsd_orphans):
+        return True
+    # A provider wiped by a `cao update` is a real defect: the fleet still
+    # advertises pi workers that can no longer start.
+    if cao_providers and any(c.state != "patched" for c in cao_providers):
         return True
     return bool(browser_bundles and any(not b.all_present for b in browser_bundles))
 

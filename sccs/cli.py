@@ -3028,6 +3028,7 @@ def _collect_doctor_statuses(
     `profiles` overrides the profile map used to filter out npx tools owned
     by a switched-off profile; None loads it from config.yaml.
     """
+    from sccs.doctor.cao import CaoDetector
     from sccs.doctor.defaults import MIN_PWSH_MAJOR
     from sccs.doctor.detectors import (
         BrowserBundleDetector,
@@ -3063,6 +3064,7 @@ def _collect_doctor_statuses(
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
     status_line_specs = doctor_cfg.effective_status_line_checks()
     cli_tool_specs = doctor_cfg.effective_cli_tools()
+    cao_provider_specs = doctor_cfg.effective_cao_providers()
     disallowed_hooks = doctor_cfg.effective_disallowed_hooks()
     protected_hooks = doctor_cfg.effective_protected_hooks()
     state = state_manager or DoctorStateManager()
@@ -3090,6 +3092,9 @@ def _collect_doctor_statuses(
         "settings_path": settings_hook_detector.settings_path,
         "gsd_orphans": GsdOrphanDetector().get_statuses(npx_specs),
         "cli_tools": CliToolDetector().get_statuses(cli_tool_specs),
+        # Silent unless BOTH an installed CAO and the synced provider
+        # source exist — that pairing is the opt-in.
+        "cao_providers": CaoDetector().get_statuses(cao_provider_specs),
         "statusline_presets": _collect_statusline_preset_statuses(),
     }
 
@@ -3197,6 +3202,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
             browser_bundles=statuses.get("browser_bundles"),
             status_lines=statuses.get("status_lines"),
             gsd_orphans=statuses.get("gsd_orphans"),
+            cao_providers=statuses.get("cao_providers"),
         )
         updates = has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"])
         emit_json(
@@ -3221,6 +3227,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
                 "statusline_presets": statuses.get("statusline_presets"),
                 "gsd_orphans": statuses.get("gsd_orphans"),
                 "cli_tools": statuses.get("cli_tools"),
+                "cao_providers": statuses.get("cao_providers"),
             }
         )
         sys.exit(1 if problems else 0)
@@ -3240,6 +3247,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
+        cao_providers=statuses.get("cao_providers"),
         statusline_presets=statuses.get("statusline_presets"),
         powershell=statuses.get("powershell"),
     )
@@ -3262,6 +3270,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         browser_bundles=statuses.get("browser_bundles"),
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
+        cao_providers=statuses.get("cao_providers"),
     ):
         console.print()
         console.print_warning("Run `sccs doctor install` to fix missing items.")
@@ -3299,6 +3308,7 @@ def doctor_install(ctx: click.Context, yes: bool, output_json: bool) -> None:
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
+        cao_providers=statuses.get("cao_providers"),
         statusline_presets=statuses.get("statusline_presets"),
     )
 
@@ -3362,6 +3372,7 @@ def doctor_update(ctx: click.Context, yes: bool, output_json: bool) -> None:
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
+        cao_providers=statuses.get("cao_providers"),
     )
 
     if plan.is_empty():
@@ -3440,6 +3451,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
+        cao_providers=statuses.get("cao_providers"),
         strict=strict,
     )
 

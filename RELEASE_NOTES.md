@@ -1,5 +1,30 @@
 # Release Notes
 
+## Version 2.64.0 (31.08.2026)
+
+### Added (`sccs doctor` keeps CAO's extra providers alive across an update)
+
+- **CAO's provider registry is a hard-coded if/elif chain fed by an enum, not a plugin point** — its plugin system is observer-only and cannot register a provider. Adding one therefore means editing the *installed* package at six sites, and every `cao update`, `uv tool upgrade` or reinstall replaces that package and silently removes all of it again. A worker that no longer starts is the first sign.
+- **Versioning the provider file transported it without ever making CAO use it.** That was the actual gap: the file arrived on a new machine and sat there inert, and after an update the fleet still advertised pi workers that could not launch. `sccs doctor check` now reports a wiped provider and `sccs doctor install` puts it back — the same shape as every other doctor-managed component.
+- **The provider SOURCE is deliberately not bundled here.** It stays in the private sync repo and reaches a host through the `cao_provider` sync category at `~/.config/cao/provider`; this package publishes to PyPI and GitHub, and which agent CLIs a fleet routes work across is not something it carries. Only the mechanism — locate, verify, patch — lives in `sccs/doctor/cao.py`.
+- **The pairing of both is the opt-in.** A row appears only when an installed CAO *and* the synced provider source are present. No CAO, or no source, means no row and no advertisement — there is no config flag to set.
+- **`anchor_lost` is reported, never repaired.** When CAO's own layout moves under a patch definition, SCCS refuses and prints where to re-derive the anchors. A half-applied patch leaves a package that still imports but fails at launch, which is worse than an unpatched one.
+
+### Details worth keeping
+
+- **Verification runs to completion before the first write**, so a spec whose third site no longer matches leaves the first two untouched.
+- **Edits accumulate per file, not per site.** `providers/manager.py` carries two sites (the import and the instantiation branch); deriving both from the same on-disk text and writing them in turn makes the second write discard the first. Found by running against a real CAO install — the synthetic fixture had one site per file and never showed it.
+- **Two readings of the `cao` binary path.** `~/.local/bin/cao` is a symlink into the tool root, so resolving it yields `<tool>/bin/cao`, whose grandparent is the tool root itself; appending `share/uv/tools/…` a second time then finds nothing. Both readings are tried. Also found by the real run, not by a test.
+- Path safety in two layers: absolute paths and `..` segments are rejected when the spec is parsed, and a symlinked target inside the package is refused at write time. File permissions survive the atomic replace.
+
+### Verified
+
+Against the live CAO 2.5.0 install on macOS: all six anchors match real package code; a copy with the patch stripped goes `missing` → restore → `patched`, the re-run is a no-op, every patched file parses as valid Python, and the result is equivalent to what the previous shell script produced. `doctor check` and `doctor check --json` both carry the row.
+
+### Tests
+
+46 new tests in `tests/test_doctor_cao.py` (package lookup incl. the shim symlink, all five detector states, patch/idempotency/permissions, path-safety guards, installer actions, reporter rows, exit-code effect) plus a policy test pinning the bundled spec to all six registration sites. 1743 total; ruff/format/mypy clean.
+
 ## Version 2.63.1 (31.08.2026)
 
 ### Fixed (`sccs docs generate` described a repo the sync engine does not see)

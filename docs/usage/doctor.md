@@ -40,6 +40,25 @@ doctor:
 
 `zoxide` (smarter `cd`) wird auf **allen** Plattformen geprüft (winget/`brew install zoxide`/Install-Script), **Microsoft Coreutils** (`Microsoft.Coreutils`, Rust-uutils-Port von `cat`/`grep`/`wc`/`cut`/`xargs`) **nur Windows** — gibt PowerShell dieselben Unix-Befehle wie Linux/macOS/WSL. Erkennung: `which` für „auf PATH", auf Windows zusätzlich `winget list --id <id>` als autoritative Install-Prüfung (fängt die WinGet-Links-nicht-auf-PATH-Falle). Zustände: `OK` / gelb „installed, not on PATH" (+ PowerShell-PATH-Copy-Paste-Block unter der Tabelle) / blau „not installed (optional)". **Nur Hinweis — fehlend = kein Exit 1.** `doctor install` bietet `winget install`/`brew install` (confirm-gated); SCCS mutiert nie selbst PATH/Profil. Hinweis: zoxide braucht zusätzlich `zoxide init <shell>` im Profil für den `z`-Befehl (bewusst nicht durch den Doctor — er stellt nur die Binary sicher); Coreutils braucht keine Profil-Init. Shell-Conflicts (PS-Aliase `cat`/`sort`/`tee` gewinnen gegen die `.exe` → mit `cat.exe`/`sort.exe` aufrufen): siehe <https://github.com/microsoft/coreutils#shell-conflicts>.
 
+### CAO-Provider nach einem `cao update` wiederherstellen — ab v2.64.0
+
+Der [CLI Agent Orchestrator](https://github.com/awslabs/cli-agent-orchestrator) (CAO) löst seine Provider über eine **fest verdrahtete if/elif-Kette** auf, die aus einem Enum gespeist wird — kein Erweiterungspunkt. Sein Plugin-System hilft nicht: CAO-Plugins sind reine Beobachter und können keinen Provider registrieren. Einen zusätzlichen Provider anzubinden heißt deshalb, das **installierte Paket** an sechs Stellen zu ergänzen — und jedes `cao update`, `uv tool upgrade` oder Neuinstallieren ersetzt dieses Paket und entfernt alles davon wieder. Das erste Anzeichen ist ein Worker, der nicht mehr startet.
+
+Die Provider-Datei nur zu versionieren transportiert sie, hält CAO aber nicht am Laufen. Genau diese Lücke schließt der Doctor: `sccs doctor check` meldet einen entfernten Provider, `sccs doctor install` spielt ihn wieder ein.
+
+```
+cao provider: pi_cli   ❌ MISSING   removed by a CAO update — run `sccs doctor install`
+cao provider: pi_cli   ✅ OK        patched into /Users/…/site-packages/cli_agent_orchestrator
+```
+
+**Die Quelle liegt bewusst nicht im Paket.** SCCS wird nach PyPI und GitHub veröffentlicht; nur der *Mechanismus* (finden, prüfen, patchen) steht in `sccs/doctor/cao.py`. Die Provider-Datei selbst kommt über die Sync-Kategorie `cao_provider` nach `~/.config/cao/provider` — dieselbe Trennlinie, nach der in v2.60.0 die CAO-Agentenprofile aus diesem Repository verschwunden sind.
+
+**Das Opt-in ist das Zusammentreffen beider, kein Schalter.** Eine Zeile erscheint nur, wenn ein installiertes CAO **und** die synchronisierte Quelle vorhanden sind. Fehlt eines von beiden, erscheint nichts — wer die Quelle nie synchronisiert hat, hat das Feature nicht angefordert und wird nicht darauf hingewiesen.
+
+**Ein verschobener Ankerpunkt wird gemeldet, nie repariert.** Ändert CAO seinen eigenen Aufbau, meldet der Doctor `CAO layout changed` und druckt, wo die Ankerpunkte in `DEFAULT_CAO_PROVIDERS` neu abzuleiten sind. Ein halb angewandter Patch hinterlässt ein Paket, das zwar importiert, aber beim Start scheitert — schlimmer als ein ungepatchtes. Aus demselben Grund läuft die Prüfung **vollständig durch, bevor die erste Datei geschrieben wird**.
+
+Nach dem Einspielen den CAO-Server neu starten, damit der Provider geladen wird.
+
 ### Was wird geprüft?
 
 | Komponente | Check (`check`) | Reparatur (`install` / `update`) |
@@ -260,6 +279,25 @@ doctor:
 ```
 
 `zoxide` (smart `cd`) is checked on **all** platforms (winget / `brew install zoxide` / install script); **Microsoft Coreutils** (`Microsoft.Coreutils`, the Rust uutils port of `cat`/`grep`/`wc`/`cut`/`xargs`) is **Windows-only** — it gives PowerShell the same UNIX commands as Linux/macOS/WSL. Detection: `which` for "on PATH"; on Windows a `winget list --id <id>` fallback is the authoritative install check (catches the WinGet-Links-not-on-PATH trap). States: `OK` / yellow "installed, not on PATH" (+ a copy-paste PowerShell PATH block below the table) / blue "not installed (optional)". **Informational only — missing = no exit 1.** `doctor install` offers `winget install` / `brew install` (confirm-gated); SCCS never edits PATH/profile itself. Note: zoxide also needs `zoxide init <shell>` in the profile for the `z` command (intentionally not done by the doctor — it only ensures the binary); Coreutils needs no profile init. Shell conflicts (PowerShell aliases `cat`/`sort`/`tee` win over the `.exe` → call `cat.exe`/`sort.exe`): see <https://github.com/microsoft/coreutils#shell-conflicts>.
+
+### Restoring a CAO provider after a `cao update` — since v2.64.0
+
+The [CLI Agent Orchestrator](https://github.com/awslabs/cli-agent-orchestrator) (CAO) resolves providers through a **hard-coded if/elif chain** fed by an enum — not an extension point. Its plugin system does not help: CAO plugins are observers and cannot register a provider. Adding one therefore means editing the **installed package** at six sites — and every `cao update`, `uv tool upgrade` or reinstall replaces that package and removes all of it again. The first sign is a worker that no longer starts.
+
+Versioning the provider file transports it but does not keep CAO working. That is the gap the doctor closes: `sccs doctor check` reports a wiped provider, `sccs doctor install` puts it back.
+
+```
+cao provider: pi_cli   ❌ MISSING   removed by a CAO update — run `sccs doctor install`
+cao provider: pi_cli   ✅ OK        patched into /Users/…/site-packages/cli_agent_orchestrator
+```
+
+**The source is deliberately not bundled.** SCCS publishes to PyPI and GitHub; only the *mechanism* (locate, verify, patch) lives in `sccs/doctor/cao.py`. The provider file itself arrives through the `cao_provider` sync category at `~/.config/cao/provider` — the same line that took the CAO agent profiles out of this repository in v2.60.0.
+
+**The opt-in is the pairing, not a flag.** A row appears only when an installed CAO **and** the synced source are both present. Missing either means no row at all — someone who never synced the source has not asked for this feature and is not advertised at.
+
+**A moved anchor is reported, never repaired.** If CAO changes its own layout, the doctor reports `CAO layout changed` and prints where to re-derive the anchors in `DEFAULT_CAO_PROVIDERS`. A half-applied patch leaves a package that imports but fails at launch — worse than an unpatched one. For the same reason verification runs to completion **before the first file is written**.
+
+Restart the CAO server afterwards so the provider is loaded.
 
 ### PowerShell 7+ check (Windows) — since v2.45.0
 

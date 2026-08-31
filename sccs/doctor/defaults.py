@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from sccs.doctor.schema import (
     BundledSkillSpec,
+    CaoPatchSite,
+    CaoProviderSpec,
     CliToolSpec,
     MCPServerSpec,
     NodeInstallSpec,
@@ -433,3 +435,115 @@ DEFAULT_DISALLOWED_HOOKS: list[str] = []
 # (`@opengsd/gsd-core: ["gsd-*"]`). Users may override via
 # `doctor.protected_hooks:` in `~/.config/sccs/config.yaml`.
 DEFAULT_PROTECTED_HOOKS: list[str] = ["gsd-"]
+
+# ---------------------------------------------------------------------------
+# CAO provider patches
+# ---------------------------------------------------------------------------
+# CAO 2.5.0 ships four providers and resolves them through a hard-coded
+# if/elif chain fed by a ProviderType enum. Its plugin system cannot help:
+# CAO plugins are observers that receive events after the fact and cannot
+# register a provider. So an extra provider has to be patched into the
+# installed package at every site the registry touches — and every
+# `cao update` replaces that package and removes all of it again. Syncing the
+# provider file alone transports it without ever making CAO use it; this is
+# what closes that gap.
+#
+# The provider SOURCE is deliberately not bundled here. It lives in the private
+# sync repo and is materialised at ~/.config/cao/provider by the `cao_provider`
+# sync category. This package publishes to PyPI and GitHub.
+#
+# Anchors are literal text from CAO 2.5.0. When one stops matching, the doctor
+# reports `anchor_lost` and refuses to patch rather than guessing a location —
+# re-derive the anchors against the installed package instead of loosening them.
+
+_PI_TOOL_MAPPING = """
+    # Added by `sccs doctor` (not upstream). pi's built-in tools; powershell is
+    # Windows-only but is grouped with bash so a tool set never grants one
+    # shell and withholds the other.
+    "pi_cli": {
+        "fs_read": ["read", "grep", "find", "ls"],
+        "fs_list": ["ls", "find"],
+        "fs_write": ["write", "edit"],
+        "fs_*": ["read", "grep", "find", "ls", "write", "edit"],
+        "execute_bash": ["bash", "powershell"],
+    },"""
+
+_PI_MANAGER_ANCHOR = """            elif provider_type == ProviderType.OPENCODE_CLI.value:
+                provider = OpenCodeCliProvider(
+                    terminal_id,
+                    tmux_session,
+                    tmux_window,
+                    agent_profile,
+                    allowed_tools,
+                    model=model,
+                )"""
+
+_PI_MANAGER_BRANCH = """
+            elif provider_type == ProviderType.PI_CLI.value:
+                provider = PiCliProvider(
+                    terminal_id,
+                    tmux_session,
+                    tmux_window,
+                    agent_profile,
+                    allowed_tools,
+                    skill_prompt=skill_prompt,
+                    model=model,
+                )"""
+
+DEFAULT_CAO_PROVIDERS: list[CaoProviderSpec] = [
+    CaoProviderSpec(
+        name="pi_cli",
+        binary="pi",
+        source_dir="~/.config/cao/provider",
+        source_file="pi_cli.py",
+        package_subpath="providers/pi_cli.py",
+        sites=[
+            # 1. Enum member — every other site keys off ProviderType.
+            CaoPatchSite(
+                rel_path="models/provider.py",
+                anchor='    MOCK_CLI = "mock_cli"',
+                insertion='\n    # Added by `sccs doctor` (not upstream).\n    PI_CLI = "pi_cli"',
+                marker='PI_CLI = "pi_cli"',
+            ),
+            # 2. Registry import.
+            CaoPatchSite(
+                rel_path="providers/manager.py",
+                anchor="from cli_agent_orchestrator.providers.opencode_cli import OpenCodeCliProvider",
+                insertion="\nfrom cli_agent_orchestrator.providers.pi_cli import PiCliProvider",
+                marker="from cli_agent_orchestrator.providers.pi_cli import PiCliProvider",
+            ),
+            # 3. Registry instantiation branch. The anchor is the whole opencode
+            #    branch on purpose: a shorter one also matches the branches above
+            #    it and would insert in the wrong place.
+            CaoPatchSite(
+                rel_path="providers/manager.py",
+                anchor=_PI_MANAGER_ANCHOR,
+                insertion=_PI_MANAGER_BRANCH,
+                marker="ProviderType.PI_CLI.value",
+            ),
+            # 4. Workspace access, validated when a worker launches.
+            CaoPatchSite(
+                rel_path="cli/commands/launch.py",
+                anchor='    "opencode_cli",',
+                insertion='\n    "pi_cli",',
+                marker='"pi_cli",',
+            ),
+            # 5. Binary discovery, so the web UI lists the provider at all.
+            CaoPatchSite(
+                rel_path="api/main.py",
+                anchor='        "opencode_cli": "opencode",',
+                insertion='\n        "pi_cli": "pi",',
+                marker='"pi_cli": "pi"',
+            ),
+            # 6. Tool mapping. Without it the launch banner prints
+            #    "Blocked: (none)" even though --tools does restrict the worker.
+            #    The provider enforces; this table only explains.
+            CaoPatchSite(
+                rel_path="utils/tool_mapping.py",
+                anchor="TOOL_MAPPING: Dict[str, Dict[str, List[str]]] = {",
+                insertion=_PI_TOOL_MAPPING,
+                marker='"pi_cli": {',
+            ),
+        ],
+    ),
+]
