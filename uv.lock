@@ -818,7 +818,7 @@ wheels = [
 
 [[package]]
 name = "sccs"
-version = "2.63.0"
+version = "2.63.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

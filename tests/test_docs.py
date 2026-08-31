@@ -160,3 +160,67 @@ def test_render_readme_contains_version(docs_config: SccsConfig) -> None:
     content = gen.render_readme()
 
     assert f"SCCS v{__version__}" in content
+
+
+class TestTreeRespectsExcludes:
+    """The directory tree and item counts must honour the same excludes as the sync engine.
+
+    Regression: `_walk_tree` filtered only dotfiles, so a `__pycache__/` left behind by a
+    tooling run showed up in the generated README's repository structure even though
+    `__pycache__` is a default `global_exclude` pattern and the sync engine never touches
+    it. `_collect_categories` had the same gap in its item counts.
+    """
+
+    def test_tree_skips_global_exclude_match(self, docs_config: SccsConfig, mock_repo: Path) -> None:
+        """An entry matching a configured global_exclude pattern never reaches the tree."""
+        (mock_repo / "scratch.tmp").write_text("x\n", encoding="utf-8")
+        (mock_repo / "keepme.md").write_text("x\n", encoding="utf-8")
+
+        gen = DocsGenerator(docs_config)
+        tree = gen._build_directory_tree()
+
+        assert "keepme.md" in tree
+        assert "scratch.tmp" not in tree
+
+    def test_tree_skips_pycache_under_default_excludes(self, sample_config: dict, mock_repo: Path) -> None:
+        """The original trigger: a stray __pycache__/ left behind by a tooling run.
+
+        ``__pycache__`` ships in the ``global_exclude`` default but is absent from the
+        test fixture's trimmed-down pattern list, so this exercises the real-world path.
+        """
+        sample_config.pop("global_exclude", None)  # fall back to the shipped defaults
+        config = SccsConfig.model_validate(sample_config)
+
+        (mock_repo / "__pycache__").mkdir()
+        (mock_repo / "__pycache__" / "thing.cpython-313.pyc").write_bytes(b"\x00")
+        (mock_repo / "keepme").mkdir()
+
+        gen = DocsGenerator(config)
+        tree = gen._build_directory_tree()
+
+        assert "keepme" in tree
+        assert "__pycache__" not in tree
+
+    def test_tree_skips_doctor_managed_items(self, docs_config: SccsConfig, mock_repo: Path) -> None:
+        """Doctor-managed patterns (gsd-*) are excluded like the sync engine excludes them."""
+        (mock_repo / "gsd-helper.md").write_text("managed\n", encoding="utf-8")
+        (mock_repo / "own-notes.md").write_text("mine\n", encoding="utf-8")
+
+        gen = DocsGenerator(docs_config)
+        tree = gen._build_directory_tree()
+
+        assert "own-notes.md" in tree
+        assert "gsd-helper.md" not in tree
+
+    def test_item_count_skips_excluded_entries(self, docs_config: SccsConfig, mock_repo: Path) -> None:
+        """Excluded files are not counted in a category's item total."""
+        commands = mock_repo / ".claude" / "commands"
+        commands.mkdir(parents=True, exist_ok=True)
+        (commands / "real.md").write_text("x\n", encoding="utf-8")
+        (commands / "gsd-managed.md").write_text("x\n", encoding="utf-8")
+        (commands / ".DS_Store").write_bytes(b"\x00")
+
+        gen = DocsGenerator(docs_config)
+        counts = {c.name: c.item_count for c in gen._collect_categories()}
+
+        assert counts["claude_commands"] == 1

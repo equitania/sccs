@@ -1,4 +1,4 @@
-# sccs v2.60.0 | Claude Code Sync Tool (UV)
+# sccs v2.63.1 | Claude Code Sync Tool (UV)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Setup:    uv venv --python 3.12 && venv+ && uv pip install -e ".[dev]"
 ▸ Sync:     sccs sync --dry-run

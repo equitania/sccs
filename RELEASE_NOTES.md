@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.63.1 (31.08.2026)
+
+### Fixed (`sccs docs generate` described a repo the sync engine does not see)
+
+- **The generated hub README ignored `global_exclude` entirely.** `_walk_tree` filtered nothing but dotfiles, so a stray `__pycache__/` left behind by a tooling run appeared in the "Repository Structure" tree — under a pattern that ships in the `global_exclude` default and that the sync engine has always honoured. Found while adding a directory to a sync repo: the tree advertised a directory that sync would never touch.
+- **`_collect_categories` had the same gap in its item counts**, and it was the worse half. Its `directory` and `file` branches filtered nothing at all, the `mixed` branch only dotfiles — so a doctor-managed `gsd-*` file or an editor leftover inflated the number the README publishes per category. Measured on a fixture: 3 reported where 1 syncs.
+- **Both now share `DocsGenerator._is_excluded`**, built from `global_exclude` plus `get_doctor_managed_excludes()` — the same composition `SyncEngine.effective_global_exclude` and `Exporter` already use, so the three surfaces cannot drift apart again. Matched against the basename, mirroring how `find_files`/`find_directories` apply excludes during a scan.
+- **Why this matters beyond cosmetics**: the README is the repository's own description of itself, and a new machine reads it before running anything. A tree and item count that disagree with what sync actually does is a document that lies about its subject.
+
+### Tests
+
+4 new tests in `TestTreeRespectsExcludes` (`tests/test_docs.py`): a configured `global_exclude` pattern, the real `__pycache__` trigger against the shipped defaults rather than the fixture's trimmed list, doctor-managed `gsd-*`, and the item count. 1697 total; ruff/format/mypy clean.
+
 ## Version 2.63.0 (31.08.2026)
 
 ### Fixed (the foreign-target guard fired on most targets SCCS had created)
