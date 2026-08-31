@@ -55,7 +55,11 @@ explizit mit `$<skill-name>` an. Starte eine neue Codex-Sitzung, falls deren
 Skill-Liste bereits gecacht ist.
 
 **Sichere Updates — zwei Schalter für zwei Risiken:** SCCS merkt sich die Ziele,
-die es selbst erzeugt hat, in `~/.config/sccs/.codex_export_state.yaml`.
+die es selbst erzeugt hat, in `~/.config/sccs/.codex_export_state.yaml`. Vor
+jedem Export übernimmt es zusätzlich alle Ziele in dieses Register, die bereits
+Zeichen für Zeichen dem entsprechen, was es schreiben würde (seit v2.63.0) —
+sonst könnte ein Ziel, das nie geschrieben werden musste, nie Besitz erwerben
+und würde beim ersten Update der Quelle fälschlich als fremd gemeldet.
 Ein Update eines SCCS-eigenen Ziels braucht `--overwrite` (oder `--force`).
 Ein Ziel, das SCCS **nicht** geschrieben hat — vorhanden oder in Codex von Hand
 geändert — braucht das eigene `--replace-foreign`, weil dort fremde Handarbeit
@@ -223,7 +227,11 @@ skills activate contextually; request a specific one explicitly with
 cached.
 
 **Safe updates — two switches for two risks:** SCCS records the targets it
-created in `~/.config/sccs/.codex_export_state.yaml`. Updating a target SCCS owns
+created in `~/.config/sccs/.codex_export_state.yaml`. Before each export it also
+adopts into that register every target that already matches, byte for byte, what
+it would write (since v2.63.0) — otherwise a target that never needed writing
+could never earn ownership and would be wrongly reported as foreign the first
+time its source changed. Updating a target SCCS owns
 requires `--overwrite` (or `--force`). A target SCCS did **not** write —
 pre-existing, or edited by hand in Codex — requires the separate
 `--replace-foreign`, because it may carry somebody's edits. The two deliberately

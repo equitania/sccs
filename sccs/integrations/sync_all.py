@@ -375,6 +375,12 @@ class CodexTarget:
 
         outcome = TargetOutcome(key=self.key, label=self.label)
         state = self.state_manager.load()
+        adopted = self.detector.adopt_in_sync(
+            state,
+            model_map=self.model_map,
+            reasoning_map=self.reasoning_map,
+            exclude_patterns=self.exclude,
+        )
         jobs = (
             (
                 "skills",
@@ -412,7 +418,7 @@ class CodexTarget:
             outcome.warnings.update(result.warnings)
             wrote = wrote or bool(result.created or result.updated)
 
-        if wrote and not dry_run:
+        if (wrote or adopted) and not dry_run:
             try:
                 self.state_manager.save(state)
             except OSError as exc:

@@ -1,5 +1,17 @@
 # Release Notes
 
+## Version 2.63.0 (31.08.2026)
+
+### Fixed (the foreign-target guard fired on most targets SCCS had created)
+
+- **Ownership was recorded only when a target was WRITTEN, so a target that never needed writing could never earn it.** On a normal host that is most of them: measured here, 90 Codex targets with 18 ownership records. The consequence was invisible until a source changed — at that moment SCCS reported its own target as foreign and refused to update it, which is exactly what stranded eight skills for up to five days in v2.61.0. That was not an isolated case but the normal state showing itself for the first time.
+- **`CodexDetector.adopt_in_sync()` now claims targets that already equal what SCCS would write**, before each export in both the individual commands and `sync-all`. It derives equality from the gap builders rather than comparing again: absence of a gap IS the proof that the target exists and matches. That also keeps the guard intact — a gap of any kind (pending work, symlink block, command collision, foreign target) disqualifies an artefact from adoption, and an excluded artefact is skipped explicitly because `source_names()` deliberately ignores excludes.
+- **Adopting an identical target gives up nothing the guard was protecting.** A hand edit at the target would by definition make it differ, a differing target produces a gap, and a gap is never adopted. After this, "foreign" means what it should: the target diverges AND matches nothing SCCS ever wrote. Verified on the real host — the register went from 19 entries to 87 in one pass, and a subsequent source change now updates its target without `--replace-foreign`.
+
+### Tests
+
+- 8 new tests (1693 total), `TestAdoptInSync`: adoption of an identical target, the follow-up update becoming ordinary, refusal to adopt a differing target (the guard must survive), missing targets, excluded artefacts, idempotence, agents and commands, and a command blocked by a skill collision.
+
 ## Version 2.62.0 (31.08.2026)
 
 ### Added (one pass across every installed assistant)

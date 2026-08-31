@@ -2760,8 +2760,17 @@ def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names, replace_for
     selected = list(selected_names) if selected_names else None
     state_manager = _codex_export_state_manager()
     state = state_manager.load()
+    model_map, reasoning_map = _resolve_codex_model_maps()
+    # Claim targets that already match the source, so the foreign-target guard
+    # fires on real divergence rather than on a missing ownership record.
+    adopted = detector.adopt_in_sync(
+        state,
+        model_map=model_map,
+        reasoning_map=reasoning_map,
+        exclude_patterns=_resolve_codex_excludes(),
+    )
+
     if kind == "agents":
-        model_map, reasoning_map = _resolve_codex_model_maps()
         model_errors, model_warnings = _validate_codex_models(detector, model_map)
         for warning in model_warnings:
             console.print_info(warning)
@@ -2804,7 +2813,7 @@ def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names, replace_for
         selected=selected,
         state=state,
     )
-    if not dry_run and (result.created or result.updated):
+    if not dry_run and (result.created or result.updated or adopted):
         try:
             state_manager.save(state)
         except OSError as exc:

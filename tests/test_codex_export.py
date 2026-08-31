@@ -270,3 +270,98 @@ class TestEmpty:
         assert result.updated == []
         assert result.skipped == []
         assert not result.target_dir_created
+
+
+class TestAdoptInSync:
+    """Ownership for targets that already match the source.
+
+    The gap this closes: ownership used to be recorded only when a target was
+    WRITTEN, so a target that never needed writing could never earn it. On a
+    real host that was most of them (90 targets, 18 records) — and the moment
+    such a source changed, SCCS refused to update a target it had created.
+    """
+
+    def test_identical_target_is_adopted(self, tmp_path):
+        detector = _detector(tmp_path)
+        _write_skill(detector, "my-skill")
+        # Write it, then start from an empty register as if the export
+        # predated ownership tracking.
+        export_skills_to_codex(detector.get_skill_gaps())
+        state = CodexExportState()
+
+        assert detector.adopt_in_sync(state) == ["skills:my-skill"]
+        assert state.owns("skills", "my-skill", detector.skills_dir / "my-skill")
+
+    def test_adoption_makes_the_next_update_ordinary(self, tmp_path):
+        """The whole point: after adoption a changed source updates its target
+        without --replace-foreign."""
+        detector = _detector(tmp_path)
+        source = _write_skill(detector, "my-skill")
+        export_skills_to_codex(detector.get_skill_gaps())
+
+        state = CodexExportState()
+        detector.adopt_in_sync(state)
+        (source / "SKILL.md").write_text("changed", encoding="utf-8")
+
+        gaps = detector.get_skill_gaps(state=state)
+        assert not gaps[0].foreign_target
+        result = export_skills_to_codex(gaps, state=state)
+        assert result.updated == ["my-skill"]
+
+    def test_a_differing_target_is_never_adopted(self, tmp_path):
+        """The guard must survive: divergence is exactly what it protects."""
+        detector = _detector(tmp_path)
+        _write_skill(detector, "my-skill")
+        target = detector.skills_dir / "my-skill"
+        target.mkdir()
+        (target / "SKILL.md").write_text("hand written", encoding="utf-8")
+
+        state = CodexExportState()
+        assert detector.adopt_in_sync(state) == []
+        assert detector.get_skill_gaps(state=state)[0].foreign_target
+        assert (target / "SKILL.md").read_text(encoding="utf-8") == "hand written"
+
+    def test_missing_target_is_not_adopted(self, tmp_path):
+        detector = _detector(tmp_path)
+        _write_skill(detector, "my-skill")
+        assert detector.adopt_in_sync(CodexExportState()) == []
+
+    def test_excluded_artefacts_are_not_adopted(self, tmp_path):
+        """source_names ignores excludes, so an excluded artefact also has no
+        gap — it must not be mistaken for an in-sync one."""
+        detector = _detector(tmp_path)
+        _write_skill(detector, "gsd-thing")
+        export_skills_to_codex(detector.get_skill_gaps())
+
+        state = CodexExportState()
+        assert detector.adopt_in_sync(state, exclude_patterns=["gsd-*"]) == []
+
+    def test_adoption_is_idempotent(self, tmp_path):
+        detector = _detector(tmp_path)
+        _write_skill(detector, "my-skill")
+        export_skills_to_codex(detector.get_skill_gaps())
+
+        state = CodexExportState()
+        assert detector.adopt_in_sync(state) == ["skills:my-skill"]
+        assert detector.adopt_in_sync(state) == []
+
+    def test_agents_and_commands_are_adopted_too(self, tmp_path):
+        detector = _detector(tmp_path)
+        (detector._cc_agents_dir / "reviewer.md").write_text(AGENT_MD, encoding="utf-8")
+        (detector._cc_commands_dir / "finalize.md").write_text(COMMAND_MD, encoding="utf-8")
+        convert_agents_to_codex(detector.get_agent_gaps())
+        convert_commands_to_codex(detector.get_command_gaps())
+
+        state = CodexExportState()
+        assert sorted(detector.adopt_in_sync(state)) == ["agents:reviewer", "commands:finalize"]
+
+    def test_a_command_blocked_by_a_skill_collision_is_not_adopted(self, tmp_path):
+        """A collision produces a gap, so silence never covers it."""
+        detector = _detector(tmp_path)
+        _write_skill(detector, "shared-name")
+        export_skills_to_codex(detector.get_skill_gaps())
+        (detector._cc_commands_dir / "shared-name.md").write_text(COMMAND_MD, encoding="utf-8")
+
+        state = CodexExportState()
+        # The skill is adopted; the command that lost the slot is not.
+        assert detector.adopt_in_sync(state) == ["skills:shared-name"]

@@ -497,6 +497,65 @@ class CodexDetector:
             names.add(path.stem)
         return names
 
+    def target_path(self, kind: str, name: str) -> Path:
+        """Where an artefact of ``kind`` lands. Mirrors the three gap builders."""
+        if kind == "skills":
+            return self._skills_dir / name
+        if kind == "agents":
+            return self.agents_dir / f"{name}.toml"
+        return self._skills_dir / name / "SKILL.md"
+
+    def adopt_in_sync(
+        self,
+        state: CodexExportState,
+        *,
+        model_map: dict[str, str] | None = None,
+        reasoning_map: dict[str, str] | None = None,
+        exclude_patterns: list[str] | None = None,
+    ) -> list[str]:
+        """Claim ownership of targets that already equal what SCCS would write.
+
+        Ownership used to be recorded ONLY when a target was written, so a
+        target that never needed writing could never earn it — and on a normal
+        host that is most of them. The moment such a source changed, its target
+        was reported as foreign and refused an update, although SCCS had
+        created it. Measured on a real host: 90 targets, 18 with a record.
+
+        Adopting an identical target loses nothing the guard was protecting:
+        a hand edit at the target would, by definition, make it differ, and a
+        differing target produces a gap and is therefore never adopted here.
+        Absence of a gap is exactly the proof of equality — which is why this
+        derives from the gap builders instead of comparing again.
+
+        Returns the ``kind:name`` keys adopted, so a caller knows to persist.
+        """
+        adopted: list[str] = []
+        for kind, gaps in (
+            ("skills", self.get_skill_gaps(exclude_patterns=exclude_patterns, state=state)),
+            (
+                "agents",
+                self.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude_patterns, state=state),
+            ),
+            ("commands", self.get_command_gaps(exclude_patterns=exclude_patterns, state=state)),
+        ):
+            pending = {gap.name for gap in gaps}
+            for name in sorted(self.source_names(kind)):
+                # A gap of ANY kind disqualifies: pending work, a symlink block,
+                # a command collision, or a foreign target. Only silence means
+                # "target exists and matches".
+                if name in pending:
+                    continue
+                # source_names deliberately ignores excludes; an excluded
+                # artefact has no gap either and must not be adopted.
+                if exclude_patterns and matches_any_pattern(name, exclude_patterns):
+                    continue
+                dst = self.target_path(kind, name)
+                if not dst.exists() or state.owns(kind, name, dst):
+                    continue
+                state.record(kind, name, dst)
+                adopted.append(CodexExportState.key(kind, name))
+        return adopted
+
     def _cc_skill_names(self) -> set[str]:
         """Names of exportable Claude skills (they claim the skill slots)."""
         names: set[str] = set()

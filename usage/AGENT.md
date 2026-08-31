@@ -189,7 +189,8 @@ skills (Codex prompts are deprecated). Bundled model map (v2.58.3): `opus`/`sonn
 ONE current model family and differ only in reasoning effort — Codex has no discovery *command*,
 but caches a catalogue at `~/.codex/models_cache.json` (one `slug` per entry) to validate the map
 before agent export; a missing configured slug aborts the export. SCCS tracks the targets it creates
-in `~/.config/sccs/.codex_export_state.yaml`. Two independent switches, because they cover two
+in `~/.config/sccs/.codex_export_state.yaml`, adopting any target that already matches byte for byte
+so ownership is not limited to targets it happened to write. Two independent switches, because they cover two
 different risks: `--overwrite` (or `--force`) updates targets SCCS recorded as its own, while
 `--replace-foreign` is required for a target SCCS did not write — one that may hold hand edits.
 Neither implies the other. Both exports additionally report skills the target will refuse to load
