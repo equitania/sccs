@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.59.0  ·  **Python:** ≥3.10
+- **Version:** 2.65.0  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -22,6 +22,9 @@
 - Auto-commit / auto-push / auto-pull around sync, gated by config and per-run flags.
 - Timestamped backups before every overwrite; dry-run preview on every mutating command.
 - Selective ZIP export/import of items for deploying configs to other machines (zip-slip-safe import).
+- Ship a named, scenario-scoped bundle (skills/agents/commands/framework files/shell config) to a
+  foreign host and later remove it again with verification (`sccs deploy`) — the bundle carries its
+  own removal policy in the manifest, so the target needs no SCCS config at all.
 - Report how much plan quota each orchestrated agent CLI has left (`sccs capacity`), with the
   provenance of every number, so a supervisor routes by remaining capacity instead of guessing.
 - "Doctor": inspect & repair a Claude Code environment (Node, `claude` CLI, plugins, npx tools,
@@ -55,6 +58,12 @@
 | `sccs config validate` | Validate configuration file. | --json |
 | `sccs convert fish-to-pwsh` | Generate a PowerShell profile from Fish shell configuration. | --src PATH, --dst PATH, --force, -n/--dry-run, --conveniences/--no-conveniences |
 | `sccs convert fish-to-zsh` | Generate a zsh profile from Fish shell configuration (best-effort function translation; platform files get `uname` guards; never emits broken zsh). | --src PATH, --dst PATH, --force, -n/--dry-run, --conveniences/--no-conveniences |
+| `sccs deploy list` | Show the deployment profiles. | --json |
+| `sccs deploy show` | Resolve a profile against the local tree: item list, missing items, unmet skill dependencies. | NAME, --platform TEXT, --json |
+| `sccs deploy export` | Build the deployment bundle ZIP for a profile. | NAME, -o/--output PATH, --platform TEXT, -n/--dry-run, --allow-missing-deps, --json |
+| `sccs deploy install` | Install a bundle on the target host and write the receipt. | ZIP, -n/--dry-run, --json |
+| `sccs deploy status` | Show what SCCS installed on this host via deploy. | --json |
+| `sccs deploy revoke` | Remove a deployed bundle again and verify it is gone. | --profile TEXT, -n/--dry-run, --keep-traces, -y/--yes, --json |
 | `sccs diff` | Show diff for items. | [ITEM_NAME], -c/--category TEXT, --json |
 | `sccs docs generate` | Generate hub README for the sync repository. | -n/--dry-run, --commit, --push |
 | `sccs doctor check` | Status table of Node.js, claude CLI, plugins, npx tools (+ opt-in CLI tools zoxide/coreutils); live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged); shows Node + CLI-tool install commands inline. | --update-check/--no-update-check, --json |
@@ -135,6 +144,38 @@ sccs export --all -o full-setup.zip            # everything, no prompt
 sccs import full-setup.zip --dry-run           # preview
 sccs import full-setup.zip --overwrite         # apply, with automatic backup of replaced files
 ```
+
+### Deploy a scenario bundle to a customer host, then take it back off
+```bash
+sccs deploy list                                  # configured profiles (odoo-server, odoo-dev-full, fastreport, shell-only)
+sccs deploy show odoo-server --platform linux     # resolve against the local tree: items, missing items, unmet skill deps
+sccs deploy export odoo-server -o odoo-server.zip --platform linux
+# the bundle targets the PROFILE's platform, not the exporting machine's — a Mac must not pack
+# macOS-only fish files into a bundle meant for a Linux server
+# the manifest is self-describing (profile, platform, retain list, sweep globs) — deploy install
+# needs no SCCS config on the target host at all, that is the normal case
+scp odoo-server.zip customer-host:~/              # however you move the bytes over
+
+# on the target host:
+sccs deploy install odoo-server.zip --dry-run     # preview
+sccs deploy install odoo-server.zip               # writes files + a receipt (schema v2); a target
+                                                   # that pre-dates the install is skipped and
+                                                   # reported, never overwritten
+sccs deploy status                                # what SCCS installed here, read from the receipt
+
+# ... work on the customer host ...
+
+sccs deploy revoke -y                             # removes it again; ends with a verification
+                                                   # sweep that re-scans the shipped names
+                                                   # independently of the receipt bookkeeping
+# revoke also trims `history` out of ~/.claude.json (never deletes the file — it also holds the
+# host user's auth/onboarding state), clears the matching session transcripts under
+# ~/.claude/projects/ (they quote skill content verbatim), and removes ~/.config/sccs/ unless
+# that directory pre-dates the install — which means the customer runs SCCS themselves, and then
+# it is left alone with a note in the report
+```
+One-way delivery with a way back — unlike `export`/`import` (any items, ad-hoc ZIP, no removal
+tracking), a deploy profile is named, repeatable, and knows how to remove itself.
 
 ### Heal a Claude Code environment
 ```bash
@@ -256,6 +297,21 @@ sccs config show               # current config; also: validate | edit | init [-
     export commands) — that is what makes it a maintenance command. It still never touches a foreign
     target without `--replace-foreign`, and never exports Codex hooks.
   - Mutating commands honour `-n/--dry-run` (or `--dry-run`) — preview first when unsure.
+- **Deploy ownership & revoke safety:**
+  - A target that pre-dates the SCCS `deploy install` is recorded `pre_existing`; `revoke` never
+    removes it, and — since v2.65.0 — `install` never overwrites it either, it is skipped and
+    reported. A target SCCS installed that the customer later edited IS removed on revoke, flagged
+    as modified — a different fact from `pre_existing`, not a stronger version of it.
+  - `revoke`'s closing verification sweep re-scans the shipped names independently of the receipt:
+    a name planned for removal that survived, or a name with no receipt entry at all, are
+    **failures** (non-zero exit); a name proven never written by SCCS is reported but not a
+    failure — unless its content is byte-identical to what the bundle would have shipped, in which
+    case it counts as a failure again (the customer host now holds our knowledge either way).
+  - A receipt written by an older SCCS (schema < v2) is refused with actionable text, never read
+    under the new assumptions.
+  - `claude_memories`, `claude_plans`, `claude_todos` may never appear in a deployment profile —
+    the schema validator raises. That is project memory from other engagements and must never
+    leave the machine.
 - **Backups:** writes land in `~/.config/sccs/backups/<category>/<item>.<timestamp>.bak` before overwrite.
 - **Prerequisites:** `sccs config init` must have produced `~/.config/sccs/config.yaml`; sync needs a valid
   `repository.path` git repo. `doctor` needs Node ≥20 + the `claude` CLI for plugin steps. OpenCode
@@ -301,6 +357,7 @@ sccs config show               # current config; also: validate | edit | init [-
 - `docs/usage/doctor.md` — every check, cascade-resilience, statusline, manual blocks.
 - `docs/usage/profiles.md` — profiles, statusline presets, install safety (DE/EN).
 - `docs/usage/transfer.md` — export/import (ZIP) use cases.
+- `docs/usage/deploy.md` — deploy profiles, bundle contents, ownership & revoke rules (DE/EN).
 - `docs/usage/opencode.md` — model mapping & conversion rules.
 - `docs/usage/categories.md` · `docs/usage/platforms.md` · `docs/usage/cli-reference.md` — full reference.
 - Config: `~/.config/sccs/config.yaml` · env: `SCCS_CONFIG` (config path), `EDITOR`/`VISUAL` (merge/edit).

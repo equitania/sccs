@@ -27,6 +27,7 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 - 🛡️ **`doctor.protected_hooks`** *(v2.32.0)* — harter Schutzwall (Default `gsd-`): geschützte Hooks werden NIE entfernt, auch wenn ein `disallowed_hooks`-Pattern matcht (*protection wins*). GSD-Hooks überleben jeden doctor-Pass.
 - ⚡ **Auto-Update sicherer Wartung** *(v2.32.0)* — `sccs doctor update`/`optimize` führt Plugin-Install/Update, npx-Refresh (inkl. GSD), Marketplace- und Bundled-Skill-Schritte ohne Nachfrage aus; destruktive Actions (Uninstall, Hook-Removal) bleiben confirm-pflichtig.
 - 📦 **Selektiver Export/Import** als ZIP-Archiv (Checkbox-Auswahl) für Kundendeployments → [docs/usage/transfer.md](docs/usage/transfer.md)
+- 🚚 **Deploy: Kundendeployment mit Rückweg** *(v2.65.0)* — `sccs deploy export odoo-server -o kunde.zip` baut aus einem benannten Profil (Skills, Agents, Commands, Framework-Dateien, Shell-Config) ein Bundle für einen fremden Host; `sccs deploy install` installiert es dort — auch ohne SCCS-Config auf dem Zielrechner —, `sccs deploy revoke` nimmt alles wieder ab und prüft mit einer Sweep, dass nichts zurückbleibt. Anders als das allgemeine `sccs export`/`import` ist das ein wiederholbares, benanntes Profil mit definiertem Rückweg → [docs/usage/deploy.md](docs/usage/deploy.md)
 - 🧠 **Memory Bridge** — file-basierter persistenter Kontext zwischen Claude Code (Terminal) und Claude.ai (Web), inklusive `sccs memory` CRUD-CLI → [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md)
 - 🔀 **OpenCode-Integration** *(v2.37.0)* — `sccs integrations opencode` exportiert Claude-Artefakte one-way nach [OpenCode](https://opencode.ai): Skills/Rules werden nativ gelesen, Agents/Commands per Frontmatter-Konvertierung materialisiert, MCP-Server in `opencode.json` gemerged → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🎯 **Dynamische Modell-Zuordnung** *(v2.38.0)* — `opencode map-models` löst Claude-Modelle gegen die real verfügbaren OpenCode-Modelle auf (`opencode models`-Discovery + Familien-Match), konfigurierbar über `opencode.model_map`, statischer Fallback offline → [docs/usage/opencode.md](docs/usage/opencode.md)
@@ -96,6 +97,7 @@ sccs doctor check                # System & Plugin Health prüfen
 | [docs/usage/sync.md](docs/usage/sync.md) | Sync-Workflow, Schnellstart, Konfiguration, Konfliktauflösung, Backups |
 | [docs/usage/doctor.md](docs/usage/doctor.md) | `sccs doctor` — System & Plugin Health, Bundled Skills, Browser-Bundles, Permission-Checks |
 | [docs/usage/transfer.md](docs/usage/transfer.md) | Export/Import als ZIP-Archive (Customer Deployment) |
+| [docs/usage/deploy.md](docs/usage/deploy.md) | Kundendeployment: Profile, Export/Install/Revoke, Ownership, Verifikations-Sweep |
 | [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md) | Memory Bridge: persistenter Kontext zwischen Claude Code und Claude.ai |
 | [docs/usage/categories.md](docs/usage/categories.md) | Kategorien-Referenz, Standard-Kategorien, Plattform-Filter |
 | [docs/usage/opencode.md](docs/usage/opencode.md) | OpenCode-Integration: Agents/Commands exportieren, Modell-Mapping, MCP-Merge |
@@ -130,6 +132,7 @@ SCCS is a YAML-configured, bidirectional synchronization tool for Claude Code fi
 - 🛡️ **`doctor.protected_hooks`** *(v2.32.0)* — hard guard (default `gsd-`): protected hooks are NEVER stripped, even when a `disallowed_hooks` pattern matches (*protection wins*). GSD hooks survive every doctor pass.
 - ⚡ **Auto-update for safe maintenance** *(v2.32.0)* — `sccs doctor update`/`optimize` runs plugin install/update, npx refresh (incl. GSD), marketplace and bundled-skill steps without prompts; destructive actions (uninstall, hook removal) keep their confirm gate.
 - 📦 **Selective export/import** as ZIP archives (checkbox selection) for customer deployments → [docs/usage/transfer.md](docs/usage/transfer.md)
+- 🚚 **Deploy: customer deployments with a way back** *(v2.65.0)* — `sccs deploy export odoo-server -o customer.zip` builds a bundle from a named profile (skills, agents, commands, framework files, shell config) for a foreign host; `sccs deploy install` installs it there — even with no SCCS config on the target —, `sccs deploy revoke` takes it back off and verifies with a sweep that nothing is left. Unlike the general-purpose `sccs export`/`import`, this is a repeatable, named profile with a defined way back → [docs/usage/deploy.md](docs/usage/deploy.md)
 - 🧠 **Memory Bridge** — file-based persistent context between Claude Code (terminal) and Claude.ai (web), including a full `sccs memory` CRUD CLI → [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md)
 - 🔀 **OpenCode integration** *(v2.37.0)* — `sccs integrations opencode` exports Claude artefacts one-way to [OpenCode](https://opencode.ai): skills/rules are read natively, agents/commands are materialised via frontmatter conversion, MCP servers are merged into `opencode.json` → [docs/usage/opencode.md](docs/usage/opencode.md)
 - 🎯 **Dynamic model mapping** *(v2.38.0)* — `opencode map-models` resolves Claude models against the models your OpenCode install actually offers (`opencode models` discovery + family match), configurable via `opencode.model_map`, with a static fallback when offline → [docs/usage/opencode.md](docs/usage/opencode.md)
@@ -198,6 +201,7 @@ sccs doctor check                # System & plugin health check
 | [docs/usage/sync.md](docs/usage/sync.md) | Sync workflow, quick start, configuration, conflict resolution, backups |
 | [docs/usage/doctor.md](docs/usage/doctor.md) | `sccs doctor` — system & plugin health, bundled skills, browser bundles, permission checks |
 | [docs/usage/transfer.md](docs/usage/transfer.md) | Export/Import as ZIP archives (customer deployment) |
+| [docs/usage/deploy.md](docs/usage/deploy.md) | Customer deployment: profiles, export/install/revoke, ownership, verification sweep |
 | [docs/usage/memory-bridge.md](docs/usage/memory-bridge.md) | Memory Bridge: persistent context between Claude Code and Claude.ai |
 | [docs/usage/categories.md](docs/usage/categories.md) | Category reference, default categories, platform filters |
 | [docs/usage/opencode.md](docs/usage/opencode.md) | OpenCode integration: export agents/commands, model mapping, MCP merge |
