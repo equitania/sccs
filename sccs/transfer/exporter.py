@@ -50,7 +50,13 @@ class ExportResult:
 class Exporter:
     """Scans local items and creates ZIP export archives."""
 
-    def __init__(self, config: SccsConfig, *, include_managed: bool = False) -> None:
+    def __init__(
+        self,
+        config: SccsConfig,
+        *,
+        include_managed: bool = False,
+        target_platform: str | None = None,
+    ) -> None:
         """Initialize the exporter.
 
         Args:
@@ -60,6 +66,8 @@ class Exporter:
                 those files are reproducible via `sccs doctor install` on the
                 target machine, so shipping a frozen snapshot of them just
                 creates drift (see `sccs/doctor/managed.py`).
+            target_platform: Platform the export is built FOR ("linux",
+                "macos", "windows"). Defaults to the running machine.
         """
         self._config = config
         # Mirror SyncEngine.effective_global_exclude: the sync engine already
@@ -70,6 +78,7 @@ class Exporter:
         if not include_managed:
             self._doctor_excludes = get_doctor_managed_excludes(config.doctor, getattr(config, "statusline", None))
         self.effective_global_exclude = list(config.global_exclude) + self._doctor_excludes
+        self._target_platform = target_platform
 
     def scan_available_items(self) -> dict[str, list[SyncItem]]:
         """Scan all enabled categories for locally available items.
@@ -84,7 +93,7 @@ class Exporter:
         for cat_name, category in self._config.sync_categories.items():
             if not category.enabled:
                 continue
-            if not is_platform_match(category.platforms):
+            if not is_platform_match(category.platforms, platform=self._target_platform):
                 continue
 
             local_path = expand_path(category.local_path)

@@ -39,20 +39,25 @@ def get_current_platform() -> str:
     return _PLATFORM_MAP.get(system, system.lower())
 
 
-def is_platform_match(platforms: list[str] | None) -> bool:
+def is_platform_match(platforms: list[str] | None, *, platform: str | None = None) -> bool:
     """
-    Check if the current platform matches the given platform filter.
+    Check if a platform filter matches.
 
     Args:
         platforms: List of platform names to match against.
                    None or empty list means all platforms match.
+        platform: Reference platform. Defaults to the running machine.
+                  `sccs deploy export` passes the profile's target platform
+                  here — otherwise a Mac would pack `fish_config_macos`
+                  into a Linux bundle.
 
     Returns:
-        True if current platform is in the list, or if list is None/empty.
+        True if the reference platform is in the list, or if list is
+        None/empty.
     """
     if not platforms:
         return True
-    return get_current_platform() in platforms
+    return (platform or get_current_platform()) in platforms
 
 
 def is_shell_available(shell: str) -> bool:
