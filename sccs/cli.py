@@ -4078,6 +4078,7 @@ def deploy_revoke(
                     "errors": [],
                     "leftovers": [],
                     "shared": [],
+                    "state_dir_kept": plan.keep_state_dir,
                 }
             )
         else:
