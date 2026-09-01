@@ -4053,7 +4053,7 @@ def deploy_revoke(
     output_json: bool,
 ) -> None:
     """Remove what SCCS installed, and verify it is gone."""
-    from sccs.deploy.revoke import build_revoke_plan, execute_revoke
+    from sccs.deploy.revoke import SWEEP_REASON_LABELS, build_revoke_plan, execute_revoke
     from sccs.output.json_emit import emit_json, emit_json_error
 
     console = ctx.obj["console"]
@@ -4077,6 +4077,7 @@ def deploy_revoke(
                     "removed": 0,
                     "errors": [],
                     "leftovers": [],
+                    "benign_leftovers": [],
                     "shared": [],
                     "state_dir_kept": plan.keep_state_dir,
                 }
@@ -4144,23 +4145,32 @@ def deploy_revoke(
             "removed": result.removed,
             "errors": result.errors,
             "leftovers": result.leftovers,
+            "benign_leftovers": result.benign_leftovers,
             "shared": shared_names,
             "state_dir_kept": plan.keep_state_dir,
         }
         emit_json(payload)
         sys.exit(0 if result.success else 1)
 
+    # The sweep re-scans the shipped names without consulting the per-entry
+    # bookkeeping, so it also surfaces targets that were never ours. Those
+    # are shown, but separately and without failing the run — an alarm that
+    # fires on every host is an alarm nobody reads.
     if result.leftovers:
-        # The sweep re-scans the shipped names without consulting the
-        # per-entry bookkeeping, so it also surfaces a target that was
-        # recorded as the customer's own. That is the point — but the
-        # operator still needs to know which is which before deciding
-        # whether anything actually leaked.
-        recorded_foreign = {item.entry.target for item in plan.untouched}
-        console.print_error(f"{len(result.leftovers)} artefacts the profile shipped are still on this host:")
-        for leftover in result.leftovers:
-            note = " [dim](recorded as already present before the install — not written by SCCS)[/dim]"
-            console.print(f"  {leftover}{note if leftover in recorded_foreign else ''}")
+        console.print_error(f"{len(result.leftovers)} artefacts of ours are still on this host:")
+        for finding in result.findings:
+            if finding.failure:
+                reason = SWEEP_REASON_LABELS.get(finding.reason, finding.reason)
+                console.print(f"  {finding.path} [dim]— {reason}[/dim]")
+    if result.benign_leftovers:
+        console.print_warning(
+            f"{len(result.benign_leftovers)} names this profile ships are still on this host, "
+            f"but were never written by SCCS:"
+        )
+        for finding in result.findings:
+            if not finding.failure:
+                reason = SWEEP_REASON_LABELS.get(finding.reason, finding.reason)
+                console.print(f"  [dim]{finding.path} — {reason}[/dim]")
     for error in result.errors:
         console.print_error(error)
 

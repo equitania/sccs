@@ -293,6 +293,115 @@ def test_roundtrip_export_install_revoke_leaves_nothing(runner, home, tmp_path, 
     assert _parse_clean(result.output)["leftovers"] == []
 
 
+def test_a_second_run_does_not_report_a_clean_host(runner, home, tmp_path, monkeypatch):
+    """End to end: a sweep-only finding must survive into the next run.
+
+    The receipt is doctored the way a build with wrong ownership logic would
+    have written it — `pre_existing` on an artefact SCCS did write. Revoke
+    reports it and exits 1. The operator re-runs. If the record had been
+    dropped, that second run would print "Nothing to revoke on this host",
+    exit 0, and the artefact would still be there.
+    """
+    out = tmp_path / "b.zip"
+    assert runner.invoke(cli, ["deploy", "export", "tiny", "-o", str(out)]).exit_code == 0
+
+    target = tmp_path / "customer2"
+    target.mkdir()
+    monkeypatch.setenv("HOME", str(target))
+    monkeypatch.setattr(Path, "home", lambda: target)
+    monkeypatch.delenv("SCCS_CONFIG", raising=False)
+
+    assert runner.invoke(cli, ["deploy", "install", str(out), "--json"]).exit_code == 0
+    skill = target / ".claude" / "skills" / "odoo-common"
+    assert skill.exists()
+
+    manager = ReceiptManager(target / ".config" / "sccs" / ".deploy_receipt.yaml")
+    record = manager.load().find("tiny")
+    for entry in record.entries:
+        entry.pre_existing = True  # the wrong inference; written_by_sccs stays True
+    manager.record_install(record)
+
+    # `.stdout`, not `.output`: a failing revoke also logs to stderr, and
+    # CliRunner.output merges the two. The JSON contract is about stdout.
+    first = runner.invoke(cli, ["deploy", "revoke", "--yes", "--json"])
+    assert first.exit_code == 1, first.output
+    assert str(skill) in _parse_clean(first.stdout)["leftovers"]
+    assert skill.exists()
+
+    second = runner.invoke(cli, ["deploy", "revoke", "--yes", "--json"])
+    assert second.exit_code == 1, second.output
+    payload = _parse_clean(second.stdout)
+    assert str(skill) in payload["leftovers"]
+    assert payload["success"] is False
+
+
+def test_a_never_ours_leftover_is_reported_without_failing(runner, home, tmp_path, monkeypatch):
+    """Case 3 in the CLI: shown, labelled, exit 0.
+
+    The customer already had their own `odoo-common`, so install skipped it.
+    Revoke reports the name it ships and still finds — under
+    `benign_leftovers`, not `leftovers` — and succeeds.
+    """
+    out = tmp_path / "b.zip"
+    assert runner.invoke(cli, ["deploy", "export", "tiny", "-o", str(out)]).exit_code == 0
+
+    target = tmp_path / "customer3"
+    theirs = target / ".claude" / "skills" / "odoo-common"
+    theirs.mkdir(parents=True)
+    (theirs / "SKILL.md").write_text("# the customer's own\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(target))
+    monkeypatch.setattr(Path, "home", lambda: target)
+    monkeypatch.delenv("SCCS_CONFIG", raising=False)
+
+    assert runner.invoke(cli, ["deploy", "install", str(out), "--json"]).exit_code == 0
+
+    result = runner.invoke(cli, ["deploy", "revoke", "--yes", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = _parse_clean(result.output)
+    assert payload["leftovers"] == []
+    assert payload["benign_leftovers"] == [str(theirs)]
+    assert (theirs / "SKILL.md").read_text(encoding="utf-8") == "# the customer's own\n"
+
+
+def test_text_mode_separates_a_never_ours_leftover_from_a_real_one(runner, home, tmp_path, monkeypatch):
+    """The operator has to be able to tell the two blocks apart at a glance.
+
+    Both kinds of finding appear on this host: the customer's own
+    `odoo-common` (never ours) and, after doctoring the receipt, an
+    artefact SCCS did write but recorded as pre-existing.
+    """
+    import re
+
+    out = tmp_path / "b.zip"
+    assert runner.invoke(cli, ["deploy", "export", "tiny", "-o", str(out)]).exit_code == 0
+
+    target = tmp_path / "customer4"
+    theirs = target / ".claude" / "skills" / "odoo-common"
+    theirs.mkdir(parents=True)
+    (theirs / "SKILL.md").write_text("# the customer's own\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(target))
+    monkeypatch.setattr(Path, "home", lambda: target)
+    monkeypatch.delenv("SCCS_CONFIG", raising=False)
+
+    assert runner.invoke(cli, ["deploy", "install", str(out), "--json"]).exit_code == 0
+
+    manager = ReceiptManager(target / ".config" / "sccs" / ".deploy_receipt.yaml")
+    record = manager.load().find("tiny")
+    record.sweep_globs["claude_skills"] = ["odoo-common", "ghost"]
+    manager.record_install(record)
+    ghost = target / ".claude" / "skills" / "ghost"
+    ghost.mkdir(parents=True)
+    (ghost / "SKILL.md").write_text("# left behind\n", encoding="utf-8")
+
+    result = runner.invoke(cli, ["deploy", "revoke", "--yes"])
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+
+    assert result.exit_code == 1
+    assert "artefacts of ours are still on this host" in output
+    assert "no receipt entry" in output
+    assert "never written by SCCS" in output
+
+
 # --- Final review, CRITICAL 3: an unknown --profile must not read as clean ---
 
 

@@ -9,7 +9,16 @@ from pathlib import Path
 import pytest
 
 from sccs.deploy.receipt import InstallRecord, ReceiptEntry, ReceiptManager
-from sccs.deploy.revoke import build_revoke_plan, execute_revoke, sweep
+from sccs.deploy.revoke import (
+    SWEEP_CONTENT_MATCH,
+    SWEEP_PLANNED_SURVIVOR,
+    SWEEP_UNRECORDED,
+    SweepFinding,
+    build_revoke_plan,
+    execute_revoke,
+    sweep,
+    sweep_findings,
+)
 from sccs.utils.hashing import directory_hash
 
 
@@ -37,7 +46,14 @@ def host(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _entry(host: Path, name: str, *, pre_existing=False, category="claude_skills"):
+def _entry(host: Path, name: str, *, pre_existing=False, category="claude_skills", shipped_hash=None):
+    """A receipt entry as `deploy install` writes it.
+
+    `written_by_sccs` mirrors the install: False exactly for a target we
+    skipped because it was already there. `shipped_hash` is what the bundle
+    would have written to such a target — None here means the customer's
+    artefact is not our artefact.
+    """
     target = host / ".claude" / "skills" / name
     return ReceiptEntry(
         category=category,
@@ -46,6 +62,8 @@ def _entry(host: Path, name: str, *, pre_existing=False, category="claude_skills
         item_type="directory",
         content_hash=directory_hash(target),
         pre_existing=pre_existing,
+        written_by_sccs=not pre_existing,
+        shipped_hash=shipped_hash,
     )
 
 
@@ -108,11 +126,13 @@ def test_execute_removes_only_the_remove_bucket(manager, host):
     assert (host / ".config" / "fish" / "config.fish").exists()
 
     # `customers-own` is in the profile's sweep_globs and still on disk, so
-    # the verification sweep reports it and the revoke is not "clean". The
-    # sweep deliberately does not consult `pre_existing` — a bookkeeping flag
-    # that says "not ours" is exactly what it exists to second-guess.
-    assert result.leftovers == [str(host / ".claude" / "skills" / "customers-own")]
-    assert not result.success
+    # the sweep reports it — but the receipt POSITIVELY records that SCCS
+    # never wrote there and its content is not ours, so it is case 3:
+    # surfaced, labelled, and not a failure. Failing here would fail on
+    # every host that has its own copy of a shipped name.
+    assert result.benign_leftovers == [str(host / ".claude" / "skills" / "customers-own")]
+    assert result.leftovers == []
+    assert result.success
 
 
 def test_execute_purges_traces_and_drops_the_receipt(manager, host):
@@ -154,11 +174,20 @@ def test_traces_survive_while_another_profile_remains(manager, host):
     assert [r.profile for r in manager.load().installs] == ["fastreport"]
 
 
-def test_sweep_is_clean_once_every_shipped_name_is_gone(manager, host):
+def test_sweep_is_clean_after_a_successful_revoke(manager, host):
+    """A successful revoke leaves nothing of ours — with the host untouched.
+
+    The customer's own `customers-own` stays exactly where it is. It is
+    still reported (it is a name the profile ships), but as case 3, so no
+    finding fails and the revoke genuinely succeeds.
+    """
     plan = build_revoke_plan(manager, home=host)
-    execute_revoke(plan, manager)
-    # The host user's own copy of a shipped name is the one thing left; with
-    # it gone too, nothing the profile shipped remains and the sweep is clean.
+    result = execute_revoke(plan, manager)
+
+    assert result.success
+    assert [f for f in sweep_findings(plan) if f.failure] == []
+    assert (host / ".claude" / "skills" / "customers-own").exists()
+    # And with theirs gone too, the sweep reports nothing at all.
     shutil.rmtree(host / ".claude" / "skills" / "customers-own")
     assert sweep(plan) == []
 
@@ -206,9 +235,17 @@ def test_execute_fails_when_the_sweep_finds_something(manager, host, monkeypatch
     plan = build_revoke_plan(manager, home=host)
 
     def fake_sweep(_plan):
-        return [str(host / ".claude" / "skills" / "odoo19")]
+        return [
+            SweepFinding(
+                path=str(host / ".claude" / "skills" / "odoo19"),
+                category="claude_skills",
+                name="odoo19",
+                reason=SWEEP_PLANNED_SURVIVOR,
+                profile="odoo-server",
+            )
+        ]
 
-    monkeypatch.setattr("sccs.deploy.revoke.sweep", fake_sweep)
+    monkeypatch.setattr("sccs.deploy.revoke.sweep_findings", fake_sweep)
     result = execute_revoke(plan, manager)
     assert not result.success
     assert result.leftovers
@@ -303,12 +340,14 @@ def test_shared_skill_is_bucketed_shared_and_survives(manager, host):
     assert "odoo-common" not in {i.entry.name for i in plan.to_remove}
 
     result = execute_revoke(plan, manager)
+    assert result.success
     assert (host / ".claude" / "skills" / "odoo-common").exists()
     assert not (host / ".claude" / "skills" / "odoo19").exists()
     assert [r.profile for r in manager.load().installs] == ["fastreport"]
     # A shared artefact is excluded from the sweep — another profile still
     # claims it, so "still present" is the intended outcome, not a leak.
     assert not any("odoo-common" in item for item in result.leftovers)
+    assert not any("odoo-common" in item for item in result.benign_leftovers)
 
 
 def test_shared_skill_removed_once_the_last_profile_goes(manager, host):
@@ -324,3 +363,110 @@ def test_shared_skill_removed_once_the_last_profile_goes(manager, host):
     assert {i.entry.name for i in plan2.to_remove} == {"odoo-common"}
     execute_revoke(plan2, manager)
     assert not (host / ".claude" / "skills" / "odoo-common").exists()
+
+
+# --- Second-pass sweep findings keep the receipt record (three-way rule) ---
+
+
+def test_a_wrongly_skipped_artefact_of_ours_keeps_the_record(manager, host):
+    """The headline failure mode, one command later.
+
+    An entry is marked `pre_existing` on an artefact SCCS did write — the
+    exact shape of a receipt from a build whose ownership logic was wrong.
+    Revoke reports it and exits non-zero, correct. If the record went with
+    it, the operator's re-run would find no receipt, print "Nothing to
+    revoke on this host", exit 0, and leave the artefact standing. So the
+    provenance record, not the inference, decides: written_by_sccs=True
+    keeps the finding a failure and the record in place.
+    """
+    record = manager.load().find("odoo-server")
+    for entry in record.entries:
+        if entry.name == "odoo19":
+            entry.pre_existing = True  # the wrong inference ...
+            entry.written_by_sccs = True  # ... over the right record
+    manager.record_install(record)
+
+    plan = build_revoke_plan(manager, home=host)
+    # Bucketed untouched, so no planned removal will ever look at it.
+    assert "odoo19" in {i.entry.name for i in plan.untouched}
+
+    result = execute_revoke(plan, manager)
+
+    assert not result.success
+    assert str(host / ".claude" / "skills" / "odoo19") in result.leftovers
+    # The record survives, so the re-run still knows where to look.
+    assert [r.profile for r in manager.load().installs] == ["odoo-server"]
+    again = build_revoke_plan(manager, home=host)
+    assert again.records
+    assert str(host / ".claude" / "skills" / "odoo19") in sweep(again)
+
+
+def test_a_shipped_name_with_no_entry_at_all_fails_and_keeps_the_record(manager, host):
+    """Case 2: files written without being recorded.
+
+    A name in `sweep_globs` with no receipt entry is the signature of an
+    install that wrote and did not record. Losing the record here is the
+    worst case of all: there is no entry left to re-derive the directory
+    from, so the sweep could never find that artefact again.
+    """
+    record = manager.load().find("odoo-server")
+    record.sweep_globs["claude_skills"].append("ghost")
+    manager.record_install(record)
+    ghost = host / ".claude" / "skills" / "ghost"
+    ghost.mkdir(parents=True)
+    (ghost / "SKILL.md").write_text("# ghost\n", encoding="utf-8")
+
+    plan = build_revoke_plan(manager, home=host)
+    assert "ghost" not in {i.entry.name for i in plan.items}
+
+    result = execute_revoke(plan, manager)
+
+    assert not result.success
+    assert str(ghost) in result.leftovers
+    assert [f.reason for f in result.findings if f.name == "ghost"] == [SWEEP_UNRECORDED]
+    assert [r.profile for r in manager.load().installs] == ["odoo-server"]
+
+
+def test_a_foreign_target_holding_our_content_is_a_failure(manager, host):
+    """Condition (b): "already here" and "is our content" can coincide.
+
+    Ownership says the customer put it there and nothing of ours was
+    written. The bytes say otherwise — the artefact on that host IS the one
+    the bundle ships, so our knowledge is on it and the revoke has not
+    delivered its promise.
+    """
+    theirs = host / ".claude" / "skills" / "customers-own"
+    record = manager.load().find("odoo-server")
+    record.entries = [
+        _entry(host, "customers-own", pre_existing=True, shipped_hash=directory_hash(theirs))
+        if e.name == "customers-own"
+        else e
+        for e in record.entries
+    ]
+    manager.record_install(record)
+
+    plan = build_revoke_plan(manager, home=host)
+    result = execute_revoke(plan, manager)
+
+    assert not result.success
+    assert str(theirs) in result.leftovers
+    assert [f.reason for f in result.findings if f.name == "customers-own"] == [SWEEP_CONTENT_MATCH]
+    # Their file is still theirs — reported, never deleted.
+    assert theirs.exists()
+    assert [r.profile for r in manager.load().installs] == ["odoo-server"]
+
+
+def test_a_case_3_finding_alone_lets_the_receipt_record_go(manager, host):
+    """The other side of the rule: an alarm that always fires is no alarm.
+
+    `customers-own` is recorded as never written by SCCS and holds
+    different content. It is reported, but the revoke succeeds and the
+    record goes — otherwise every host carrying its own copy of a shipped
+    name would be permanently un-revokable.
+    """
+    plan = build_revoke_plan(manager, home=host)
+    result = execute_revoke(plan, manager)
+
+    assert result.success
+    assert result.benign_leftovers == [str(host / ".claude" / "skills" / "customers-own")]
+    assert not manager.exists()
