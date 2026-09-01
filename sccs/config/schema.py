@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from sccs.deploy.schema import DeploymentProfile
 from sccs.doctor.profiles import ProfileSpec
 from sccs.doctor.schema import DoctorConfig
 from sccs.doctor.statusline import StatusLineConfig
@@ -358,6 +359,18 @@ class SccsConfig(BaseModel):
             "switches together (skills, agents, settings.json hooks, "
             "statusline). Merged over the bundled defaults in "
             "sccs/doctor/profiles.py:DEFAULT_PROFILES."
+        ),
+    )
+    # Deployment profiles are fully optional: legacy config.yaml files
+    # without a `deployment_profiles:` key get the bundled defaults from
+    # sccs/deploy/defaults.py. An entry here fully replaces the bundled
+    # profile of the same name.
+    deployment_profiles: dict[str, DeploymentProfile] = Field(
+        default_factory=dict,
+        description=(
+            "Named, scenario-scoped bundles that `sccs deploy export` builds "
+            "for foreign hosts. Merged over the bundled defaults in "
+            "sccs/deploy/defaults.py:DEFAULT_DEPLOYMENT_PROFILES."
         ),
     )
     # Statusline block is fully optional: without it the bundled presets
