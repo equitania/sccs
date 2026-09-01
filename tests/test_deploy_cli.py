@@ -291,3 +291,129 @@ def test_roundtrip_export_install_revoke_leaves_nothing(runner, home, tmp_path, 
     assert result.exit_code == 0, result.output
     assert not (target / ".claude" / "skills" / "odoo-common").exists()
     assert _parse_clean(result.output)["leftovers"] == []
+
+
+# --- Final review, CRITICAL 3: an unknown --profile must not read as clean ---
+
+
+def _tiny_record(home: Path) -> InstallRecord:
+    return InstallRecord(
+        profile="tiny",
+        installed_at="2026-09-01T10:00:00+00:00",
+        sccs_version="2.65.0",
+        entries=[
+            ReceiptEntry(
+                category="claude_skills",
+                name="odoo-common",
+                target=str(home / ".claude" / "skills" / "odoo-common"),
+                item_type="directory",
+            )
+        ],
+    )
+
+
+def test_revoke_with_an_unknown_profile_fails_and_names_what_is_installed(runner, home):
+    """A typo used to filter to nothing and report a clean host, exit 0."""
+    manager = ReceiptManager(home / ".config" / "sccs" / ".deploy_receipt.yaml")
+    manager.record_install(_tiny_record(home))
+
+    result = runner.invoke(cli, ["deploy", "revoke", "--profile", "tinny", "--yes"])
+
+    assert result.exit_code == 1
+    assert "tinny" in result.output
+    assert "tiny" in result.output
+    assert (home / ".claude" / "skills" / "odoo-common").exists()
+
+
+def test_revoke_with_an_unknown_profile_emits_the_json_error_envelope(runner, home):
+    manager = ReceiptManager(home / ".config" / "sccs" / ".deploy_receipt.yaml")
+    manager.record_install(_tiny_record(home))
+
+    result = runner.invoke(cli, ["deploy", "revoke", "--profile", "nope", "--yes", "--json"])
+
+    assert result.exit_code == 1
+    payload = _parse_clean(result.output)
+    assert payload["success"] is False
+    assert "nope" in payload["error"]
+
+
+def test_revoke_without_a_profile_filter_still_succeeds_on_a_clean_host(runner, home):
+    """The legitimate "nothing installed here" case keeps exit 0."""
+    result = runner.invoke(cli, ["deploy", "revoke", "--yes", "--json"])
+    assert result.exit_code == 0
+    assert _parse_clean(result.output)["removed"] == 0
+
+
+# --- Final review, CRITICAL 1: foreign targets are visible in both modes ---
+
+
+def test_install_reports_skipped_foreign_targets(runner, home, tmp_path, monkeypatch):
+    out = tmp_path / "b.zip"
+    assert runner.invoke(cli, ["deploy", "export", "tiny", "-o", str(out)]).exit_code == 0
+
+    target = tmp_path / "customer-foreign"
+    (target / ".claude" / "skills" / "odoo-common").mkdir(parents=True)
+    (target / ".claude" / "skills" / "odoo-common" / "SKILL.md").write_text("theirs\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(target))
+    monkeypatch.setattr(Path, "home", lambda: target)
+    monkeypatch.delenv("SCCS_CONFIG", raising=False)
+
+    result = runner.invoke(cli, ["deploy", "install", str(out), "--json"])
+    assert result.exit_code == 0, result.output
+    payload = _parse_clean(result.output)
+    assert "claude_skills/odoo-common" in payload["skipped_foreign"]
+
+    text = runner.invoke(cli, ["deploy", "install", str(out)])
+    assert text.exit_code == 0, text.output
+    assert "odoo-common" in text.output
+    assert "not written by SCCS" in text.output
+    assert (target / ".claude" / "skills" / "odoo-common" / "SKILL.md").read_text(encoding="utf-8") == "theirs\n"
+
+
+# --- Final review, IMPORTANT 3: the host user's own ~/.config/sccs/ stays ---
+
+
+def _install_on(runner, out: Path, target: Path, monkeypatch):
+    monkeypatch.setenv("HOME", str(target))
+    monkeypatch.setattr(Path, "home", lambda: target)
+    monkeypatch.delenv("SCCS_CONFIG", raising=False)
+    result = runner.invoke(cli, ["deploy", "install", str(out), "--json"])
+    assert result.exit_code == 0, result.output
+
+
+def test_revoke_keeps_a_pre_existing_sccs_state_dir(runner, home, tmp_path, monkeypatch):
+    """The host user runs `sccs` themselves — their state is not ours."""
+    out = tmp_path / "b.zip"
+    assert runner.invoke(cli, ["deploy", "export", "tiny", "-o", str(out)]).exit_code == 0
+
+    target = tmp_path / "host-with-sccs"
+    (target / ".config" / "sccs").mkdir(parents=True)
+    (target / ".config" / "sccs" / "config.yaml").write_text("repository:\n  path: ~/x\n", encoding="utf-8")
+    (target / ".config" / "sccs" / ".sync_state.yaml").write_text("categories: {}\n", encoding="utf-8")
+    _install_on(runner, out, target, monkeypatch)
+
+    result = runner.invoke(cli, ["deploy", "revoke", "--yes", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = _parse_clean(result.output)
+    assert payload["state_dir_kept"] is True
+
+    assert (target / ".config" / "sccs" / "config.yaml").exists()
+    assert (target / ".config" / "sccs" / ".sync_state.yaml").exists()
+    assert not (target / ".config" / "sccs" / ".deploy_receipt.yaml").exists()
+    assert not (target / ".claude" / "skills" / "odoo-common").exists()
+
+
+def test_revoke_purges_a_state_dir_we_created(runner, home, tmp_path, monkeypatch):
+    out = tmp_path / "b.zip"
+    assert runner.invoke(cli, ["deploy", "export", "tiny", "-o", str(out)]).exit_code == 0
+
+    target = tmp_path / "host-without-sccs"
+    target.mkdir()
+    _install_on(runner, out, target, monkeypatch)
+    # Something SCCS itself would leave behind in that directory.
+    (target / ".config" / "sccs" / ".sync_state.yaml").write_text("categories: {}\n", encoding="utf-8")
+
+    result = runner.invoke(cli, ["deploy", "revoke", "--yes", "--json"])
+    assert result.exit_code == 0, result.output
+    assert _parse_clean(result.output)["state_dir_kept"] is False
+    assert not (target / ".config" / "sccs" / ".sync_state.yaml").exists()

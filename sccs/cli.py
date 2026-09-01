@@ -3752,9 +3752,9 @@ def _load_deployment_profiles():
 
 
 def _deploy_receipt_manager():
-    from sccs.deploy.receipt import ReceiptManager
+    from sccs.deploy.receipt import ReceiptManager, default_receipt_path
 
-    return ReceiptManager(Path.home() / ".config" / "sccs" / ".deploy_receipt.yaml")
+    return ReceiptManager(default_receipt_path())
 
 
 @deploy_group.command("list")
@@ -3973,12 +3973,20 @@ def deploy_install(ctx: click.Context, zip_path: Path, dry_run: bool, output_jso
                 "profile": outcome.profile,
                 "installed": outcome.installed,
                 "skipped": outcome.skipped,
+                "skipped_foreign": outcome.skipped_foreign,
             }
         )
         return
 
     verb = "Would install" if dry_run else "Installed"
     console.print_success(f"{verb} {outcome.installed} artefacts (profile '{outcome.profile}')")
+    if outcome.skipped_foreign:
+        console.print_warning(
+            f"{len(outcome.skipped_foreign)} targets already existed and were not written by SCCS — left untouched:"
+        )
+        for name in outcome.skipped_foreign:
+            console.print(f"  [dim]{name}[/dim]")
+        console.print_info("  Nothing of ours landed there. Remove them by hand first to install ours.")
     if not dry_run:
         console.print_info("  Run `sccs deploy revoke` to remove them again.")
 
@@ -4099,6 +4107,11 @@ def deploy_revoke(
             console.print(f"\n[bold]Work traces ({len(plan.traces)}):[/bold]")
             for trace in plan.traces:
                 console.print(f"  {trace.path} — [dim]{trace.label}[/dim]")
+        if plan.keep_state_dir:
+            console.print(
+                "\n[dim]~/.config/sccs/ was already here before this deployment — "
+                "it stays, only the deployment receipt is removed.[/dim]"
+            )
 
     if not dry_run and not yes:
         # --json means non-interactive, full stop — even on a real TTY. The
@@ -4131,14 +4144,22 @@ def deploy_revoke(
             "errors": result.errors,
             "leftovers": result.leftovers,
             "shared": shared_names,
+            "state_dir_kept": plan.keep_state_dir,
         }
         emit_json(payload)
         sys.exit(0 if result.success else 1)
 
     if result.leftovers:
-        console.print_error(f"{len(result.leftovers)} artefacts survived the removal:")
+        # The sweep re-scans the shipped names without consulting the
+        # per-entry bookkeeping, so it also surfaces a target that was
+        # recorded as the customer's own. That is the point — but the
+        # operator still needs to know which is which before deciding
+        # whether anything actually leaked.
+        recorded_foreign = {item.entry.target for item in plan.untouched}
+        console.print_error(f"{len(result.leftovers)} artefacts the profile shipped are still on this host:")
         for leftover in result.leftovers:
-            console.print(f"  {leftover}")
+            note = " [dim](recorded as already present before the install — not written by SCCS)[/dim]"
+            console.print(f"  {leftover}{note if leftover in recorded_foreign else ''}")
     for error in result.errors:
         console.print_error(error)
 

@@ -78,7 +78,7 @@ def _portable_raw_config(selections: list[ExportSelection], raw_config: dict) ->
 def _deployment_section(resolved: ResolvedProfile) -> DeploymentSection:
     return DeploymentSection(
         profile=resolved.name,
-        target_platform=resolved.profile.target_platform,
+        target_platform=resolved.target_platform,
         retain=list(resolved.profile.retain),
         purge_traces=True,
         sweep_globs={
@@ -103,7 +103,7 @@ def build_bundle(
 
     ships_skills = any(s.category_name == "claude_skills" and s.items for s in resolved.selections)
     section = _deployment_section(resolved)
-    exporter = Exporter(config, target_platform=resolved.profile.target_platform)
+    exporter = Exporter(config, target_platform=resolved.target_platform)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         selections = list(resolved.selections)

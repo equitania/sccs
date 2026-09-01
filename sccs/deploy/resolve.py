@@ -44,6 +44,16 @@ class ResolvedProfile:
     missing_deps: list[tuple[str, str]] = field(default_factory=list)
     # (category, item name) pairs named by the profile but absent locally.
     missing_items: list[tuple[str, str]] = field(default_factory=list)
+    # The platform this resolution actually used — the profile's own, unless
+    # `--platform` overrode it. The bundle's manifest must stamp THIS, not
+    # `profile.target_platform`: the ZIP contents already follow the override,
+    # and a manifest that says "linux" over a macOS payload is a lie the
+    # install host cannot detect.
+    target_platform: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.target_platform:
+            self.target_platform = self.profile.target_platform
 
     @property
     def total_items(self) -> int:
@@ -116,7 +126,7 @@ def resolve_profile(
     exporter = Exporter(config, target_platform=platform)
     scanned = exporter.scan_available_items()
 
-    resolved = ResolvedProfile(name=name, profile=profile)
+    resolved = ResolvedProfile(name=name, profile=profile, target_platform=platform)
     parsed: dict[str, list[str]] = {}
 
     for category, globs in profile.include.items():
