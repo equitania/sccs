@@ -7,6 +7,7 @@ import json
 import pytest
 
 from sccs.deploy.traces import (
+    TraceTarget,
     enumerate_traces,
     remove_traces,
     strip_claude_json_history,
@@ -110,3 +111,91 @@ def test_remove_traces_dry_run_removes_nothing(home):
     targets = [t for t in enumerate_traces(home) if t.exists]
     assert remove_traces(targets, dry_run=True) == []
     assert (home / ".claude" / "projects").exists()
+
+
+def test_claude_json_symlink_within_home_strips_the_target(home):
+    real = home / "real-claude.json"
+    real.write_text(
+        json.dumps({"userID": "abc", "history": [{"display": "secret"}]}),
+        encoding="utf-8",
+    )
+    link = home / ".claude.json"
+    link.unlink()
+    link.symlink_to(real)
+
+    changed = strip_claude_json_history(link)
+    assert changed
+
+    doc = json.loads(real.read_text(encoding="utf-8"))
+    assert "history" not in doc
+    assert doc["userID"] == "abc"
+    assert link.is_symlink()
+
+
+def test_claude_json_symlink_outside_home_is_left_alone(home):
+    outside = home.parent / "outside-claude.json"
+    outside.write_text(json.dumps({"history": [{"display": "secret"}]}), encoding="utf-8")
+    link = home / ".claude.json"
+    link.unlink()
+    link.symlink_to(outside)
+
+    result = strip_claude_json_history(link)
+    assert result is False
+
+    doc = json.loads(outside.read_text(encoding="utf-8"))
+    assert doc["history"] == [{"display": "secret"}]
+
+
+def test_remove_traces_rejects_unknown_kind(tmp_path):
+    mystery = tmp_path / "mystery.txt"
+    mystery.write_text("data", encoding="utf-8")
+    target = TraceTarget(path=mystery, label="mystery", kind="bogus", exists=True, size_bytes=4)
+
+    errors = remove_traces([target])
+
+    assert mystery.exists()
+    assert len(errors) == 1
+    assert "bogus" in errors[0]
+
+
+def test_enumerate_lists_sccs_state_dir_contents_and_excludes_receipt(home):
+    state_dir = home / ".config" / "sccs"
+    (state_dir / "sync.log").write_text("log\n", encoding="utf-8")
+    (state_dir / ".sync_state.yaml").write_text("state:\n", encoding="utf-8")
+    (state_dir / "profiles").mkdir()
+    (state_dir / "profiles" / "p1.yaml").write_text("x\n", encoding="utf-8")
+    (state_dir / ".deploy_receipt.yaml").write_text("receipt\n", encoding="utf-8")
+
+    targets = enumerate_traces(home)
+    all_paths = {t.path for t in targets}
+    state_paths = {t.path for t in targets if t.path.parent == state_dir}
+
+    assert state_paths == {
+        state_dir / "config.yaml",
+        state_dir / "sync.log",
+        state_dir / ".sync_state.yaml",
+        state_dir / "profiles",
+    }
+    assert state_dir / ".deploy_receipt.yaml" not in all_paths
+
+
+def test_remove_traces_clears_sccs_state_but_keeps_receipt(home):
+    state_dir = home / ".config" / "sccs"
+    (state_dir / "sync.log").write_text("log\n", encoding="utf-8")
+    (state_dir / "profiles").mkdir()
+    (state_dir / "profiles" / "p1.yaml").write_text("x\n", encoding="utf-8")
+    (state_dir / ".deploy_receipt.yaml").write_text("receipt\n", encoding="utf-8")
+
+    targets = [t for t in enumerate_traces(home) if t.exists]
+    errors = remove_traces(targets)
+
+    assert errors == []
+    assert not (state_dir / "config.yaml").exists()
+    assert not (state_dir / "sync.log").exists()
+    assert not (state_dir / "profiles").exists()
+    assert (state_dir / ".deploy_receipt.yaml").exists()
+
+
+def test_enumerate_contributes_no_sccs_state_targets_when_dir_absent(tmp_path):
+    targets = enumerate_traces(tmp_path)
+    assert not any(t.label.startswith("SCCS state") for t in targets)
