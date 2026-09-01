@@ -196,6 +196,40 @@ def test_revoke_dry_run_needs_no_confirmation(runner, home):
     assert _parse_clean(result.output)["dry_run"] is True
 
 
+def test_revoke_json_without_yes_refuses_rather_than_prompting(runner, home, monkeypatch):
+    """Finding 2: --json must never reach the confirmation prompt.
+
+    Even on a TTY (forced here the same way as the without-yes-aborts test),
+    --json without --yes must refuse outright: prompting, or printing
+    "Aborted", would write plain text into what is supposed to be one clean
+    JSON line.
+    """
+    manager = ReceiptManager(home / ".config" / "sccs" / ".deploy_receipt.yaml")
+    manager.record_install(
+        InstallRecord(
+            profile="tiny",
+            installed_at="2026-09-01T10:00:00+00:00",
+            sccs_version="2.65.0",
+            entries=[
+                ReceiptEntry(
+                    category="claude_skills",
+                    name="odoo-common",
+                    target=str(home / ".claude" / "skills" / "odoo-common"),
+                    item_type="directory",
+                )
+            ],
+        )
+    )
+    monkeypatch.setattr("click.testing._NamedTextIOWrapper.isatty", lambda self: True)
+
+    result = runner.invoke(cli, ["deploy", "revoke", "--json"])
+
+    assert result.exit_code == 1
+    payload = _parse_clean(result.output)
+    assert payload["success"] is False
+    assert (home / ".claude" / "skills" / "odoo-common").exists()
+
+
 def test_revoke_reports_shared_artefacts_kept(runner, home):
     """Amendment 1: a fifth bucket for artefacts another install still claims."""
     manager = ReceiptManager(home / ".config" / "sccs" / ".deploy_receipt.yaml")

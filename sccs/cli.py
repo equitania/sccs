@@ -4101,12 +4101,19 @@ def deploy_revoke(
                 console.print(f"  {trace.path} — [dim]{trace.label}[/dim]")
 
     if not dry_run and not yes:
+        # --json means non-interactive, full stop — even on a real TTY. The
+        # confirmation prompt and an "Aborted" warning both write to stdout,
+        # which is exactly the stream a --json caller is trying to parse as
+        # one clean JSON line. Same convention as `_run_profile_switch`
+        # (`if not yes and not output_json:`), except revoke is destructive
+        # and must refuse rather than silently proceed unconfirmed.
+        if output_json:
+            message = "Refusing to prompt for confirmation with --json — pass --yes for non-interactive use."
+            emit_json_error(message)
+            sys.exit(1)
         if not sys.stdout.isatty():
             message = "Refusing to revoke without a TTY — pass --yes for non-interactive use."
-            if output_json:
-                emit_json_error(message)
-            else:
-                console.print_error(message)
+            console.print_error(message)
             sys.exit(1)
         answer = click.prompt("\nSoll das wirklich entfernt werden? (ja/nein)", default="nein")
         if answer.strip().lower() not in {"ja", "yes"}:
