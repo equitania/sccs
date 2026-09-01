@@ -11,7 +11,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sccs.deploy.receipt import ReceiptEntry, ReceiptManager
+from sccs.deploy.receipt import InstallRecord, ReceiptEntry, ReceiptManager
 from sccs.deploy.traces import TraceTarget, enumerate_traces, remove_traces
 from sccs.doctor._paths import is_home_path
 from sccs.utils.hashing import directory_hash, file_hash
@@ -47,6 +47,13 @@ class RevokePlan:
     items: list[RevokeItem] = field(default_factory=list)
     traces: list[TraceTarget] = field(default_factory=list)
     purge_traces: bool = True
+    # The install records being revoked. The verification sweep works from
+    # these — their `sweep_globs` — rather than from the per-entry buckets,
+    # because the whole point of the sweep is to not trust that bookkeeping.
+    records: list[InstallRecord] = field(default_factory=list)
+    # True when ~/.config/sccs/ was the host user's own before we arrived, so
+    # the trace purge leaves it alone and takes only the receipt.
+    keep_state_dir: bool = False
 
     def _bucket(self, bucket: str) -> list[RevokeItem]:
         return [i for i in self.items if i.bucket == bucket]
@@ -105,10 +112,19 @@ def build_revoke_plan(
         profile: Revoke only this profile. Default: every installed one.
         keep_traces: Leave transcripts, plans, todos and history in place.
         home: Root for trace enumeration. Defaults to the real home.
+
+    Raises:
+        ValueError: If the receipt cannot be read, or if `profile` names a
+            profile that is not installed. A typo must not be answered with
+            "nothing to revoke" and exit 0 — that reads as a clean host.
     """
     receipt = receipt_manager.load()
     records = [r for r in receipt.installs if profile is None or r.profile == profile]
     remaining = [r for r in receipt.installs if r not in records]
+
+    if profile is not None and not records:
+        installed = ", ".join(sorted(r.profile for r in receipt.installs))
+        raise ValueError(f"No install record for profile '{profile}' on this host. Installed: {installed or 'nothing'}")
 
     # (category, name) pairs still claimed by an install that is NOT being
     # revoked. Two profiles can ship the same skill (e.g. "odoo-common"
@@ -116,7 +132,7 @@ def build_revoke_plan(
     # pull the artefact out from under the other.
     remaining_claims = {(e.category, e.name) for r in remaining for e in r.entries}
 
-    plan = RevokePlan(profiles=[r.profile for r in records])
+    plan = RevokePlan(profiles=[r.profile for r in records], records=list(records))
 
     for record in records:
         for entry in record.entries:
@@ -145,19 +161,86 @@ def build_revoke_plan(
     # install goes. Otherwise removing one of two profiles would delete
     # transcripts the other is still producing.
     plan.purge_traces = bool(records) and not remaining and not keep_traces
+
+    # ~/.config/sccs/ is only ours to purge when we created it. `sccs` stays
+    # installed as a public tool, so a host user who runs it themselves keeps
+    # their config.yaml, sync state and backups; only the receipt goes.
+    plan.keep_state_dir = any(r.state_dir_pre_existing for r in records)
+
     if plan.purge_traces:
-        plan.traces = [t for t in enumerate_traces(home) if t.exists]
+        plan.traces = [t for t in enumerate_traces(home, include_sccs_state=not plan.keep_state_dir) if t.exists]
 
     return plan
 
 
+def _category_dirs(record: InstallRecord) -> dict[str, Path]:
+    """Where each category's artefacts live, derived from the record itself.
+
+    The customer host has no config.yaml of ours, so the only description of
+    the layout that travelled with the deployment is the recorded absolute
+    target of each entry. All entries of one category share a parent.
+    """
+    dirs: dict[str, Path] = {}
+    for entry in record.entries:
+        dirs.setdefault(entry.category, Path(entry.target).parent)
+    return dirs
+
+
 def sweep(plan: RevokePlan) -> list[str]:
-    """Re-check every planned removal. Returns paths that are still there."""
+    """Verify the host, not the bookkeeping. Returns paths still present.
+
+    Two passes, and the second is the one the spec asks for:
+
+    1. Re-stat every planned removal.
+    2. Re-scan the known locations against each revoked record's
+       `sweep_globs` — the list of names the bundle actually shipped —
+       independently of how the per-entry buckets turned out.
+
+    Pass 2 exists precisely because pass 1 can only find what the
+    bookkeeping already admits to. An entry wrongly marked `pre_existing`,
+    or an artefact written before a crash left no receipt entry at all, is
+    invisible to pass 1 and is exactly what a "sweep clean" report must not
+    cover up. So this pass deliberately does NOT filter on `pre_existing`:
+    a name the profile shipped that is still on disk gets reported, and the
+    operator decides. Only two things are excluded, because for them
+    "still present" is the intended outcome, not a leak:
+
+    * categories in the record's `retain` (shell config stays by design), and
+    * entries bucketed `shared`, still claimed by another installed profile.
+    """
     leftovers: list[str] = []
+    seen: set[str] = set()
+
+    def _note(path: Path) -> None:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            leftovers.append(key)
+
     for item in plan.to_remove:
         target = Path(item.entry.target)
         if target.exists():
-            leftovers.append(str(target))
+            _note(target)
+
+    shared_claims = {(i.entry.category, i.entry.name) for i in plan.shared}
+
+    for record in plan.records:
+        dirs = _category_dirs(record)
+        for category, names in record.sweep_globs.items():
+            if category in record.retain:
+                continue
+            base = dirs.get(category)
+            if base is None:
+                # No entry of that category was ever recorded, so the record
+                # does not say where it would live. Nothing to re-scan.
+                continue
+            for name in names:
+                if (category, name) in shared_claims:
+                    continue
+                candidate = base / name
+                if candidate.exists():
+                    _note(candidate)
+
     return leftovers
 
 
@@ -215,6 +298,12 @@ def execute_revoke(
     if leftovers:
         logger.error("Revoke left %d artefacts behind", len(leftovers))
         leftover_paths = set(leftovers)
+        # Only a PLANNED removal that survived costs its profile the receipt
+        # record — a retry needs that pointer. A finding from the sweep's
+        # second pass does not: it was found without the per-entry
+        # bookkeeping and would be found again, and keeping the record on
+        # every such finding would make a host where the customer's own copy
+        # of a shipped skill name lives permanently un-revokable.
         for item in plan.to_remove:
             if item.profile and str(Path(item.entry.target)) in leftover_paths:
                 failed_profiles.add(item.profile)

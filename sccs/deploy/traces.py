@@ -92,8 +92,17 @@ def _sccs_state_targets(base: Path) -> list[TraceTarget]:
     return targets
 
 
-def enumerate_traces(home: Path | None = None) -> list[TraceTarget]:
-    """List the trace locations, marking which of them exist."""
+def enumerate_traces(home: Path | None = None, *, include_sccs_state: bool = True) -> list[TraceTarget]:
+    """List the trace locations, marking which of them exist.
+
+    Args:
+        home: Root to enumerate under. Defaults to the real home.
+        include_sccs_state: Whether ~/.config/sccs/ counts as a trace. False
+            when that directory belonged to the host user before we arrived:
+            `sccs` stays installed as a public tool, so their own config.yaml,
+            sync state and backups are not ours to delete. The receipt is
+            still removed — `remove_install` does that separately.
+    """
     base = home or Path.home()
     targets: list[TraceTarget] = []
 
@@ -108,7 +117,8 @@ def enumerate_traces(home: Path | None = None) -> list[TraceTarget]:
                 size = 0
         targets.append(TraceTarget(path=path, label=label, kind=kind, exists=exists, size_bytes=size))
 
-    targets.extend(_sccs_state_targets(base))
+    if include_sccs_state:
+        targets.extend(_sccs_state_targets(base))
 
     return targets
 

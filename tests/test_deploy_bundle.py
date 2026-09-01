@@ -105,12 +105,13 @@ def test_cleanup_command_is_a_manifest_item(config, profile, tmp_path):
 
 
 def test_cleanup_command_is_in_sweep_globs(config, profile, tmp_path):
-    """`deploy revoke`'s verification sweep (Task 7) reads sweep_globs, not
+    """`deploy revoke`'s verification sweep re-scans sweep_globs, not the
 
-    the manifest items — the cleanup command must be added to
-    sweep_globs["claude_commands"] explicitly, since _deployment_section()
-    builds sweep_globs from resolved.selections before the cleanup item is
-    spliced in.
+    manifest items — see `sccs.deploy.revoke.sweep`, second pass. The cleanup
+    command must therefore be added to sweep_globs["claude_commands"]
+    explicitly, since _deployment_section() builds sweep_globs from
+    resolved.selections before the cleanup item is spliced in. Without that,
+    the sweep would never look for the one file the bundle generates itself.
     """
     resolved = resolve_profile(config, "t", {"t": profile})
     out = tmp_path / "bundle.zip"
@@ -211,3 +212,38 @@ def test_bundle_local_paths_survive_conflicting_raw_config(config, profile, tmp_
     with zipfile.ZipFile(conflict_out) as zf:
         conflict_manifest = deserialize_manifest(zf.read(MANIFEST_FILENAME).decode("utf-8"))
     assert conflict_manifest.categories["claude_skills"].local_path == "~/.claude/skills"
+
+
+# --- Final review, MINOR 1: the manifest must stamp the EFFECTIVE platform ---
+
+
+def test_platform_override_reaches_the_manifest(config, profile, tmp_path):
+    """`deploy export --platform macos` used to stamp the profile's own value.
+
+    `_deployment_section` read `resolved.profile.target_platform`, which the
+    override never touched — the ZIP contents followed the override while the
+    manifest said something else, and the install host has no way to tell.
+    """
+    resolved = resolve_profile(config, "t", {"t": profile}, target_platform="macos")
+    assert resolved.profile.target_platform == "linux"
+    assert resolved.target_platform == "macos"
+
+    out = tmp_path / "override.zip"
+    assert build_bundle(config, resolved, out, {}).success
+
+    with zipfile.ZipFile(out) as zf:
+        manifest = deserialize_manifest(zf.read(MANIFEST_FILENAME).decode("utf-8"))
+    assert manifest.deployment is not None
+    assert manifest.deployment.target_platform == "macos"
+
+
+def test_without_an_override_the_profile_platform_is_used(config, profile, tmp_path):
+    resolved = resolve_profile(config, "t", {"t": profile})
+    assert resolved.target_platform == "linux"
+
+    out = tmp_path / "no-override.zip"
+    assert build_bundle(config, resolved, out, {}).success
+
+    with zipfile.ZipFile(out) as zf:
+        manifest = deserialize_manifest(zf.read(MANIFEST_FILENAME).decode("utf-8"))
+    assert manifest.deployment.target_platform == "linux"

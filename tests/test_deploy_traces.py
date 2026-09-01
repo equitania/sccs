@@ -199,3 +199,25 @@ def test_remove_traces_clears_sccs_state_but_keeps_receipt(home):
 def test_enumerate_contributes_no_sccs_state_targets_when_dir_absent(tmp_path):
     targets = enumerate_traces(tmp_path)
     assert not any(t.label.startswith("SCCS state") for t in targets)
+
+
+# --- Final review, IMPORTANT 3: the SCCS state dir can belong to the host ---
+
+
+def test_sccs_state_is_excluded_when_the_directory_is_not_ours(tmp_path):
+    """`include_sccs_state=False` keeps the host user's own SCCS setup."""
+    from sccs.deploy.traces import enumerate_traces
+
+    state = tmp_path / ".config" / "sccs"
+    state.mkdir(parents=True)
+    (state / "config.yaml").write_text("repository:\n  path: ~/x\n", encoding="utf-8")
+    (state / ".sync_state.yaml").write_text("categories: {}\n", encoding="utf-8")
+    (tmp_path / ".claude" / "projects").mkdir(parents=True)
+
+    with_state = enumerate_traces(tmp_path)
+    without_state = enumerate_traces(tmp_path, include_sccs_state=False)
+
+    assert any(t.path == state / "config.yaml" for t in with_state)
+    assert not any(str(t.path).startswith(str(state)) for t in without_state)
+    # The other trace locations are unaffected either way.
+    assert any(t.path == tmp_path / ".claude" / "projects" for t in without_state)

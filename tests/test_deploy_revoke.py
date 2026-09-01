@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -100,12 +101,18 @@ def test_execute_removes_only_the_remove_bucket(manager, host):
     plan = build_revoke_plan(manager, home=host)
     result = execute_revoke(plan, manager)
 
-    assert result.success
     assert result.removed == 2
     assert not (host / ".claude" / "skills" / "odoo-common").exists()
     assert not (host / ".claude" / "skills" / "odoo19").exists()
     assert (host / ".claude" / "skills" / "customers-own").exists()
     assert (host / ".config" / "fish" / "config.fish").exists()
+
+    # `customers-own` is in the profile's sweep_globs and still on disk, so
+    # the verification sweep reports it and the revoke is not "clean". The
+    # sweep deliberately does not consult `pre_existing` — a bookkeeping flag
+    # that says "not ours" is exactly what it exists to second-guess.
+    assert result.leftovers == [str(host / ".claude" / "skills" / "customers-own")]
+    assert not result.success
 
 
 def test_execute_purges_traces_and_drops_the_receipt(manager, host):
@@ -147,10 +154,44 @@ def test_traces_survive_while_another_profile_remains(manager, host):
     assert [r.profile for r in manager.load().installs] == ["fastreport"]
 
 
-def test_sweep_is_clean_after_a_successful_revoke(manager, host):
+def test_sweep_is_clean_once_every_shipped_name_is_gone(manager, host):
     plan = build_revoke_plan(manager, home=host)
     execute_revoke(plan, manager)
+    # The host user's own copy of a shipped name is the one thing left; with
+    # it gone too, nothing the profile shipped remains and the sweep is clean.
+    shutil.rmtree(host / ".claude" / "skills" / "customers-own")
     assert sweep(plan) == []
+
+
+def test_sweep_catches_a_leftover_the_bookkeeping_calls_accounted_for(manager, host):
+    """The sweep re-scans sweep_globs, so it sees what the buckets cannot.
+
+    `customers-own` is bucketed `untouched` — the per-entry bookkeeping says
+    it needs no removal and reports nothing about it. It is nevertheless a
+    name this profile shipped that is still on the host, and that is the
+    fact the operator has to be handed. This is the pass that would have
+    caught a receipt where `pre_existing` was wrongly recomputed as True.
+    """
+    plan = build_revoke_plan(manager, home=host)
+    assert {i.entry.name for i in plan.untouched} == {"customers-own"}
+    assert not any(i.entry.name == "customers-own" for i in plan.to_remove)
+
+    execute_revoke(plan, manager)
+
+    assert str(host / ".claude" / "skills" / "customers-own") in sweep(plan)
+
+
+def test_sweep_ignores_retained_categories(manager, host):
+    """`retain` means "stays by design", so it is never a leftover."""
+    record = manager.load().find("odoo-server")
+    record.sweep_globs["fish_config"] = ["config.fish"]
+    manager.record_install(record)
+
+    plan = build_revoke_plan(manager, home=host)
+    execute_revoke(plan, manager)
+
+    assert (host / ".config" / "fish" / "config.fish").exists()
+    assert not any("config.fish" in item for item in sweep(plan))
 
 
 def test_sweep_reports_a_planted_leftover(manager, host):
@@ -262,10 +303,12 @@ def test_shared_skill_is_bucketed_shared_and_survives(manager, host):
     assert "odoo-common" not in {i.entry.name for i in plan.to_remove}
 
     result = execute_revoke(plan, manager)
-    assert result.success
     assert (host / ".claude" / "skills" / "odoo-common").exists()
     assert not (host / ".claude" / "skills" / "odoo19").exists()
     assert [r.profile for r in manager.load().installs] == ["fastreport"]
+    # A shared artefact is excluded from the sweep — another profile still
+    # claims it, so "still present" is the intended outcome, not a leak.
+    assert not any("odoo-common" in item for item in result.leftovers)
 
 
 def test_shared_skill_removed_once_the_last_profile_goes(manager, host):
