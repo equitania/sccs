@@ -23,6 +23,7 @@ from sccs.transfer.manifest import (
     deserialize_manifest,
     resolves_to_parent,
 )
+from sccs.utils.hashing import directory_hash, file_hash
 from sccs.utils.paths import create_backup, matches_any_pattern, safe_copy
 
 logger = logging.getLogger(__name__)
@@ -244,6 +245,42 @@ class Importer:
 
         result.success = len(result.errors) == 0
         return result
+
+    def staged_hashes(self, selections: list[tuple[str, ManifestItem]]) -> dict[tuple[str, str], str | None]:
+        """Hash what each selected item WOULD write, without writing anything.
+
+        `deploy install` needs this for a target it refuses to overwrite.
+        Knowing the customer already had a file there is not enough: if
+        their file is byte-identical to the shipped artefact, our knowledge
+        is on that host regardless of who put it there, and only the hash of
+        the artefact we did not write can tell revoke that later.
+
+        Returns a `(category, name) -> hash` map; a hash is None when the
+        item is missing from the staging area.
+        """
+        if self._manifest is None:
+            raise RuntimeError("Manifest not loaded — call load_manifest() first")
+
+        hashes: dict[tuple[str, str], str | None] = {}
+        if not selections:
+            return hashes
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            try:
+                self._safe_extract(tmp_path)
+            except ValueError as e:
+                logger.error("Refused unsafe ZIP while hashing staged items: %s", e)
+                return hashes
+
+            for cat_name, item in selections:
+                source = tmp_path / item.zip_path.rstrip("/")
+                if item.item_type == "directory":
+                    hashes[(cat_name, item.name)] = directory_hash(source)
+                else:
+                    hashes[(cat_name, item.name)] = file_hash(source)
+
+        return hashes
 
     def _resolve_target_base(self, cat_name: str, cat_data: ManifestCategory) -> Path:
         """Resolve and validate the target base directory for a category.

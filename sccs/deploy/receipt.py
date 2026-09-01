@@ -18,7 +18,7 @@ from sccs.utils.paths import atomic_write
 
 logger = get_logger("sccs.deploy")
 
-RECEIPT_VERSION = 1
+RECEIPT_VERSION = 2
 
 # Relative to the home directory. Resolved lazily by default_receipt_path():
 # a module-level `Path.home() / ...` freezes the home directory at import
@@ -53,6 +53,22 @@ class ReceiptEntry:
     # and a receipt where everything is "not ours" makes revoke a no-op that
     # reports a clean host.
     pre_existing: bool = False
+    # The PROVENANCE RECORD, as opposed to `pre_existing`, which is an
+    # inference. `pre_existing` says "the target existed, so we skipped"; it
+    # is written by the same code that decides to skip, and a build that got
+    # that decision wrong recorded True on artefacts it then overwrote.
+    # Revoke may only exempt a leftover from failing the sweep on a POSITIVE
+    # record that SCCS never wrote there — this field — never on the
+    # inference. False for a skipped foreign target, True for everything
+    # SCCS actually wrote. The default is True because "we wrote it" is the
+    # loud answer: it keeps a leftover a failure.
+    written_by_sccs: bool = True
+    # For a skipped foreign target: the hash of what the bundle WOULD have
+    # written there. Ownership is not the only question — if the customer's
+    # own file is byte-identical to the shipped artefact, our knowledge is
+    # on that host no matter who put it there, and revoke must say so.
+    # None for anything SCCS wrote (`content_hash` already is that hash).
+    shipped_hash: str | None = None
 
 
 @dataclass
@@ -137,8 +153,12 @@ class ReceiptManager:
         version = data.get("version", RECEIPT_VERSION)
         if version != RECEIPT_VERSION:
             raise ValueError(
-                f"Deployment receipt version {version} is not supported "
-                f"(this SCCS understands version {RECEIPT_VERSION})"
+                f"Deployment receipt at {self._path} has version {version}; this SCCS "
+                f"writes and reads version {RECEIPT_VERSION}. A version-1 receipt predates "
+                f"the provenance record `written_by_sccs`, so this build cannot tell which "
+                f"of its entries SCCS actually wrote and must not guess. Run `sccs deploy "
+                f"revoke` from the SCCS version that produced it (see `sccs_version` in the "
+                f"file), or remove the listed artefacts by hand and delete the receipt."
             )
 
         try:

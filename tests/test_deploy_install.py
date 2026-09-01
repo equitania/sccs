@@ -270,6 +270,66 @@ def test_reinstall_keeps_pre_existing_false_for_our_own_artefacts(bundle, tmp_pa
     assert not (target / ".claude" / "skills" / "odoo19").exists()
 
 
+def test_provenance_is_recorded_for_both_kinds_of_entry(bundle, tmp_path, monkeypatch):
+    """`written_by_sccs` is a record, and the shipped hash rides with it.
+
+    Revoke may only exempt a leftover from failing its sweep on a positive
+    "we did not write here". `pre_existing` cannot carry that — it is an
+    inference an older build got wrong on its own artefacts — so install
+    writes the fact separately, together with the hash of what the bundle
+    would have put at the target it refused.
+    """
+    target = tmp_path / "prov"
+    _switch_home(monkeypatch, target)
+    theirs = target / ".claude" / "skills" / "odoo-common"
+    theirs.mkdir(parents=True)
+    (theirs / "SKILL.md").write_text("# theirs\n", encoding="utf-8")
+
+    manager = ReceiptManager(target / ".config" / "sccs" / ".deploy_receipt.yaml")
+    assert install_bundle(bundle, config=None, receipt_manager=manager).success
+
+    entries = {e.name: e for e in manager.load().find("t").entries}
+
+    # Ours: written, and content_hash already is the shipped hash.
+    assert entries["odoo19"].written_by_sccs is True
+    assert entries["odoo19"].shipped_hash is None
+
+    # Theirs: not written, and we keep what we would have written.
+    assert entries["odoo-common"].written_by_sccs is False
+    assert entries["odoo-common"].shipped_hash
+    # It is the BUNDLE's content, not the customer's.
+    assert entries["odoo-common"].shipped_hash != entries["odoo-common"].content_hash
+
+
+def test_a_foreign_target_holding_our_content_records_a_matching_hash(bundle, tmp_path, monkeypatch):
+    """ "Already here" and "is our content" can coincide, and then it is ours.
+
+    The customer put the shipped skill on the host themselves. Nothing was
+    written, ownership says foreign — but the knowledge is on that host all
+    the same, and only comparing the shipped hash to what is on disk can
+    say so.
+    """
+    target = tmp_path / "same"
+    _switch_home(monkeypatch, target)
+
+    # Install once onto a bare host to obtain our exact artefact, then start
+    # over with that artefact already in place and no receipt.
+    manager = ReceiptManager(target / ".config" / "sccs" / ".deploy_receipt.yaml")
+    assert install_bundle(bundle, config=None, receipt_manager=manager).success
+    manager.path.unlink()
+
+    fresh = ReceiptManager(target / ".config" / "sccs" / ".deploy_receipt.yaml")
+    outcome = install_bundle(bundle, config=None, receipt_manager=fresh)
+
+    assert sorted(outcome.skipped_foreign) == [
+        "claude_skills/odoo-common",
+        "claude_skills/odoo19",
+    ]
+    for entry in fresh.load().find("t").entries:
+        assert entry.written_by_sccs is False
+        assert entry.shipped_hash == entry.content_hash
+
+
 def test_foreign_target_is_skipped_not_overwritten(bundle, tmp_path, monkeypatch):
     """A file SCCS did not write is never displaced, and that is reported."""
     target = tmp_path / "foreign"

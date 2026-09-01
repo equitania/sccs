@@ -212,11 +212,19 @@ def install_bundle(
             skipped_foreign=skipped_foreign,
         )
 
+    # For every target we refused to write: what the bundle WOULD have put
+    # there. "The customer already had a file here" and "the customer's file
+    # IS our file" are different facts, and only this hash separates them at
+    # revoke time. Hashed from the staging area, so nothing is written.
+    skipped_selections = [(c, i) for c, i in selections if pre_existing[(c, i.name)]]
+    shipped_hashes = importer.staged_hashes(skipped_selections)
+
     entries: list[ReceiptEntry] = []
     for cat_name, item in selections:
         target = _target_path(bases[cat_name], item)
         if not target.exists():
             continue
+        is_foreign = pre_existing[(cat_name, item.name)]
         entries.append(
             ReceiptEntry(
                 category=cat_name,
@@ -224,7 +232,11 @@ def install_bundle(
                 target=str(target),
                 item_type=item.item_type,
                 content_hash=_hash_target(target, item.item_type),
-                pre_existing=pre_existing[(cat_name, item.name)],
+                pre_existing=is_foreign,
+                # Recorded, not inferred: the one thing revoke may trust
+                # when it decides that a leftover is not ours.
+                written_by_sccs=not is_foreign,
+                shipped_hash=shipped_hashes.get((cat_name, item.name)) if is_foreign else None,
             )
         )
 
