@@ -167,3 +167,51 @@ def test_read_skill_dependencies_handles_both_corpus_shapes(tmp_path):
     deps = read_skill_dependencies(skills, ["a", "b"])
     assert deps["a"] == ["odoo-common", "uv-python-tools"]
     assert deps["b"] == ["odoo-common"]
+
+
+def test_read_skill_dependencies_is_case_sensitive_to_the_marker(tmp_path):
+    """Lowercase/sentence-case "inherits from" in prose is not a dependency
+    declaration — only the literal uppercase "INHERITS FROM" marker is.
+
+    Regression for a real false positive found against the actual
+    ~/.claude/ skill corpus, not a synthetic case: uv-python-tools's
+    SKILL.md says "This skill inherits from: nothing (elementary/
+    standalone)", and fr-reports's says "Inherits from
+    eq_fr_core_base.frx" describing FastReport *template* inheritance,
+    unrelated to Claude skill dependencies. A case-insensitive
+    `_INHERITS_RE` read both as a dependency (on a skill literally named
+    "nothing", and on "eq_fr_core_base"/"frx"). If this regex is ever
+    made case-insensitive again, this test must fail — the two genuine
+    uppercase shapes below are asserted in the same test so a regex that
+    is over-tightened instead (e.g. requiring bold markers) fails too.
+    """
+    skills = tmp_path / "skills"
+
+    (skills / "uv-python-tools").mkdir(parents=True)
+    (skills / "uv-python-tools" / "SKILL.md").write_text(
+        "This skill inherits from: nothing (elementary/standalone)\n",
+        encoding="utf-8",
+    )
+    (skills / "fr-reports").mkdir(parents=True)
+    (skills / "fr-reports" / "SKILL.md").write_text(
+        "Uses Tr() dictionary pattern. Inherits from eq_fr_core_base.frx. Design uses Dark Slate Blue accent color.\n",
+        encoding="utf-8",
+    )
+    (skills / "genuine-bold").mkdir(parents=True)
+    (skills / "genuine-bold" / "SKILL.md").write_text(
+        "**INHERITS FROM:** odoo-common (UV package manager)\n",
+        encoding="utf-8",
+    )
+    (skills / "genuine-bare").mkdir(parents=True)
+    (skills / "genuine-bare" / "SKILL.md").write_text(
+        'Versionen anwenden". INHERITS FROM: odoo-common. NOT for: full module '
+        "migration of an entire module between versions\n",
+        encoding="utf-8",
+    )
+
+    deps = read_skill_dependencies(skills, ["uv-python-tools", "fr-reports", "genuine-bold", "genuine-bare"])
+
+    assert deps["uv-python-tools"] == []
+    assert deps["fr-reports"] == []
+    assert deps["genuine-bold"] == ["odoo-common"]
+    assert deps["genuine-bare"] == ["odoo-common"]
