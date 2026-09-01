@@ -22,7 +22,14 @@ logger = get_logger("sccs.deploy")
 # Matches the documented convention in ~/.claude/skills/*/SKILL.md, e.g.
 #   **INHERITS FROM:** odoo-common (UV package manager), uv-python-tools (...)
 #   INHERITS FROM: odoo-common. NOT for: ...
-_INHERITS_RE = re.compile(r"INHERITS FROM:?\**\s*(?P<rest>.+)", re.IGNORECASE)
+#
+# Case-sensitive on purpose: the convention is always the literal uppercase
+# marker "INHERITS FROM". Matching case-insensitively also caught ordinary
+# prose against the real skill corpus — "This skill inherits from: nothing
+# (elementary/standalone)" in uv-python-tools, "Inherits from
+# eq_fr_core_base.frx" describing FastReport template inheritance in
+# fr-reports — and reported both as missing dependencies.
+_INHERITS_RE = re.compile(r"INHERITS FROM:?\**\s*(?P<rest>.+)")
 _DEP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 

@@ -1,5 +1,36 @@
 # Release Notes
 
+## Version 2.65.0 (01.09.2026)
+
+### Added (`sccs deploy` — scenario-scoped bundles for foreign hosts, with a verified way back off)
+
+- **`sccs deploy export|install|revoke`** (`sccs/deploy/`) ships a named, scenario-scoped slice of the local inventory — skills, agents, commands, shell files — to a customer or server host, and takes it back cleanly later. `deploy export <profile>` builds a ZIP containing exactly what that profile needs; `deploy install` unpacks it on the target and writes a receipt; `deploy revoke` reads that receipt and removes what we brought, nothing more.
+- **Four bundled profiles**: `odoo-server`, `odoo-dev-full` (extends `odoo-server`), `fastreport`, `shell-only`. Overridable per name via `deployment_profiles:` in `config.yaml`. `claude_memories`, `claude_plans` and `claude_todos` are blocked categories — a profile naming one is refused by the schema validator at load time, never silently dropped.
+- **The receipt is standalone**, not keyed to this repo's `config.yaml`: `~/.config/sccs/.deploy_receipt.yaml` carries absolute targets, a `retain` list and sweep globs, because a customer host has no `config.yaml` of ours and `revoke` has to work without one.
+- **Two different facts about an installed artefact, both preserved**: `pre_existing` — something that already sat at the target path before we wrote — is never removed by `revoke`. An artefact we installed that the customer later edited IS removed, and flagged `modified`, because it still carries our knowledge regardless of who touched it last.
+- **A shared-artefact bucket**: when two installed profiles both ship the same artefact (`odoo-server` and `fastreport` both ship `odoo-common`), revoking one leaves it in place for the other — `revoke --profile odoo-server` does not pull `odoo-common` out from under `fastreport`. This is rechecked at revoke time from the live receipt, not memorized at install.
+- **Work-trace removal covers the whole of `~/.config/sccs/`**, enumerated at runtime rather than a fixed filename list — `.sync_state.yaml` alone names every skill ever synchronised to that host, so a hand-maintained list would rot the moment a new state file is added. Only `.deploy_receipt.yaml` is excluded, since revoke still needs it and removes it last.
+- **The transcript is the leak, not the skill**: `~/.claude/projects/` quotes skill content verbatim into session history, so it is purged too, alongside plans, todos and shell snapshots — but only when the last profile on the host is revoked, never on a partial revoke that leaves another profile installed.
+- **`~/.claude.json` is trimmed of `history`, never deleted** — it also holds the host user's auth and onboarding state. A symlinked file has its resolved target checked first; a target that resolves outside home is refused rather than followed off the machine, which would otherwise silently report success while the real file's history stayed untouched.
+- **`revoke` ends with a verification sweep** that exits non-zero on leftovers: a removal that reports success while a directory survived is worse than no cleanup at all, because the report is what the decision to stop looking rests on. A profile whose removal hit an error keeps its receipt record rather than losing it, so a retry can still find what remains.
+- Generated `/sccs-cleanup` command inside every knowledge-bearing bundle, so the agent on the customer host has a defined route instead of improvising with `rm -rf`.
+
+### Changed
+
+- `is_platform_match()` accepts an explicit reference platform, and `Exporter` a `target_platform` — without it, exporting from a Mac packed `fish_config_macos` into a bundle meant for a Linux server. Default behaviour (no explicit target) is unchanged.
+- `ExportManifest` gained an optional `deployment` section describing the profile a bundle was built for. Archives from plain `sccs export` keep importing unchanged.
+
+### Fixed (`_merge_with_defaults` mutated the shared `DEFAULT_CONFIG` singleton — affects config loading tool-wide, not only `deploy`)
+
+- **A shallow copy in `_merge_with_defaults()` left `result["sync_categories"]` as the SAME dict object as `DEFAULT_CONFIG["sync_categories"]`.** Merging a user category into it permanently poisoned the module-level default for the rest of the process — a second, unrelated `load_config()` later in the same run would see the first call's overrides (e.g. a test's temp path) as if they were the shipped defaults.
+- **This is not scoped to the new feature.** `_merge_with_defaults()` runs on every config load, so any process that calls `load_config()` more than once — the test suite, a GUI wrapper, a script that reloads config — was exposed to it. Any existing user relying on `load_config()` being called more than once in one process should treat this as the headline fix of this release.
+- Fixed with a full `copy.deepcopy(DEFAULT_CONFIG)` rather than another targeted shallow copy, so the fix does not depend on every other merged key happening to rebind instead of mutate — the invariant the previous, narrower fix silently relied on.
+- Two regression tests added to `tests/test_config.py`: one asserts `_merge_with_defaults` never mutates `DEFAULT_CONFIG`, one asserts two successive `load_config()` calls don't leak one call's category override into the other's defaults. Both verified against the pre-fix loader to confirm they actually catch the bug.
+
+### Tests
+
+New coverage across `tests/test_deploy_*.py` for the profile schema (incl. the blocked-category and cycle-detection validators), profile resolution and platform targeting, bundle building with the generated cleanup command, the receipt, install with the home guard, and the revoke plan/sweep across all buckets — plus the two config regression tests above and a version-bump assertion in `tests/test_deploy_schema.py`. 1836 total; ruff/format/mypy clean.
+
 ## Version 2.64.0 (31.08.2026)
 
 ### Added (`sccs doctor` keeps CAO's extra providers alive across an update)

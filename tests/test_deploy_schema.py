@@ -141,3 +141,10 @@ def test_config_without_deployment_profiles_defaults_to_empty():
 
     config = SccsConfig.model_validate({"repository": {"path": "~/gitbase/sccs-sync"}, "sync_categories": {}})
     assert config.deployment_profiles == {}
+
+
+def test_version_is_bumped_for_this_feature():
+    from sccs import __version__
+
+    # Tuple comparison, not string: "2.100.0" < "2.65.0" as strings.
+    assert tuple(int(p) for p in __version__.split(".")[:3]) >= (2, 65, 0)
