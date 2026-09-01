@@ -104,6 +104,24 @@ def test_cleanup_command_is_a_manifest_item(config, profile, tmp_path):
     assert CLEANUP_COMMAND_NAME in item_names
 
 
+def test_cleanup_command_is_in_sweep_globs(config, profile, tmp_path):
+    """`deploy revoke`'s verification sweep (Task 7) reads sweep_globs, not
+
+    the manifest items — the cleanup command must be added to
+    sweep_globs["claude_commands"] explicitly, since _deployment_section()
+    builds sweep_globs from resolved.selections before the cleanup item is
+    spliced in.
+    """
+    resolved = resolve_profile(config, "t", {"t": profile})
+    out = tmp_path / "bundle.zip"
+    build_bundle(config, resolved, out, {})
+
+    with zipfile.ZipFile(out) as zf:
+        manifest = deserialize_manifest(zf.read(MANIFEST_FILENAME).decode("utf-8"))
+    assert manifest.deployment is not None
+    assert CLEANUP_COMMAND_NAME in manifest.deployment.sweep_globs["claude_commands"]
+
+
 def test_shell_only_bundle_has_no_cleanup_command(config, tmp_path):
     """A profile that ships no skills has nothing to clean up."""
     shell_only = DeploymentProfile(
@@ -118,7 +136,10 @@ def test_shell_only_bundle_has_no_cleanup_command(config, tmp_path):
 
     with zipfile.ZipFile(out) as zf:
         names = zf.namelist()
+        manifest = deserialize_manifest(zf.read(MANIFEST_FILENAME).decode("utf-8"))
     assert f"claude_commands/{CLEANUP_COMMAND_NAME}" not in names
+    assert manifest.deployment is not None
+    assert CLEANUP_COMMAND_NAME not in manifest.deployment.sweep_globs.get("claude_commands", [])
 
 
 def test_cleanup_command_names_the_profile_and_the_commands():
