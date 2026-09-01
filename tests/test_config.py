@@ -1,6 +1,7 @@
 # SCCS Config Tests
 # Tests for configuration loading and validation
 
+import copy
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ import yaml
 from pydantic import ValidationError
 
 from sccs.config.defaults import DEFAULT_CONFIG, generate_default_config
-from sccs.config.loader import load_config, save_config, validate_config_file
+from sccs.config.loader import _merge_with_defaults, load_config, save_config, validate_config_file
 from sccs.config.schema import ItemType, SccsConfig, SyncCategory, SyncMode
 
 
@@ -126,6 +127,82 @@ class TestConfigLoader:
         assert config.doctor.min_node_major == 24
         assert config.doctor.plugins is not None
         assert [p.name for p in config.doctor.plugins] == ["skill-creator"]
+
+    def test_merge_with_defaults_does_not_mutate_default_config(self, sample_config: dict):
+        """Regression: _merge_with_defaults must never poison DEFAULT_CONFIG.
+
+        `result = DEFAULT_CONFIG.copy()` used to be a shallow copy, so
+        `result["sync_categories"]` was the SAME dict object as
+        `DEFAULT_CONFIG["sync_categories"]`. Merging a user category that
+        also exists in the defaults (claude_commands, here, with
+        `sample_config`'s temp-dir local_path) then assigned into that
+        shared object — permanently overwriting the module-level default
+        for the rest of the process. This bug's entire signature was
+        invisible except through test *ordering*: the corruption only shows
+        up in whichever unrelated test happens to run `load_config()` next.
+        """
+        before = copy.deepcopy(DEFAULT_CONFIG["sync_categories"]["claude_commands"])
+
+        merged = _merge_with_defaults(sample_config)
+
+        # The merge did pick up the user's override (sanity check the test
+        # itself exercises the mutating code path)...
+        assert (
+            merged["sync_categories"]["claude_commands"]["local_path"]
+            == sample_config["sync_categories"]["claude_commands"]["local_path"]
+        )
+        # ...but the shipped default must be untouched.
+        assert DEFAULT_CONFIG["sync_categories"]["claude_commands"] == before
+
+    def test_successive_load_config_calls_do_not_leak_overrides(self, temp_dir: Path):
+        """User-visible consequence of the aliasing bug above.
+
+        A first `load_config()` call whose config overrides `claude_commands`
+        must not change what a second, unrelated `load_config()` call (with
+        no `claude_commands` override at all) sees as the default.
+
+        The override path is deliberately something no `~`-expansion of the
+        real default could ever produce (a `poisoned-by-first-config`
+        segment, outside `.claude` entirely) — otherwise, under a `HOME` that
+        happens to coincide with both configs' base directory, the leaked
+        value and the correct default could accidentally be the same string
+        and the assertion would pass for the wrong reason.
+        """
+        overriding_config = {
+            "repository": {"path": str(temp_dir / "repo1")},
+            "sync_categories": {
+                "claude_commands": {
+                    "local_path": str(temp_dir / "poisoned-by-first-config"),
+                    "repo_path": ".claude/commands",
+                    "item_type": "file",
+                    "item_pattern": "*.md",
+                },
+            },
+        }
+        overriding_path = temp_dir / "overriding.yaml"
+        with open(overriding_path, "w", encoding="utf-8") as f:
+            yaml.dump(overriding_config, f, default_flow_style=False)
+        load_config(overriding_path)  # Poisoned DEFAULT_CONFIG before the fix.
+
+        plain_config = {
+            "repository": {"path": str(temp_dir / "repo2")},
+            "sync_categories": {
+                "claude_skills": {
+                    "local_path": "~/.claude/skills",
+                    "repo_path": ".claude/skills",
+                    "item_type": "directory",
+                    "item_marker": "SKILL.md",
+                },
+            },
+        }
+        plain_path = temp_dir / "plain.yaml"
+        with open(plain_path, "w", encoding="utf-8") as f:
+            yaml.dump(plain_config, f, default_flow_style=False)
+
+        second = load_config(plain_path)
+
+        assert second.sync_categories["claude_commands"].local_path == str(Path("~/.claude/commands").expanduser())
+        assert "poisoned-by-first-config" not in second.sync_categories["claude_commands"].local_path
 
     def test_save_config(self, temp_dir: Path, sample_config: dict):
         """Test saving configuration."""

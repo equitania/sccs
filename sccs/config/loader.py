@@ -1,6 +1,7 @@
 # SCCS Configuration Loader
 # Load, save, and manage YAML configuration files
 
+import copy
 import logging
 import os
 from pathlib import Path
@@ -355,22 +356,29 @@ _DEEP_MERGED_KEYS = frozenset(
 
 
 def _merge_with_defaults(data: dict) -> dict:
-    """Merge loaded data with default values for missing keys."""
-    result = DEFAULT_CONFIG.copy()
+    """Merge loaded data with default values for missing keys.
+
+    `result` starts as a `copy.deepcopy` of `DEFAULT_CONFIG`, not a shallow
+    `.copy()`. A shallow copy only duplicates the top-level dict — every
+    nested dict/list (`sync_categories`, `repository`, ...) stays the SAME
+    object as in `DEFAULT_CONFIG`, so an in-place assignment into one of
+    them (`result["sync_categories"][cat_name] = ...`, below) permanently
+    corrupts the module-level default for the rest of the process: the next
+    `load_config()` call, anywhere, would see one config's overrides as if
+    they were the shipped defaults. Every branch here happens to rebind a
+    fresh dict via `{**old, **new}` today, so a shallow copy would technically
+    get away with it too — but that is an invariant of the current code, not
+    of the function's contract, and it is exactly the kind of invariant that
+    silently stops holding when a branch is added or edited. The deep copy
+    removes the need to reason about it at all; `DEFAULT_CONFIG` is a small,
+    plain-data dict, so the cost is negligible.
+    """
+    result = copy.deepcopy(DEFAULT_CONFIG)
 
     if "repository" in data:
         result["repository"] = {**result["repository"], **data["repository"]}
 
     if "sync_categories" in data:
-        # Shallow-copy this nested dict before mutating it below. `result`
-        # is only a shallow copy of DEFAULT_CONFIG, so without this line
-        # `result["sync_categories"]` is the SAME dict object as
-        # `DEFAULT_CONFIG["sync_categories"]` and every `result["sync_categories"][cat_name] = ...`
-        # assignment below would permanently corrupt the module-level
-        # default for the rest of the process — the next `load_config()`
-        # call, anywhere, would see this config's overrides as if they were
-        # the shipped defaults.
-        result["sync_categories"] = dict(result["sync_categories"])
         # Keep default categories, update with user values
         for cat_name, cat_data in data["sync_categories"].items():
             if cat_name in result["sync_categories"]:
