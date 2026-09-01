@@ -13,10 +13,10 @@ from pathlib import Path
 
 from sccs import __version__
 from sccs.config.schema import SccsConfig
-from sccs.deploy.receipt import InstallRecord, ReceiptEntry, ReceiptManager
+from sccs.deploy.receipt import DeployReceipt, InstallRecord, ReceiptEntry, ReceiptManager
 from sccs.doctor._paths import is_home_path
 from sccs.transfer.importer import Importer
-from sccs.transfer.manifest import ManifestItem
+from sccs.transfer.manifest import ManifestCategory, ManifestItem, is_single_file_category
 from sccs.utils.hashing import directory_hash, file_hash
 from sccs.utils.logging import get_logger
 
@@ -33,10 +33,28 @@ class InstallOutcome:
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
     record: InstallRecord | None = None
+    # "category/name" for every target that already existed and was NOT
+    # written by SCCS. Nothing of ours landed there; the operator has to see
+    # that, or they will assume the bundle is complete on that host.
+    skipped_foreign: list[str] = field(default_factory=list)
 
 
 def _target_path(base: Path, item: ManifestItem) -> Path:
     return base / item.name
+
+
+def _category_base(cat_data: ManifestCategory) -> Path:
+    """Where a category's items land on this host.
+
+    Mirrors the export-side convention in `scan_items_for_category`: a
+    single-file category carries the FILE itself as `local_path`
+    (`starship_config` -> `~/.config/starship.toml`), so its items sit in the
+    file's parent directory, not underneath the file.
+    """
+    base = Path(cat_data.local_path).expanduser()
+    if is_single_file_category(cat_data):
+        return base.parent
+    return base
 
 
 def _hash_target(path: Path, item_type: str) -> str | None:
@@ -45,6 +63,29 @@ def _hash_target(path: Path, item_type: str) -> str | None:
     if item_type == "directory":
         return directory_hash(path)
     return file_hash(path)
+
+
+def _sticky_pre_existing(receipt: DeployReceipt) -> dict[tuple[str, str], bool]:
+    """Every (category, name) any install record already accounts for.
+
+    `pre_existing` answers "did this target exist before SCCS ever wrote
+    there" — a fact from the FIRST install, not from the current one. Asking
+    `target.exists()` again on a reinstall answers "did the previous install
+    put something there", which is True for everything we wrote and would
+    turn the whole receipt into a list of artefacts revoke must not touch.
+
+    Records of other profiles count too: two profiles can ship the same
+    skill, and whichever installed first is the one that saw the host
+    untouched.
+    """
+    claimed: dict[tuple[str, str], bool] = {}
+    for record in receipt.installs:
+        for entry in record.entries:
+            key = (entry.category, entry.name)
+            # An earlier "this was already here" wins: once a target has been
+            # seen as foreign, no later install may promote it to ours.
+            claimed[key] = claimed.get(key, False) or entry.pre_existing
+    return claimed
 
 
 def install_bundle(
@@ -57,14 +98,22 @@ def install_bundle(
 ) -> InstallOutcome:
     """Install a deployment bundle and record what was written.
 
+    Ownership rule, the same line the Codex export draws between a target
+    SCCS wrote and one holding somebody's hand edits:
+
+    * A target SCCS itself installed (a receipt entry exists for it and says
+      it is ours) is refreshed, so a deployment never ships stale artefacts.
+    * A target that exists but SCCS did not write is never displaced: it is
+      recorded `pre_existing=True`, skipped, and reported in
+      `InstallOutcome.skipped_foreign`.
+
     Args:
         zip_path: The bundle produced by `sccs deploy export`.
         config: Local SCCS config, or None on a host that has none.
         receipt_manager: Where the receipt is written.
         dry_run: Preview only — nothing is written, no receipt.
-        overwrite: Replace existing targets. True by default: a deployment
-            that silently skips half its payload is worse than one that
-            refreshes it, and `pre_existing` records what was displaced.
+        overwrite: Refresh targets SCCS previously installed. Never applies
+            to foreign targets — those are skipped regardless.
     """
     importer = Importer(zip_path, config=config)
 
@@ -72,6 +121,23 @@ def install_bundle(
         manifest = importer.load_manifest()
     except (ValueError, OSError) as e:
         return InstallOutcome(success=False, errors=[f"Cannot read bundle: {e}"])
+
+    # Read the receipt BEFORE anything is written. A corrupt receipt found
+    # after the copy leaves files on the host with no record of them, which
+    # makes `deploy status` say "nothing installed" and `revoke` say "nothing
+    # to revoke" — the exact failure this feature must not have.
+    try:
+        receipt = receipt_manager.load()
+    except ValueError as e:
+        return InstallOutcome(success=False, errors=[str(e)])
+
+    # Does ~/.config/sccs/ belong to the host user? Sticky, like pre_existing:
+    # once an install has seen the directory there, later installs must not
+    # decide it is ours just because we have been writing the receipt into it.
+    if receipt.installs:
+        state_dir_pre_existing = any(r.state_dir_pre_existing for r in receipt.installs)
+    else:
+        state_dir_pre_existing = receipt_manager.path.parent.exists()
 
     if manifest.deployment is None:
         return InstallOutcome(
@@ -100,23 +166,43 @@ def install_bundle(
 
     selections = importer.build_selections_all()
 
-    # Record pre-existing state BEFORE the import writes anything.
+    # Decide ownership BEFORE the import writes anything.
+    claimed = _sticky_pre_existing(receipt)
     pre_existing: dict[tuple[str, str], bool] = {}
     bases: dict[str, Path] = {}
+    to_import: list[tuple[str, ManifestItem]] = []
+    skipped_foreign: list[str] = []
+
     for cat_name, item in selections:
         cat_data = manifest.categories[cat_name]
-        base = Path(cat_data.local_path).expanduser()
+        base = _category_base(cat_data)
         bases[cat_name] = base
-        pre_existing[(cat_name, item.name)] = _target_path(base, item).exists()
+        key = (cat_name, item.name)
+        if key in claimed:
+            is_foreign = claimed[key]
+        else:
+            is_foreign = _target_path(base, item).exists()
+        pre_existing[key] = is_foreign
+        if is_foreign:
+            skipped_foreign.append(f"{cat_name}/{item.name}")
+        else:
+            to_import.append((cat_name, item))
 
-    result = importer.apply(selections, dry_run=dry_run, overwrite=overwrite, backup=not dry_run)
+    # backup=False on purpose. Nothing foreign is ever written over, so the
+    # only thing a backup could hold is a previous copy of OUR artefact — and
+    # ~/.config/sccs/backups/ on a customer host is one more place our
+    # knowledge would sit after `revoke` (which keeps that directory when the
+    # host user runs sccs themselves). Nothing to preserve, something to leak.
+    result = importer.apply(to_import, dry_run=dry_run, overwrite=overwrite, backup=False)
 
     if dry_run:
         return InstallOutcome(
             success=result.success,
             profile=section.profile,
-            installed=len(selections),
+            installed=len(to_import),
+            skipped=len(skipped_foreign),
             errors=list(result.errors),
+            skipped_foreign=skipped_foreign,
         )
 
     entries: list[ReceiptEntry] = []
@@ -142,15 +228,23 @@ def install_bundle(
         retain=list(section.retain),
         sweep_globs={k: list(v) for k, v in section.sweep_globs.items()},
         entries=entries,
+        state_dir_pre_existing=state_dir_pre_existing,
     )
     receipt_manager.record_install(record)
-    logger.info("Installed profile %s: %d artefacts", section.profile, len(entries))
+    logger.info(
+        "Installed profile %s: %d artefacts, %d foreign targets skipped",
+        section.profile,
+        len(entries),
+        len(skipped_foreign),
+    )
 
+    installed = sum(1 for e in entries if not e.pre_existing)
     return InstallOutcome(
         success=result.success,
         profile=section.profile,
-        installed=len(entries),
-        skipped=len(selections) - len(entries),
+        installed=installed,
+        skipped=len(selections) - installed,
         errors=list(result.errors),
         record=record,
+        skipped_foreign=skipped_foreign,
     )

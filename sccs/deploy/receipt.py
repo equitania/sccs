@@ -18,9 +18,18 @@ from sccs.utils.paths import atomic_write
 
 logger = get_logger("sccs.deploy")
 
-DEFAULT_RECEIPT_PATH = Path.home() / ".config" / "sccs" / ".deploy_receipt.yaml"
-
 RECEIPT_VERSION = 1
+
+# Relative to the home directory. Resolved lazily by default_receipt_path():
+# a module-level `Path.home() / ...` freezes the home directory at import
+# time, which is wrong in every test that patches HOME and would be wrong on
+# any host where the process changes user before the CLI runs.
+RECEIPT_REL_PATH = Path(".config") / "sccs" / ".deploy_receipt.yaml"
+
+
+def default_receipt_path() -> Path:
+    """Where the receipt lives when no explicit path is given."""
+    return Path.home() / RECEIPT_REL_PATH
 
 
 @dataclass
@@ -32,10 +41,17 @@ class ReceiptEntry:
     target: str
     item_type: str
     content_hash: str | None = None
-    # True when something already existed at `target` before we wrote.
-    # Such an entry is NEVER removed by revoke — "written by us" and "was
-    # already here" are different facts, and only the first justifies a
-    # deletion. Same line as the foreign_target guard in the Codex export.
+    # True when something already existed at `target` before SCCS ever wrote
+    # there. Such an entry is NEVER written over by install and NEVER removed
+    # by revoke — "written by us" and "was already here" are different facts,
+    # and only the first justifies displacing or deleting anything. Same line
+    # as the foreign_target guard in the Codex export.
+    #
+    # The value is STICKY: it is established at the first install and carried
+    # forward by every later one (see install.py::_sticky_pre_existing).
+    # Recomputing it per install would flip every entry to True on a refresh —
+    # and a receipt where everything is "not ours" makes revoke a no-op that
+    # reports a clean host.
     pre_existing: bool = False
 
 
@@ -49,6 +65,11 @@ class InstallRecord:
     retain: list[str] = field(default_factory=list)
     sweep_globs: dict[str, list[str]] = field(default_factory=dict)
     entries: list[ReceiptEntry] = field(default_factory=list)
+    # True when ~/.config/sccs/ was already there before this install wrote
+    # anything — i.e. the host user runs `sccs` themselves. Revoke then keeps
+    # the directory (their config.yaml, sync state and backups are theirs) and
+    # removes only our receipt. Sticky, for the same reason `pre_existing` is.
+    state_dir_pre_existing: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,6 +83,7 @@ class InstallRecord:
             retain=list(data.get("retain") or []),
             sweep_globs={k: list(v) for k, v in (data.get("sweep_globs") or {}).items()},
             entries=[ReceiptEntry(**e) for e in (data.get("entries") or [])],
+            state_dir_pre_existing=bool(data.get("state_dir_pre_existing", False)),
         )
 
 
@@ -83,7 +105,7 @@ class ReceiptManager:
     """Loads and saves the deployment receipt."""
 
     def __init__(self, receipt_path: Path | None = None) -> None:
-        self._path = receipt_path or DEFAULT_RECEIPT_PATH
+        self._path = receipt_path or default_receipt_path()
 
     @property
     def path(self) -> Path:
