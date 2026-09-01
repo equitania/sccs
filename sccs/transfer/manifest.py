@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import platform
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import yaml
 from pydantic import BaseModel
@@ -45,8 +45,14 @@ def is_single_file_category(category: ManifestCategory) -> bool:
     The import side cannot repeat the export side's `local_path.is_dir()`
     test — on a fresh customer host the path does not exist yet — so the
     manifest itself has to carry the answer, and it does: for a single-file
-    category, and only for one, every item name equals the basename of
-    `local_path`.
+    category, and only for one, the category carries EXACTLY ONE item and
+    that item's name equals the basename of `local_path`.
+
+    The item count is load-bearing, not decoration. A directory-backed
+    `file` category can legitimately contain a file named like the
+    directory itself (`~/.claude/commands/commands.md`); without the count
+    such a category would be mistaken for a single-file one and every one
+    of its files would be written into the directory's PARENT.
     """
     if category.item_type != "file":
         return False
@@ -56,7 +62,23 @@ def is_single_file_category(category: ManifestCategory) -> bool:
     base_name = PurePosixPath(raw.replace("\\", "/")).name
     if not base_name or base_name in {".", ".."}:
         return False
-    return bool(category.items) and all(item.name == base_name for item in category.items)
+    if len(category.items) != 1:
+        return False
+    return category.items[0].name == base_name
+
+
+def resolves_to_parent(category: ManifestCategory, expanded: Path) -> bool:
+    """True when `expanded` names the artefact itself, so items land beside it.
+
+    `is_single_file_category` reads the manifest alone, because on a fresh
+    customer host there is nothing on disk to look at. Where there IS
+    something, run the export side's own test as well: a `local_path` that
+    is a directory on this host is directory-backed, full stop — no manifest
+    fingerprint can outvote it. That closes the one false positive the
+    manifest heuristic cannot see, a directory-backed `file` category whose
+    single selected item happens to be named like the directory.
+    """
+    return is_single_file_category(category) and not expanded.is_dir()
 
 
 class DeploymentSection(BaseModel):

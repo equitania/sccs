@@ -16,7 +16,7 @@ from sccs.config.schema import SccsConfig
 from sccs.deploy.receipt import DeployReceipt, InstallRecord, ReceiptEntry, ReceiptManager
 from sccs.doctor._paths import is_home_path
 from sccs.transfer.importer import Importer
-from sccs.transfer.manifest import ManifestCategory, ManifestItem, is_single_file_category
+from sccs.transfer.manifest import ManifestCategory, ManifestItem, resolves_to_parent
 from sccs.utils.hashing import directory_hash, file_hash
 from sccs.utils.logging import get_logger
 
@@ -52,7 +52,7 @@ def _category_base(cat_data: ManifestCategory) -> Path:
     file's parent directory, not underneath the file.
     """
     base = Path(cat_data.local_path).expanduser()
-    if is_single_file_category(cat_data):
+    if resolves_to_parent(cat_data, base):
         return base.parent
     return base
 

@@ -21,7 +21,7 @@ from sccs.transfer.manifest import (
     ManifestCategory,
     ManifestItem,
     deserialize_manifest,
-    is_single_file_category,
+    resolves_to_parent,
 )
 from sccs.utils.paths import create_backup, matches_any_pattern, safe_copy
 
@@ -276,10 +276,9 @@ class Importer:
         """
         manifest_local_path = cat_data.local_path
         manifest_path = Path(manifest_local_path).expanduser().resolve()
-        single_file = is_single_file_category(cat_data)
 
         if self._config is None:
-            return manifest_path.parent if single_file else manifest_path
+            return manifest_path.parent if resolves_to_parent(cat_data, manifest_path) else manifest_path
 
         category = self._config.sync_categories.get(cat_name)
         if category is None:
@@ -295,7 +294,7 @@ class Importer:
                 f"does not match local configuration ({category.local_path})"
             )
 
-        return expected.parent if single_file else expected
+        return expected.parent if resolves_to_parent(cat_data, expected) else expected
 
     def _apply_item(
         self,

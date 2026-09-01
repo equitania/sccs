@@ -1267,6 +1267,52 @@ class TestSingleFileCategory:
         assert result.success, result.errors
         assert (target / ".config" / "starship.toml").is_file()
 
+    def test_a_single_item_named_like_its_directory_is_not_single_file(self, tmp_path):
+        """The manifest fingerprint alone cannot tell these two apart.
+
+        A directory-backed `file` category holding exactly one file named
+        like the directory (`~/.claude/notes/notes`) satisfies every
+        manifest-only test for a single-file category. Taken as one, its
+        target base becomes the parent, `parent / "notes"` is the DIRECTORY
+        itself, and the import writes a file over it. Where the path is on
+        disk, `resolves_to_parent` runs the export side's own `is_dir()`
+        test and the ambiguity is gone.
+        """
+        from sccs.transfer.manifest import ManifestCategory, is_single_file_category, resolves_to_parent
+
+        category = ManifestCategory(
+            description="notes",
+            item_type="file",
+            local_path=str(tmp_path / "notes"),
+            items=[ManifestItem(name="notes", zip_path="files/notes/notes", item_type="file")],
+        )
+        # The manifest heuristic on its own cannot rule it out.
+        assert is_single_file_category(category)
+
+        (tmp_path / "notes").mkdir()
+        assert not resolves_to_parent(category, tmp_path / "notes")
+
+        # A path that is a file, or not there yet, keeps the single-file reading.
+        (tmp_path / "notes").rmdir()
+        assert resolves_to_parent(category, tmp_path / "notes")
+        (tmp_path / "notes").write_text("x\n", encoding="utf-8")
+        assert resolves_to_parent(category, tmp_path / "notes")
+
+    def test_two_items_are_never_a_single_file_category(self, tmp_path):
+        """Single-file means exactly one item, and the count says so."""
+        from sccs.transfer.manifest import ManifestCategory, is_single_file_category
+
+        category = ManifestCategory(
+            description="notes",
+            item_type="file",
+            local_path="~/.config/notes",
+            items=[
+                ManifestItem(name="notes", zip_path="files/notes/notes", item_type="file"),
+                ManifestItem(name="notes", zip_path="files/notes/sub/notes", item_type="file"),
+            ],
+        )
+        assert not is_single_file_category(category)
+
     def test_directory_backed_file_category_is_unaffected(self, tmp_path, monkeypatch):
         """A `file` category pointing at a DIRECTORY keeps its old behaviour."""
         home = tmp_path / "dir-home"
