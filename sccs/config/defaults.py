@@ -168,6 +168,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "exclude": ["*.local.*", "credentials.*"],
         },
         # Claude Statusline
+        #
+        # The statusline is the one Claude Code artefact that is two things at
+        # once: a script to carry across machines, and a line in settings.json
+        # that has to point at it. Carrying only the script leaves every other
+        # host running whatever its settings.json happened to say — which is how
+        # a statusline reworked on the Mac stayed invisible everywhere else.
+        #
+        # `statusline-command.sh` is the name Claude Code's own /statusline
+        # setup writes, so it is part of the include list rather than an
+        # exception to it. The item_pattern is `statusline*` (no dot): a glob
+        # with the dot would never match that name.
         "claude_statusline": {
             "enabled": True,
             "description": "Claude Code Statusline Script",
@@ -175,23 +186,35 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "repo_path": ".claude/statusline",
             "sync_mode": "bidirectional",
             "item_type": "file",
-            "item_pattern": "statusline.*",
+            "item_pattern": "statusline*",
             "include": [
                 "statusline.sh",
+                "statusline-command.sh",
                 "statusline.py",
                 "statusline.ps1",
                 "statusline.fish",
             ],
-            "exclude": [],
+            # Defense-in-depth behind the include allowlist: third-party
+            # statuslines drop a multi-megabyte binary (`statusline`) and its
+            # config next to the scripts, and the editor/backup leftovers of a
+            # hand-edited script must never travel either.
+            "exclude": [
+                "statusline",
+                "statusline.toml",
+                "*.bak",
+                "*.backup",
+                "*.orig",
+            ],
             "settings_ensure": {
                 "target_file": "~/.claude/settings.json",
                 "entries": {
                     "statusLine": {
                         "type": "command",
-                        "command": "~/.claude/statusline.sh",
+                        "command": "bash ~/.claude/statusline-command.sh",
+                        "padding": 0,
                     }
                 },
-                # Per-platform overrides: Windows users don't have bash/jq/bc,
+                # Per-platform overrides: Windows users don't have bash/jq,
                 # so route the statusLine through PowerShell's native runner.
                 # The override OVERWRITES existing values on the target platform.
                 "platform_overrides": {
@@ -201,6 +224,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
                             "command": "pwsh -NoProfile -File ~/.claude/statusline.ps1",
                         }
                     }
+                },
+                # Values SCCS itself wrote before this release. Recognising them
+                # is what lets the new default reach a host that already ran an
+                # older SCCS; anything else in `statusLine` is the user's own
+                # choice and is left alone.
+                "superseded_patterns": {
+                    "statusLine": [
+                        {"type": "command", "command": "~/.claude/statusline.sh"},
+                        {"type": "command", "command": "bash ~/.claude/statusline.sh"},
+                    ]
                 },
                 "create_if_missing": True,
                 "backup_before_modify": True,

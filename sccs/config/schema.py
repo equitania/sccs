@@ -88,6 +88,19 @@ class SettingsEnsure(BaseModel):
             "platform overrides express explicit per-OS choices."
         ),
     )
+    superseded_patterns: dict[str, list[Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-key list of values SCCS itself wrote in an earlier release and may "
+            "therefore replace. A pattern matches when every key it names is present "
+            "and equal in the existing value — extra keys in the target (a hand-added "
+            "`padding`, say) do not prevent the match, but a differing value does. "
+            "Only a matched key is overwritten with the current `entries` value; "
+            "anything unrecognised counts as the user's own and stays untouched. "
+            "This is what lets a changed default reach a machine that already has an "
+            "older SCCS-written entry, without ever displacing a hand-edited one."
+        ),
+    )
     create_if_missing: bool = Field(default=True, description="Create the target file if it doesn't exist")
     backup_before_modify: bool = Field(default=True, description="Create backup before modifying")
 
@@ -96,6 +109,24 @@ class SettingsEnsure(BaseModel):
     def expand_target_path(cls, v: str) -> str:
         """Expand ~ in target file path."""
         return str(Path(v).expanduser())
+
+    @field_validator("superseded_patterns")
+    @classmethod
+    def reject_empty_patterns(cls, v: dict[str, list[Any]]) -> dict[str, list[Any]]:
+        """
+        Reject patterns that would match anything.
+
+        An empty list carries no meaning, and an empty dict pattern matches every
+        possible value — which would turn "replace what SCCS wrote" into "replace
+        whatever is there", the exact opposite of the guarantee.
+        """
+        for key, patterns in v.items():
+            if not patterns:
+                raise ValueError(f"superseded_patterns['{key}'] is empty — remove the key instead")
+            for pattern in patterns:
+                if isinstance(pattern, dict) and not pattern:
+                    raise ValueError(f"superseded_patterns['{key}'] contains an empty pattern, which matches any value")
+        return v
 
 
 class SyncCategory(BaseModel):

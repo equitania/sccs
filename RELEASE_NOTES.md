@@ -1,5 +1,24 @@
 # Release Notes
 
+## Version 2.66.0 (01.09.2026)
+
+### Fixed (the statusline was the one artefact that never travelled)
+
+- **The `claude_statusline` category did not cover the file Claude Code actually runs.** Claude Code's own `/statusline` setup writes `~/.claude/statusline-command.sh`, and that name matched neither the `include` allowlist nor the `item_pattern`: `statusline.*` is an fnmatch glob, where the dot is literal, so it matches `statusline.sh` but never `statusline-command.sh`. The file that *is* the statusline was therefore never collected, while a stale `statusline.sh` beside it synced happily — and every other host pulled that one. A statusline reworked on the Mac stayed invisible on Linux and Windows, with `sccs sync` reporting success throughout. `item_pattern` is now `statusline*`, and the live script is a named entry in `include` rather than an exception to it.
+- **`settings_ensure` hardcoded the old path.** Even once the script travelled, the target host's `settings.json` kept pointing at `~/.claude/statusline.sh`, because the shipped entry named that file literally. Both halves have to move together: the statusline is a script to carry *and* a line in `settings.json` that has to point at it, and shipping only the script leaves each host running whatever its settings file happened to say.
+- **The category now excludes what must never travel**: the multi-megabyte binary a third-party statusline drops as `~/.claude/statusline`, its machine-local `statusline.toml`, and the `.bak`/`.orig` leftovers of a hand-edited script. The preset system already excluded the first two through `managed_paths`; the category now does so in its own right, so the guarantee does not depend on a preset being configured.
+
+### Added (`superseded_patterns` — how a corrected default reaches a machine that already has the old one)
+
+- **`SettingsEnsure.superseded_patterns`** names, per key, the values SCCS itself wrote in an earlier release. A key whose current value matches one of them is refreshed to the current default and reported as `refreshed`; anything else is the user's own and is skipped exactly as before. This is what closes the second half of the problem above: a host that already ran an older SCCS has an old command sitting in `settings.json`, and the existing merge is non-destructive by design, so nothing would ever have replaced it.
+- **Matching is by pattern, not by equality.** Every key a pattern names must be present and equal in the target; extra keys do not prevent the match, so a hand-added `padding` next to an SCCS-written `command` still counts as ours, while a differing `command` does not. An empty pattern is rejected at validation time — it would match every value, turning "replace what SCCS wrote" into "replace whatever is there".
+- **A refresh is always reported, never only under `--verbose`.** It is the one case in which SCCS replaces a value that was already in the file, so it is visible in the normal output, and it goes through the existing backup path.
+- **`_resolve_effective_settings_ensure` lifts the same values in an existing `config.yaml`.** A config file written once has no way to learn that a shipped default was corrected — which is exactly how the old command survived on the other machines. The resolver already filled in missing `platform_overrides` from the bundled default for this reason; it now also fills in `superseded_patterns`, and lifts an `entries` value that is itself one of those superseded values. A value the default does not recognise stays the user's, and a user who declares their own patterns keeps control.
+
+### Changed
+
+- **`statusline.ps1` is a port of the current script, not of its predecessor.** The bundled PowerShell statusline still mirrored the April version of `statusline.sh`. It now follows `statusline-command.sh` segment for segment — directory, git branch with change count and ahead/behind, language version, model, context window, output style, clock — without `jq` or `bc`, using `ConvertFrom-Json` and `InvariantCulture` formatting (under a German locale `{0:0.0}` yields "1,0M"). The timeout guard is a process handle with `WaitForExit(ms)` rather than `Start-Job`, whose runspace would cost more than the git call it guards on a line redrawn every frame.
+
 ## Version 2.65.1 (01.09.2026)
 
 ### Fixed (discoverability — the new command group was invisible from the old one)

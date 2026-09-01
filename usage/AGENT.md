@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.65.1  ·  **Python:** ≥3.10
+- **Version:** 2.66.0  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -331,6 +331,20 @@ sccs config show               # current config; also: validate | edit | init [-
   are expanded by the doctor's check before it looks for the file (v2.58.2). `statusline use|install`
   writes both `~/.claude/settings.json` and `statusline.active` in config.yaml; the latter is what
   `doctor install` reads when deciding whether to offer the installer.
+- **`sync` writes settings.json for some categories** (`settings_ensure`, today only
+  `claude_statusline`): a missing key is added, an existing key is left alone — with one exception.
+  Values SCCS itself wrote in an earlier release are listed per key in `superseded_patterns` and are
+  lifted to the current default, because a non-destructive merge alone can never correct a shipped
+  default on a machine that already has the old one (v2.66.0). A refresh is always reported
+  (`↻ settings.json: refreshed [statusLine]`) and goes through the normal backup path. To pin a
+  hand-written value, set `superseded_patterns` for that key to something that never occurs.
+- **The statusline is a script AND a settings.json line.** `claude_statusline` syncs
+  `statusline-command.sh` (the name Claude Code's own `/statusline` setup writes), `statusline.sh`,
+  `.py`, `.fish` and `.ps1`, and points `statusLine` at the right one per platform — bash on
+  macOS/Linux, `pwsh -NoProfile -File` on Windows. The multi-MB third-party `statusline` binary,
+  `statusline.toml` and `*.bak`/`*.orig` are excluded. NOTE for existing configs: the scan fields
+  (`item_pattern`, `include`, `exclude`) come from the user's `config.yaml` unchanged and need a
+  one-off manual alignment; only the `settings_ensure` half catches up on its own.
 - **Platforms:** categories can be platform-gated (e.g. `fish_config` is macOS-only by default).
 
 ## Machine-readable outputs

@@ -556,3 +556,255 @@ class TestResolveEffectiveSettingsEnsure:
 
         effective = _resolve_effective_settings_ensure("claude_statusline", user_block)
         assert effective is user_block
+
+
+class TestSupersededPatterns:
+    """Refreshing a value SCCS itself wrote in an earlier release.
+
+    The guarantee under test cuts both ways: a recognised value is lifted to
+    the current default, and anything else is left exactly as the user left it.
+    """
+
+    def test_recognised_value_is_refreshed(self, settings_file: Path):
+        settings_file.write_text(
+            json.dumps({"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}}),
+            encoding="utf-8",
+        )
+
+        config = SettingsEnsure(
+            target_file=str(settings_file),
+            entries={"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+            superseded_patterns={"statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}]},
+        )
+        result = ensure_settings(config)
+
+        assert result.success
+        assert result.keys_refreshed == ["statusLine"]
+        assert result.keys_skipped == []
+        data = json.loads(settings_file.read_text(encoding="utf-8"))
+        assert data["statusLine"]["command"] == "bash ~/.claude/statusline-command.sh"
+
+    def test_unrecognised_value_is_never_touched(self, settings_file: Path):
+        hand_edited = {"type": "command", "command": "~/bin/my-own-statusline"}
+        settings_file.write_text(json.dumps({"statusLine": hand_edited}), encoding="utf-8")
+
+        config = SettingsEnsure(
+            target_file=str(settings_file),
+            entries={"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+            superseded_patterns={"statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}]},
+        )
+        result = ensure_settings(config)
+
+        assert result.keys_skipped == ["statusLine"]
+        assert result.keys_refreshed == []
+        assert not result.file_modified
+        data = json.loads(settings_file.read_text(encoding="utf-8"))
+        assert data["statusLine"] == hand_edited
+
+    def test_extra_keys_in_target_do_not_prevent_the_match(self, settings_file: Path):
+        # A user who added `padding` next to an SCCS-written command still has
+        # an SCCS-written command.
+        settings_file.write_text(
+            json.dumps({"statusLine": {"type": "command", "command": "~/.claude/statusline.sh", "padding": 2}}),
+            encoding="utf-8",
+        )
+
+        config = SettingsEnsure(
+            target_file=str(settings_file),
+            entries={"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+            superseded_patterns={"statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}]},
+        )
+        result = ensure_settings(config)
+
+        assert result.keys_refreshed == ["statusLine"]
+
+    def test_differing_value_on_a_named_key_blocks_the_match(self, settings_file: Path):
+        settings_file.write_text(
+            json.dumps({"statusLine": {"type": "command", "command": "~/.claude/statusline-other.sh"}}),
+            encoding="utf-8",
+        )
+
+        config = SettingsEnsure(
+            target_file=str(settings_file),
+            entries={"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+            superseded_patterns={"statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}]},
+        )
+        result = ensure_settings(config)
+
+        assert result.keys_skipped == ["statusLine"]
+
+    def test_scalar_pattern_matches_by_equality(self, settings_file: Path):
+        settings_file.write_text(json.dumps({"theme": "old-theme"}), encoding="utf-8")
+
+        config = SettingsEnsure(
+            target_file=str(settings_file),
+            entries={"theme": "new-theme"},
+            superseded_patterns={"theme": ["old-theme"]},
+        )
+        result = ensure_settings(config)
+
+        assert result.keys_refreshed == ["theme"]
+        assert json.loads(settings_file.read_text(encoding="utf-8"))["theme"] == "new-theme"
+
+    def test_no_patterns_configured_keeps_the_old_non_destructive_behaviour(self, settings_file: Path):
+        settings_file.write_text(json.dumps({"statusLine": {"command": "x"}}), encoding="utf-8")
+
+        config = _make_config(settings_file, {"statusLine": {"command": "y"}})
+        result = ensure_settings(config)
+
+        assert result.keys_skipped == ["statusLine"]
+        assert not result.file_modified
+
+    def test_dry_run_reports_the_refresh_without_writing(self, settings_file: Path):
+        original = {"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}}
+        settings_file.write_text(json.dumps(original), encoding="utf-8")
+
+        config = SettingsEnsure(
+            target_file=str(settings_file),
+            entries={"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+            superseded_patterns={"statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}]},
+        )
+        result = ensure_settings(config, dry_run=True)
+
+        assert result.keys_refreshed == ["statusLine"]
+        assert result.file_modified
+        assert json.loads(settings_file.read_text(encoding="utf-8")) == original
+
+    def test_refresh_creates_a_backup(self, settings_file: Path):
+        settings_file.write_text(
+            json.dumps({"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}}),
+            encoding="utf-8",
+        )
+
+        config = SettingsEnsure(
+            target_file=str(settings_file),
+            entries={"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+            superseded_patterns={"statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}]},
+        )
+        result = ensure_settings(config)
+
+        assert result.backup_path is not None
+        assert result.backup_path.exists()
+
+    def test_empty_pattern_list_is_rejected(self, settings_file: Path):
+        with pytest.raises(ValueError, match="empty"):
+            SettingsEnsure(
+                target_file=str(settings_file),
+                entries={"statusLine": {"command": "x"}},
+                superseded_patterns={"statusLine": []},
+            )
+
+    def test_empty_dict_pattern_is_rejected(self, settings_file: Path):
+        # An empty pattern matches every value, turning "replace what SCCS
+        # wrote" into "replace whatever is there".
+        with pytest.raises(ValueError, match="matches any value"):
+            SettingsEnsure(
+                target_file=str(settings_file),
+                entries={"statusLine": {"command": "x"}},
+                superseded_patterns={"statusLine": [{}]},
+            )
+
+
+class TestSupersededEntriesLiftedForOldConfigs:
+    """An old user config must learn about a corrected default.
+
+    Without this, the machine that first ran an older SCCS keeps writing that
+    release's command forever — the config file has no other way to find out.
+    """
+
+    def _stub_default(self, monkeypatch, block: dict) -> None:
+        import sccs.sync.category as category_mod
+
+        monkeypatch.setattr(category_mod, "get_default_settings_ensure", lambda name: block)
+
+    def test_old_entries_value_is_lifted_to_the_current_default(self, monkeypatch, tmp_path):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        self._stub_default(
+            monkeypatch,
+            {
+                "target_file": "~/.claude/settings.json",
+                "entries": {"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+                "superseded_patterns": {
+                    "statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}],
+                },
+            },
+        )
+
+        user_block = SettingsEnsure(
+            target_file=str(tmp_path / "settings.json"),
+            entries={"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}},
+        )
+
+        effective = _resolve_effective_settings_ensure("claude_statusline", user_block)
+
+        assert effective is not None
+        assert effective.entries["statusLine"]["command"] == "bash ~/.claude/statusline-command.sh"
+        assert effective.superseded_patterns == {
+            "statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}]
+        }
+        # target_file stays the user's.
+        assert effective.target_file == str(tmp_path / "settings.json")
+
+    def test_user_chosen_entries_value_survives(self, monkeypatch, tmp_path):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        self._stub_default(
+            monkeypatch,
+            {
+                "target_file": "~/.claude/settings.json",
+                "entries": {"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+                "superseded_patterns": {
+                    "statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}],
+                },
+            },
+        )
+
+        own = {"type": "command", "command": "~/bin/my-own-statusline"}
+        user_block = SettingsEnsure(
+            target_file=str(tmp_path / "settings.json"),
+            entries={"statusLine": own},
+        )
+
+        effective = _resolve_effective_settings_ensure("claude_statusline", user_block)
+
+        assert effective is not None
+        assert effective.entries["statusLine"] == own
+
+    def test_user_declared_patterns_win_over_the_default(self, monkeypatch, tmp_path):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        self._stub_default(
+            monkeypatch,
+            {
+                "target_file": "~/.claude/settings.json",
+                "entries": {"statusLine": {"type": "command", "command": "bash ~/.claude/statusline-command.sh"}},
+                "superseded_patterns": {
+                    "statusLine": [{"type": "command", "command": "~/.claude/statusline.sh"}],
+                },
+            },
+        )
+
+        user_block = SettingsEnsure(
+            target_file=str(tmp_path / "settings.json"),
+            entries={"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}},
+            # The user says: nothing about statusLine is superseded.
+            superseded_patterns={"statusLine": [{"type": "command", "command": "something-else"}]},
+        )
+
+        effective = _resolve_effective_settings_ensure("claude_statusline", user_block)
+
+        assert effective is not None
+        assert effective.entries["statusLine"]["command"] == "~/.claude/statusline.sh"
+
+    def test_category_without_default_block_is_untouched(self, monkeypatch, tmp_path):
+        from sccs.sync.category import _resolve_effective_settings_ensure
+
+        self._stub_default(monkeypatch, {})
+
+        user_block = SettingsEnsure(
+            target_file=str(tmp_path / "settings.json"),
+            entries={"foo": "bar"},
+        )
+
+        assert _resolve_effective_settings_ensure("custom_cat", user_block) is user_block

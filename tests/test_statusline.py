@@ -493,3 +493,60 @@ def test_install_refuses_an_empty_download(monkeypatch):
     monkeypatch.setattr("os.name", "posix")
     with pytest.raises(StatusLineError, match="empty"):
         install_preset(DEFAULT_STATUSLINE_PRESETS["claude-code-statusline"])
+
+
+class TestStatuslineCategoryMatchesTheLiveScript:
+    """The sync category must cover the file Claude Code actually runs.
+
+    `statusline-command.sh` is the name Claude Code's own /statusline setup
+    writes. It was covered by neither the include list nor the item_pattern
+    (`statusline.*` is an fnmatch glob, where the dot is literal), so the one
+    file that IS the statusline never reached the repository — while the
+    stale `statusline.sh` next to it synced happily, and every other host
+    kept running that.
+    """
+
+    def _category(self):
+        from sccs.config.defaults import DEFAULT_CONFIG
+
+        return DEFAULT_CONFIG["sync_categories"]["claude_statusline"]
+
+    def _matches(self, name: str) -> bool:
+        import fnmatch
+
+        from sccs.utils.paths import matches_any_pattern
+
+        cat = self._category()
+        if not fnmatch.fnmatch(name, cat["item_pattern"]):
+            return False
+        if not matches_any_pattern(name, cat["include"]):
+            return False
+        return not matches_any_pattern(name, cat["exclude"])
+
+    def test_live_statusline_script_is_synced(self):
+        assert self._matches("statusline-command.sh")
+
+    def test_legacy_scripts_still_sync(self):
+        for name in ("statusline.sh", "statusline.ps1", "statusline.py", "statusline.fish"):
+            assert self._matches(name), name
+
+    def test_third_party_binary_and_config_never_sync(self):
+        # Multi-megabyte binary plus machine-local taste.
+        assert not self._matches("statusline")
+        assert not self._matches("statusline.toml")
+
+    def test_editor_and_backup_leftovers_never_sync(self):
+        assert not self._matches("statusline-command.sh.bak")
+        assert not self._matches("statusline.sh.orig")
+
+    def test_settings_entry_points_at_the_live_script(self):
+        entry = self._category()["settings_ensure"]["entries"]["statusLine"]
+        assert entry["command"] == "bash ~/.claude/statusline-command.sh"
+
+    def test_previous_release_commands_are_declared_superseded(self):
+        """Otherwise a host that already ran an older SCCS keeps the old line."""
+        from sccs.sync.settings import is_superseded
+
+        patterns = self._category()["settings_ensure"]["superseded_patterns"]["statusLine"]
+        assert is_superseded({"type": "command", "command": "~/.claude/statusline.sh"}, patterns)
+        assert not is_superseded({"type": "command", "command": "~/bin/mine"}, patterns)

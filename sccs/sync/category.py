@@ -30,16 +30,26 @@ def _resolve_effective_settings_ensure(
 ) -> SettingsEnsure | None:
     """Combine a user-provided settings_ensure with the bundled default.
 
-    Handles two upgrade scenarios from pre-v2.20.0 user configs:
+    Handles three upgrade scenarios from older user configs:
       * The user has no ``settings_ensure`` block at all — adopt the
         bundled default (so platform_overrides take effect).
       * The user has a block but ``platform_overrides`` is empty / lacks
         the current platform — fill in missing platform keys from the
         default. The user's per-platform overrides still win.
+      * The user's block carries ``entries`` and ``superseded_patterns``
+        from an older release. Both are knowledge shipped by the package,
+        never something a user writes by hand, and a config file written
+        once never learns about a corrected default on its own — which is
+        how a statusline reworked on one machine stayed invisible on every
+        other one. So: missing ``superseded_patterns`` are filled in from
+        the default, and an ``entries`` value that IS one of those
+        superseded values is lifted to the current default. A value the
+        default does not recognise is the user's own and stays.
 
-    The user's ``entries``, ``target_file`` and other top-level fields
-    are NEVER overwritten — only platform_overrides are augmented.
+    ``target_file`` and the remaining top-level fields are never touched.
     """
+    from sccs.sync.settings import is_superseded
+
     default_block = get_default_settings_ensure(category_name)
     if user_block is None:
         if default_block is None:
@@ -49,15 +59,41 @@ def _resolve_effective_settings_ensure(
     if not default_block:
         return user_block
 
-    default_overrides = default_block.get("platform_overrides", {}) or {}
-    if not default_overrides:
-        return user_block
+    updates: dict[str, object] = {}
 
-    merged_overrides = dict(default_overrides)
-    merged_overrides.update(user_block.platform_overrides)
-    if merged_overrides == user_block.platform_overrides:
+    default_overrides = default_block.get("platform_overrides", {}) or {}
+    if default_overrides:
+        merged_overrides = dict(default_overrides)
+        merged_overrides.update(user_block.platform_overrides)
+        if merged_overrides != user_block.platform_overrides:
+            updates["platform_overrides"] = merged_overrides
+
+    default_patterns = default_block.get("superseded_patterns", {}) or {}
+    merged_patterns = dict(default_patterns)
+    merged_patterns.update(user_block.superseded_patterns)
+    if merged_patterns != user_block.superseded_patterns:
+        updates["superseded_patterns"] = merged_patterns
+
+    # Lift entries the package itself wrote in an earlier release. Keyed on the
+    # merged patterns, so a user who declared their own patterns keeps control.
+    default_entries = default_block.get("entries", {}) or {}
+    if default_entries and merged_patterns:
+        merged_entries = dict(user_block.entries)
+        changed = False
+        for key, default_value in default_entries.items():
+            if key not in merged_entries:
+                continue
+            if merged_entries[key] == default_value:
+                continue
+            if is_superseded(merged_entries[key], merged_patterns.get(key, [])):
+                merged_entries[key] = default_value
+                changed = True
+        if changed:
+            updates["entries"] = merged_entries
+
+    if not updates:
         return user_block
-    return user_block.model_copy(update={"platform_overrides": merged_overrides})
+    return user_block.model_copy(update=updates)
 
 
 @dataclass

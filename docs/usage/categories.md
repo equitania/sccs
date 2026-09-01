@@ -25,6 +25,18 @@ Alle Felder, die ein `SyncCategory` in `config.yaml` aufnehmen kann:
 | `include` | list | Nein | Einschluss-Patterns (Standard: `["*"]`) |
 | `exclude` | list | Nein | Ausschluss-Patterns (Standard: `[]`) |
 | `platforms` | list | Nein | Plattform-Filter: `["macos"]`, `["linux"]`, `null` = alle |
+| `settings_ensure` | dict | Nein | Einträge, die nach dem Sync in einer JSON-Datei stehen müssen (siehe unten) |
+
+`settings_ensure` selbst:
+
+| Feld | Typ | Beschreibung |
+|------|-----|-------------|
+| `target_file` | string | Zieldatei, z.B. `~/.claude/settings.json` |
+| `entries` | dict | Schlüssel, die vorhanden sein müssen. Fehlende werden ergänzt, vorhandene **nicht** überschrieben |
+| `platform_overrides` | dict | Pro Plattform (`macos`/`linux`/`windows`). Überschreiben auch vorhandene Werte — eine ausdrückliche Wahl je Betriebssystem |
+| `superseded_patterns` | dict | Je Schlüssel die Werte, die SCCS selbst in einer früheren Version geschrieben hat. Nur ein Treffer wird durch den aktuellen `entries`-Wert ersetzt; alles andere gilt als eigene Wahl und bleibt. Ein Muster trifft, wenn jeder von ihm genannte Schlüssel im Zielwert gleich ist — zusätzliche Schlüssel im Ziel stören nicht. Ein leeres Muster wird beim Laden abgelehnt, es würde jeden Wert treffen |
+| `create_if_missing` | bool | Zieldatei anlegen, wenn sie fehlt (Standard: true) |
+| `backup_before_modify` | bool | Sicherung vor jeder Änderung (Standard: true) |
 
 ### Standard-Kategorien
 
@@ -40,7 +52,7 @@ Alle Felder, die ein `SyncCategory` in `config.yaml` aufnehmen kann:
 | `claude_scripts` | `~/.claude/scripts/` | Hilfsskripte |
 | `claude_plugins` | `~/.claude/plugins/` | Plugin-Konfigurationen |
 | `claude_mcp` | `~/.claude/mcp/` | MCP-Server-Konfigurationen |
-| `claude_statusline` | `~/.claude/statusline.*` | Statusline-Skript |
+| `claude_statusline` | `~/.claude/statusline*` | Statusline-Skript **und** der passende `statusLine`-Eintrag in `settings.json` |
 
 #### Claude Code (standardmäßig deaktiviert)
 
@@ -59,6 +71,54 @@ Alle Felder, die ein `SyncCategory` in `config.yaml` aufnehmen kann:
 | `fish_functions` | `~/.config/fish/functions/` | alle | Fish-Funktionen |
 | `fish_functions_macos` | `~/.config/fish/functions/macos/` | macOS | macOS-spezifische Funktionen |
 | `starship_config` | `~/.config/starship.toml` | alle | Starship-Prompt |
+
+### Die Statuszeile über mehrere Rechner
+
+Die Statuszeile ist zwei Dinge auf einmal: ein Skript unter `~/.claude/` **und** ein
+`statusLine`-Eintrag in `settings.json`, der darauf zeigt. Wird nur das Skript verteilt,
+läuft auf jedem anderen Rechner weiterhin das, was dessen `settings.json` zufällig sagt.
+Die Kategorie `claude_statusline` deckt deshalb beides ab.
+
+Synchronisiert werden `statusline-command.sh` (der Name, den Claude Codes eigenes
+`/statusline`-Setup schreibt), `statusline.sh`, `statusline.py`, `statusline.fish` und
+`statusline.ps1`. Ausgeschlossen bleiben die mehrere Megabyte große Binary `statusline`
+eines Fremd-Presets, deren rechnerlokale `statusline.toml` sowie `*.bak`/`*.orig`.
+
+Den `settings.json`-Eintrag setzt `settings_ensure`: unter macOS und Linux
+`bash ~/.claude/statusline-command.sh`, unter Windows der PowerShell-Port
+`pwsh -NoProfile -File ~/.claude/statusline.ps1` (beide Skripte liegen im Repository und
+zeigen dieselbe Zeile).
+
+**Ein bestehender Eintrag wird nicht angetastet** — mit einer Ausnahme: Werte, die SCCS
+selbst in einer früheren Version geschrieben hat, stehen in `superseded_patterns` und
+werden auf den aktuellen Stand gehoben. Ohne das behielte ein Rechner, der schon einmal
+mit einer älteren SCCS-Version lief, dessen Kommando für immer. Ein Eintrag, den die
+Liste nicht kennt, gilt als deine eigene Wahl und bleibt. Ein solcher Austausch wird im
+Ausgabetext gemeldet (`↻ settings.json: refreshed [statusLine]`) und geht durch dieselbe
+Backup-Logik wie jede andere Änderung an der Datei.
+
+Eigenes Kommando dauerhaft festhalten — dann fasst SCCS den Eintrag nie an:
+
+```yaml
+sync_categories:
+  claude_statusline:
+    settings_ensure:
+      entries:
+        statusLine:
+          type: command
+          command: ~/bin/meine-statuszeile
+      superseded_patterns:
+        statusLine:
+        - type: command
+          command: nichts-was-jemals-vorkommt
+```
+
+**Auf einem Rechner mit älterer `config.yaml`**: Der `settings.json`-Teil zieht beim
+nächsten `sccs sync` von allein nach — fehlende `superseded_patterns` und ein veralteter
+`entries`-Wert werden aus den mitgelieferten Vorgaben ergänzt. Die Scan-Felder
+(`item_pattern`, `include`, `exclude`) stammen dagegen unverändert aus der eigenen Datei
+und müssen dort einmal von Hand angeglichen werden, sonst wird `statusline-command.sh`
+gar nicht erst eingesammelt.
 
 ### Plattform-Awareness
 
@@ -105,6 +165,18 @@ All fields a `SyncCategory` accepts in `config.yaml`:
 | `include` | list | No | Patterns to include (default: `["*"]`) |
 | `exclude` | list | No | Patterns to exclude (default: `[]`) |
 | `platforms` | list | No | Platform filter: `["macos"]`, `["linux"]`, `null` = all |
+| `settings_ensure` | dict | No | Entries a JSON file must carry after the sync (see below) |
+
+`settings_ensure` itself:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `target_file` | string | Target file, e.g. `~/.claude/settings.json` |
+| `entries` | dict | Keys that must be present. Missing ones are added, existing ones are **not** overwritten |
+| `platform_overrides` | dict | Per platform (`macos`/`linux`/`windows`). These do overwrite existing values — an explicit per-OS choice |
+| `superseded_patterns` | dict | Per key, the values SCCS itself wrote in an earlier release. Only a match is replaced by the current `entries` value; anything else counts as your own choice and stays. A pattern matches when every key it names is equal in the target value — extra keys in the target do not prevent it. An empty pattern is rejected at load time, as it would match every value |
+| `create_if_missing` | bool | Create the target file when absent (default: true) |
+| `backup_before_modify` | bool | Back up before every change (default: true) |
 
 ### Default categories
 
@@ -120,7 +192,7 @@ All fields a `SyncCategory` accepts in `config.yaml`:
 | `claude_scripts` | `~/.claude/scripts/` | Utility scripts |
 | `claude_plugins` | `~/.claude/plugins/` | Plugin configurations |
 | `claude_mcp` | `~/.claude/mcp/` | MCP server configs |
-| `claude_statusline` | `~/.claude/statusline.*` | Statusline script |
+| `claude_statusline` | `~/.claude/statusline*` | Statusline script **and** the matching `statusLine` entry in `settings.json` |
 
 #### Claude Code (disabled by default)
 
@@ -139,6 +211,52 @@ All fields a `SyncCategory` accepts in `config.yaml`:
 | `fish_functions` | `~/.config/fish/functions/` | all | Fish custom functions |
 | `fish_functions_macos` | `~/.config/fish/functions/macos/` | macOS | macOS-specific functions |
 | `starship_config` | `~/.config/starship.toml` | all | Starship prompt |
+
+### The statusline across machines
+
+The statusline is two things at once: a script under `~/.claude/` **and** a `statusLine`
+entry in `settings.json` pointing at it. Ship only the script and every other machine
+keeps running whatever its own `settings.json` happens to say. The `claude_statusline`
+category therefore covers both.
+
+Synced are `statusline-command.sh` (the name Claude Code's own `/statusline` setup
+writes), `statusline.sh`, `statusline.py`, `statusline.fish` and `statusline.ps1`.
+Excluded are the multi-megabyte `statusline` binary a third-party preset drops, its
+machine-local `statusline.toml`, and `*.bak`/`*.orig`.
+
+The `settings.json` entry comes from `settings_ensure`: on macOS and Linux
+`bash ~/.claude/statusline-command.sh`, on Windows the PowerShell port
+`pwsh -NoProfile -File ~/.claude/statusline.ps1` (both scripts live in the repository and
+render the same line).
+
+**An existing entry is left alone** — with one exception: values SCCS itself wrote in an
+earlier release are listed in `superseded_patterns` and are lifted to the current one.
+Without that, a machine that once ran an older SCCS would keep that release's command
+forever. An entry the list does not recognise counts as your own choice and stays. Such a
+replacement is reported in the output (`↻ settings.json: refreshed [statusLine]`) and goes
+through the same backup path as any other change to the file.
+
+To pin your own command so SCCS never touches the entry:
+
+```yaml
+sync_categories:
+  claude_statusline:
+    settings_ensure:
+      entries:
+        statusLine:
+          type: command
+          command: ~/bin/my-statusline
+      superseded_patterns:
+        statusLine:
+        - type: command
+          command: nothing-that-will-ever-occur
+```
+
+**On a machine with an older `config.yaml`**: the `settings.json` half catches up by
+itself on the next `sccs sync` — missing `superseded_patterns` and an outdated `entries`
+value are filled in from the bundled defaults. The scan fields (`item_pattern`, `include`,
+`exclude`) come from your own file unchanged and have to be aligned there once by hand,
+otherwise `statusline-command.sh` is never picked up in the first place.
 
 ### Platform awareness
 

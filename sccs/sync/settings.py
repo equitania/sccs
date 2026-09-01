@@ -19,6 +19,7 @@ class SettingsEnsureResult:
     keys_added: list[str] = field(default_factory=list)
     keys_skipped: list[str] = field(default_factory=list)
     keys_overridden: list[str] = field(default_factory=list)
+    keys_refreshed: list[str] = field(default_factory=list)
     file_created: bool = False
     file_modified: bool = False
     backup_path: Path | None = None
@@ -39,7 +40,9 @@ def ensure_settings(
     """
     Ensure JSON settings file contains required entries.
 
-    Non-destructive: missing keys are added, existing keys are NEVER overwritten.
+    Non-destructive: missing keys are added, existing keys are never overwritten
+    unless they match one of the `superseded_patterns` — a value SCCS itself wrote
+    in an earlier release, and therefore may refresh.
 
     Args:
         config: Settings ensure configuration.
@@ -85,12 +88,15 @@ def ensure_settings(
             return result
         result.file_created = True
 
-    # Classify base entries: missing → add, present → skip (non-destructive).
+    # Classify base entries: missing → add, present → skip (non-destructive),
+    # present but recognisably a value SCCS wrote in an earlier release → refresh.
     for key in config.entries:
-        if key in existing:
-            result.keys_skipped.append(key)
-        else:
+        if key not in existing:
             result.keys_added.append(key)
+        elif is_superseded(existing[key], config.superseded_patterns.get(key, [])):
+            result.keys_refreshed.append(key)
+        else:
+            result.keys_skipped.append(key)
 
     # Platform overrides ALWAYS apply for the current platform — they're an
     # explicit per-OS choice, so they overwrite even if the key already exists.
@@ -101,7 +107,7 @@ def ensure_settings(
             result.keys_added.append(key)
 
     # Nothing to do - no modification needed
-    if not result.keys_added and not result.keys_overridden:
+    if not result.keys_added and not result.keys_overridden and not result.keys_refreshed:
         result.file_created = False
         return result
 
@@ -113,7 +119,7 @@ def ensure_settings(
 
     # Build merged settings: existing → new keys → platform overrides on top.
     merged: dict[str, Any] = dict(existing)
-    for key in result.keys_added:
+    for key in result.keys_added + result.keys_refreshed:
         if key in config.entries:
             merged[key] = config.entries[key]
     for key, value in overrides_for_platform.items():
@@ -142,6 +148,26 @@ def ensure_settings(
         return result
 
     return result
+
+
+def is_superseded(existing: Any, patterns: list[Any]) -> bool:
+    """
+    Decide whether ``existing`` is a value SCCS wrote in an earlier release.
+
+    A dict pattern matches when every key it names is present and equal in the
+    existing value; extra keys in the target do not prevent the match, so a
+    hand-added ``padding`` next to an SCCS-written ``command`` still counts as
+    ours. Any other pattern must be equal outright.
+    """
+    for pattern in patterns:
+        if isinstance(pattern, dict):
+            if not isinstance(existing, dict):
+                continue
+            if all(key in existing and existing[key] == value for key, value in pattern.items()):
+                return True
+        elif existing == pattern:
+            return True
+    return False
 
 
 def _deep_merge(base: Any, override: Any) -> Any:

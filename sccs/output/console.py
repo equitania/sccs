@@ -259,10 +259,19 @@ class Console:
 
         verb_add = "would add" if dry_run else "added"
         verb_create = "would create" if dry_run else "created"
+        verb_refresh = "would refresh" if dry_run else "refreshed"
 
         for key in result.keys_added:
             suffix = f" ({verb_create})" if result.file_created else ""
             self._console.print(f"    [green]✓[/green] {target}: {verb_add} [{key}]{suffix}")
+
+        # Refreshed keys are the one case where SCCS replaces a value that was
+        # already there, so they are reported unconditionally — never only under
+        # --verbose.
+        for key in result.keys_refreshed:
+            self._console.print(
+                f"    [yellow]↻[/yellow] {target}: {verb_refresh} [{key}] (was an entry from an earlier SCCS release)"
+            )
 
         if self.verbose:
             for key in result.keys_skipped:
