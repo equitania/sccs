@@ -65,8 +65,8 @@ def _hash_target(path: Path, item_type: str) -> str | None:
     return file_hash(path)
 
 
-def _sticky_pre_existing(receipt: DeployReceipt) -> dict[tuple[str, str], bool]:
-    """Every (category, name) any install record already accounts for.
+def _sticky_pre_existing(receipt: DeployReceipt) -> dict[str, bool]:
+    """Every TARGET PATH any install record already accounts for.
 
     `pre_existing` answers "did this target exist before SCCS ever wrote
     there" — a fact from the FIRST install, not from the current one. Asking
@@ -77,14 +77,21 @@ def _sticky_pre_existing(receipt: DeployReceipt) -> dict[tuple[str, str], bool]:
     Records of other profiles count too: two profiles can ship the same
     skill, and whichever installed first is the one that saw the host
     untouched.
+
+    The key is the resolved absolute target, NOT `(category, name)`. A
+    category's `local_path` is not fixed for all time — a maintainer edits
+    the config, or a second export machine has a different layout — and the
+    same `(category, name)` then resolves to a DIFFERENT directory. Keyed on
+    the pair, the claim from the old path answers "ours" for a path no
+    install has ever touched, and the fresh `target.exists()` check that
+    would have caught the customer's file there never runs at all.
     """
-    claimed: dict[tuple[str, str], bool] = {}
+    claimed: dict[str, bool] = {}
     for record in receipt.installs:
         for entry in record.entries:
-            key = (entry.category, entry.name)
             # An earlier "this was already here" wins: once a target has been
             # seen as foreign, no later install may promote it to ours.
-            claimed[key] = claimed.get(key, False) or entry.pre_existing
+            claimed[entry.target] = claimed.get(entry.target, False) or entry.pre_existing
     return claimed
 
 
@@ -178,10 +185,10 @@ def install_bundle(
         base = _category_base(cat_data)
         bases[cat_name] = base
         key = (cat_name, item.name)
-        if key in claimed:
-            is_foreign = claimed[key]
-        else:
-            is_foreign = _target_path(base, item).exists()
+        target = _target_path(base, item)
+        # A path no record accounts for gets the only honest answer there is:
+        # whatever is on disk right now.
+        is_foreign = claimed[str(target)] if str(target) in claimed else target.exists()
         pre_existing[key] = is_foreign
         if is_foreign:
             skipped_foreign.append(f"{cat_name}/{item.name}")

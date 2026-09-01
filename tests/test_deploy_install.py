@@ -171,6 +171,72 @@ def test_reinstall_updates_the_record(bundle, tmp_path, monkeypatch):
     assert len(receipt.installs[0].entries) == 2
 
 
+def _bundle_at(source_home: Path, tmp_path: Path, local_path: str, out_name: str) -> Path:
+    """A second bundle shipping the same skill under a different local_path."""
+    src = source_home / local_path.removeprefix("~/")
+    src.mkdir(parents=True, exist_ok=True)
+    for name in ("odoo-common",):
+        (src / name).mkdir(parents=True, exist_ok=True)
+        (src / name / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: t\n---\n\nBody of {name}.\n", encoding="utf-8"
+        )
+    config = SccsConfig.model_validate(
+        {
+            "repository": {"path": str(source_home / "repo")},
+            "sync_categories": {
+                "claude_skills": {
+                    "enabled": True,
+                    "local_path": local_path,
+                    "repo_path": ".claude/skills",
+                    "item_type": "directory",
+                    "item_marker": "SKILL.md",
+                    "include": ["*"],
+                }
+            },
+        }
+    )
+    profile = DeploymentProfile(
+        description="t",
+        target_platform="linux",
+        include={"claude_skills": ["odoo-common"]},
+    )
+    resolved = resolve_profile(config, "t", {"t": profile})
+    out = tmp_path / out_name
+    assert build_bundle(config, resolved, out, {}).success
+    return out
+
+
+def test_a_relocated_category_still_checks_the_new_path(bundle, source_home, tmp_path, monkeypatch):
+    """Ownership is a fact about a PATH, not about a (category, name) pair.
+
+    The first bundle maps `claude_skills` to `~/.claude/skills` and the
+    receipt records `odoo-common` there as ours. A later bundle — a changed
+    maintainer config, or an export from a second machine — maps the same
+    category to `~/.claude/skills-alt`, where the customer has their own
+    `odoo-common`. Keyed on `(category, name)` the stored claim answers
+    "ours" for a directory no install has ever touched, no `exists()` check
+    runs, and the import writes over the customer's work.
+    """
+    second = _bundle_at(source_home, tmp_path, "~/.claude/skills-alt", "alt.zip")
+
+    target = tmp_path / "target-alt"
+    _switch_home(monkeypatch, target)
+    manager = ReceiptManager(target / ".config" / "sccs" / ".deploy_receipt.yaml")
+
+    assert install_bundle(bundle, config=None, receipt_manager=manager).success
+
+    theirs = target / ".claude" / "skills-alt" / "odoo-common"
+    theirs.mkdir(parents=True)
+    (theirs / "SKILL.md").write_text("# the customer's own\n", encoding="utf-8")
+
+    outcome = install_bundle(second, config=None, receipt_manager=manager)
+
+    assert outcome.skipped_foreign == ["claude_skills/odoo-common"]
+    assert (theirs / "SKILL.md").read_text(encoding="utf-8") == "# the customer's own\n"
+    record = manager.load().find("t")
+    assert {(e.target, e.pre_existing) for e in record.entries} == {(str(theirs), True)}
+
+
 # --- Final review, CRITICAL 1: pre_existing is sticky, foreign targets are skipped ---
 
 
