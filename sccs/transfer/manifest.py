@@ -32,6 +32,22 @@ class ManifestCategory(BaseModel):
     items: list[ManifestItem]
 
 
+class DeploymentSection(BaseModel):
+    """Removal policy carried by a `sccs deploy export` bundle.
+
+    The customer host has no config.yaml of ours, so it must not depend on
+    one to know what has to leave again.
+    """
+
+    profile: str
+    target_platform: str
+    retain: list[str] = []
+    purge_traces: bool = True
+    # category -> the globs the profile selected with. `deploy revoke` uses
+    # these for its verification sweep, which must work without our config.
+    sweep_globs: dict[str, list[str]] = {}
+
+
 class ExportManifest(BaseModel):
     """Root manifest stored as sccs_manifest.yaml in ZIP root."""
 
@@ -39,6 +55,9 @@ class ExportManifest(BaseModel):
     created_at: str
     created_on: str
     categories: dict[str, ManifestCategory]
+    # None for bundles produced by plain `sccs export` — that path stays
+    # unchanged and its archives must keep importing.
+    deployment: DeploymentSection | None = None
 
     @property
     def total_items(self) -> int:

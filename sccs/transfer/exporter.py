@@ -14,6 +14,7 @@ from sccs.doctor.managed import get_doctor_managed_excludes
 from sccs.sync.item import SyncItem, scan_items_for_category
 from sccs.transfer.manifest import (
     MANIFEST_FILENAME,
+    DeploymentSection,
     ExportManifest,
     ManifestCategory,
     ManifestItem,
@@ -184,6 +185,8 @@ class Exporter:
         selections: list[ExportSelection],
         output_path: Path,
         raw_config: dict,
+        *,
+        deployment: DeploymentSection | None = None,
     ) -> ExportResult:
         """Create ZIP archive from selected items.
 
@@ -191,6 +194,8 @@ class Exporter:
             selections: List of ExportSelection objects.
             output_path: Path for the output ZIP file.
             raw_config: Raw YAML config dict for unexpanded paths.
+            deployment: Removal policy for a `sccs deploy` bundle. None for
+                a plain `sccs export` archive.
 
         Returns:
             ExportResult with success status and details.
@@ -199,7 +204,7 @@ class Exporter:
             return ExportResult(success=False, error="No items selected for export")
 
         try:
-            manifest = self._build_manifest(selections, raw_config)
+            manifest = self._build_manifest(selections, raw_config, deployment=deployment)
             total_items = 0
 
             with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -223,6 +228,8 @@ class Exporter:
         self,
         selections: list[ExportSelection],
         raw_config: dict,
+        *,
+        deployment: DeploymentSection | None = None,
     ) -> ExportManifest:
         """Build manifest from selections."""
         categories: dict[str, ManifestCategory] = {}
@@ -262,7 +269,9 @@ class Exporter:
                 items=manifest_items,
             )
 
-        return create_manifest(categories)
+        manifest = create_manifest(categories)
+        manifest.deployment = deployment
+        return manifest
 
     def _add_category_to_zip(
         self,
