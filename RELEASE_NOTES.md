@@ -1,5 +1,15 @@
 # Release Notes
 
+## Version 2.65.1 (01.09.2026)
+
+### Fixed (discoverability — the new command group was invisible from the old one)
+
+- **`sccs export --help` and `sccs import --help` now name `sccs deploy`.** The export help text opens with "for deployment to other systems" and said nothing about the command group built for exactly that, which is the one place a reader shipping to a customer server would look. Both now state what they themselves do not do: `export` is the general-purpose picker with no receipt and no way back, `import` writes files and keeps no record of them.
+- **`docs/usage/cli-reference.md` documented 11 of 17 commands in German and 10 of 17 in English.** Missing from both were `capability-card`, `convert`, `deploy`, `docs`, `profile` and `statusline`; `capacity` existed only in the German section. This had accumulated over several releases, not just the last one. All seventeen are now present in both language sections, mirrored block for block. A reference missing seven commands is a document that lies about its subject — the same reason the generated hub README was fixed in v2.63.1.
+- The `profile` block states explicitly that `sccs profile` and a deployment profile share a word and nothing else: one parks local artefact groups to shrink the model's system prompt, the other names a slice of the inventory to ship to a foreign host. A reader who conflates them does the wrong thing.
+
+No code behaviour changed in this release; `sccs/cli.py` carries docstring edits only.
+
 ## Version 2.65.0 (01.09.2026)
 
 ### Added (`sccs deploy` — scenario-scoped bundles for foreign hosts, with a verified way back off)
