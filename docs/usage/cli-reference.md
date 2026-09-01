@@ -14,8 +14,10 @@ finden sich themenspezifisch in den anderen Usage-Docs:
 - Sync-Workflow → [sync.md](sync.md)
 - Doctor → [doctor.md](doctor.md)
 - Export/Import → [transfer.md](transfer.md)
+- Deployment (Kundenhosts, mit Rückweg) → [deploy.md](deploy.md)
 - Memory Bridge → [memory-bridge.md](memory-bridge.md)
 - Kategorien → [categories.md](categories.md)
+- Profile & Statusline → [profiles.md](profiles.md)
 - OpenCode-Integration → [opencode.md](opencode.md)
 - Kapazitätssonde → [capacity.md](capacity.md)
 
@@ -52,6 +54,18 @@ sccs import config.zip           # Interaktive Auswahl + importieren
 sccs import config.zip --dry-run # Vorschau ohne Schreiben
 sccs import config.zip --all     # Alles importieren
 sccs import config.zip --include-managed  # Auch doctor-verwaltete Items schreiben
+# Für einen fremden Host (Kunde) meist das passendere Werkzeug: sccs deploy (siehe unten)
+
+# Deployment (benanntes Profil MIT Rückweg für einen fremden Host — anders als Export/Import oben, siehe deploy.md)
+sccs deploy list                        # Profile auflisten
+sccs deploy show odoo-server            # Zeigen, was ein Profil bündeln würde
+sccs deploy show odoo-server --platform linux  # Gegen andere Zielplattform prüfen
+sccs deploy export odoo-server -o kunde.zip     # Bundle aus einem Profil bauen
+sccs deploy install kunde.zip           # Bundle installieren + Quittung schreiben
+sccs deploy install kunde.zip -n        # Vorschau ohne zu schreiben
+sccs deploy status                      # Zeigen, was SCCS auf diesem Host installiert hat
+sccs deploy revoke                      # Entfernen, was SCCS installiert hat, + verifizieren
+sccs deploy revoke --profile fastreport # Falls mehrere Profile auf dem Host koexistieren
 
 # Kategorien
 sccs categories list             # Aktivierte Kategorien
@@ -66,10 +80,32 @@ sccs doctor install              # Installiert fehlende Komponenten (Confirm pro
 sccs doctor install --yes        # Skip Confirms (CI use only)
 sccs doctor update               # Plugins + npx-Tools aktualisieren
 
+# Profile (LOKALE Artefakt-Gruppen parken, um den System-Prompt zu verkleinern — ungleich den Deployment-Profilen oben, siehe profiles.md)
+sccs profile list                # Profile + Zustand anzeigen
+sccs profile off gsd             # Gruppe parken (verschoben, nicht gelöscht)
+sccs profile on gsd              # Geparkte Gruppe zurückholen
+sccs profile status gsd          # Detail zu einem Profil (ohne Name: alle)
+
+# Statusline (Presets für die Statusleiste, siehe profiles.md)
+sccs statusline list             # Verfügbare Presets anzeigen
+sccs statusline use claude-code-statusline      # settings.json auf ein Preset umstellen
+sccs statusline install claude-code-statusline  # Preset herunterladen + installieren
+sccs statusline show             # Aktuellen statusLine-Eintrag anzeigen
+
 # Kapazität (verbleibendes Plan-Kontingent je Agent-CLI)
 sccs capacity                    # Rich-Tabelle + Routing-Empfehlung
 sccs capacity --json             # Einzeiliges JSON für Orchestrator/GUI
 sccs capacity --offline          # Ohne Netzwerk-Probe (Antigravity /usage)
+
+# Konvertierung (Shell-Profile aus der Fish-Config generieren)
+sccs convert fish-to-pwsh        # PowerShell-Profil aus der Fish-Config erzeugen
+sccs convert fish-to-zsh         # Zsh-Profil aus der Fish-Config erzeugen
+
+# Dokumentation
+sccs docs generate               # Hub-README für das Sync-Repository generieren
+
+# Capability Card (für LLM-/Agent-Konsum)
+sccs capability-card             # Capability Card (usage/AGENT.md) ausgeben
 
 # Integrationen (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
 sccs integrations status                       # Integrations-Report
@@ -100,8 +136,10 @@ in the other usage docs:
 - Sync workflow → [sync.md](sync.md)
 - Doctor → [doctor.md](doctor.md)
 - Export/Import → [transfer.md](transfer.md)
+- Deployment (customer hosts, with a way back) → [deploy.md](deploy.md)
 - Memory Bridge → [memory-bridge.md](memory-bridge.md)
 - Categories → [categories.md](categories.md)
+- Profiles & statusline → [profiles.md](profiles.md)
 - OpenCode integration → [opencode.md](opencode.md)
 - Capacity probe → [capacity.md](capacity.md)
 
@@ -138,6 +176,18 @@ sccs import config.zip           # Interactive selection + import
 sccs import config.zip --dry-run # Preview without writing
 sccs import config.zip --all     # Import everything
 sccs import config.zip --include-managed  # Write doctor-managed items too
+# For a foreign (customer) host, sccs deploy is usually the better tool (see below)
+
+# Deploy (a named profile WITH a way back, for a foreign host — unlike Export/Import above, see deploy.md)
+sccs deploy list                        # List deployment profiles
+sccs deploy show odoo-server            # Show what a profile would bundle
+sccs deploy show odoo-server --platform linux  # Check against a different target platform
+sccs deploy export odoo-server -o customer.zip  # Build a bundle from a profile
+sccs deploy install customer.zip        # Install a bundle + write the receipt
+sccs deploy install customer.zip -n     # Preview without writing
+sccs deploy status                      # Show what SCCS installed on this host
+sccs deploy revoke                      # Remove what SCCS installed, and verify it is gone
+sccs deploy revoke --profile fastreport # When several profiles coexist on the host
 
 # Categories
 sccs categories list             # List enabled categories
@@ -151,6 +201,33 @@ sccs doctor check --no-update-check  # Skip the live version check (offline/fast
 sccs doctor install              # Install missing components (confirm per action)
 sccs doctor install --yes        # Skip confirms (CI use only)
 sccs doctor update               # Update plugins + refresh npx tools
+
+# Profiles (park LOCAL artefact groups to shrink the system prompt — unrelated to the deployment profiles above, see profiles.md)
+sccs profile list                # Show profiles + their state
+sccs profile off gsd             # Park a group (moved aside, not deleted)
+sccs profile on gsd              # Bring a parked group back
+sccs profile status gsd          # Detail for one profile (omit name for all)
+
+# Statusline (statusline presets, see profiles.md)
+sccs statusline list             # List available presets
+sccs statusline use claude-code-statusline      # Point settings.json at a preset
+sccs statusline install claude-code-statusline  # Download and install a preset
+sccs statusline show             # Show the current statusLine entry
+
+# Capacity (remaining plan quota per agent CLI)
+sccs capacity                    # Rich table + routing advice
+sccs capacity --json             # Single-line JSON for an orchestrator/GUI
+sccs capacity --offline          # Skip the network probe (Antigravity /usage)
+
+# Convert (generate shell profiles from the Fish config)
+sccs convert fish-to-pwsh        # Generate a PowerShell profile from the Fish config
+sccs convert fish-to-zsh         # Generate a zsh profile from the Fish config
+
+# Docs
+sccs docs generate               # Generate the hub README for the sync repository
+
+# Capability card (for LLM/agent consumption)
+sccs capability-card             # Print the capability card (usage/AGENT.md)
 
 # Integrations (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
 sccs integrations status                       # Integration report

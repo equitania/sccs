@@ -1182,6 +1182,12 @@ def export_cmd(
     hooks, and other configurations for deployment to other systems.
 
     \b
+    Shipping to a FOREIGN host — a customer server — you probably want
+    `sccs deploy export <profile>` instead: it bundles a named, repeatable
+    slice, and `sccs deploy revoke` takes it back off that machine again.
+    This command is the general-purpose picker, with no way back.
+
+    \b
     Items installed by `sccs doctor` (gsd-* skills/agents/hooks,
     playwright-cli) are excluded — the target machine reproduces them
     with its own `sccs doctor install`. Use --include-managed to keep them.
@@ -1284,6 +1290,11 @@ def import_cmd(
     \b
     Extracts selected items from a ZIP archive and places them
     in the appropriate local paths.
+
+    \b
+    For an archive built by `sccs deploy export`, use `sccs deploy install`
+    instead: it records a receipt so `sccs deploy revoke` can remove the
+    artefacts again. This command writes the files and keeps no record.
 
     \b
     Doctor-managed items (gsd-* skills/agents/hooks, playwright-cli) are
