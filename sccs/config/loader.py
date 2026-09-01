@@ -362,6 +362,15 @@ def _merge_with_defaults(data: dict) -> dict:
         result["repository"] = {**result["repository"], **data["repository"]}
 
     if "sync_categories" in data:
+        # Shallow-copy this nested dict before mutating it below. `result`
+        # is only a shallow copy of DEFAULT_CONFIG, so without this line
+        # `result["sync_categories"]` is the SAME dict object as
+        # `DEFAULT_CONFIG["sync_categories"]` and every `result["sync_categories"][cat_name] = ...`
+        # assignment below would permanently corrupt the module-level
+        # default for the rest of the process — the next `load_config()`
+        # call, anywhere, would see this config's overrides as if they were
+        # the shipped defaults.
+        result["sync_categories"] = dict(result["sync_categories"])
         # Keep default categories, update with user values
         for cat_name, cat_data in data["sync_categories"].items():
             if cat_name in result["sync_categories"]:
