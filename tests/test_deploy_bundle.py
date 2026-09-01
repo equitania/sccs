@@ -162,3 +162,52 @@ def test_manifest_without_deployment_section_still_parses():
     )
     manifest = deserialize_manifest(legacy)
     assert manifest.deployment is None
+
+
+def test_bundle_local_paths_are_home_relative(config, profile, tmp_path):
+    """A bundle exists to travel to a host with a different home directory.
+
+    SyncCategory expands `~` eagerly, so without a fix the manifest would
+    carry THIS host's absolute paths — dead, or quietly wrong, on any other
+    machine. Every category's local_path must come back out as `~/...`.
+    """
+    resolved = resolve_profile(config, "t", {"t": profile})
+    out = tmp_path / "bundle.zip"
+    assert build_bundle(config, resolved, out, {}).success
+
+    with zipfile.ZipFile(out) as zf:
+        manifest = deserialize_manifest(zf.read(MANIFEST_FILENAME).decode("utf-8"))
+
+    assert manifest.categories
+    for cat_name, cat_data in manifest.categories.items():
+        assert cat_data.local_path.startswith("~/"), (
+            f"{cat_name} local_path {cat_data.local_path!r} is not home-relative"
+        )
+
+
+def test_bundle_local_paths_survive_conflicting_raw_config(config, profile, tmp_path):
+    """The portable form wins even when raw_config disagrees.
+
+    Covers both the case that exposed the bug (raw_config == {}, so the
+    manifest falls back to the eagerly-expanded absolute path) and a
+    raw_config that explicitly carries a stale absolute local_path for the
+    same category — the bundle must overwrite it, not defer to it.
+    """
+    resolved = resolve_profile(config, "t", {"t": profile})
+
+    empty_out = tmp_path / "empty.zip"
+    assert build_bundle(config, resolved, empty_out, {}).success
+    with zipfile.ZipFile(empty_out) as zf:
+        empty_manifest = deserialize_manifest(zf.read(MANIFEST_FILENAME).decode("utf-8"))
+    assert empty_manifest.categories["claude_skills"].local_path == "~/.claude/skills"
+
+    conflicting_raw = {
+        "sync_categories": {
+            "claude_skills": {"local_path": "/some/other/machines/absolute/path"},
+        }
+    }
+    conflict_out = tmp_path / "conflict.zip"
+    assert build_bundle(config, resolved, conflict_out, conflicting_raw).success
+    with zipfile.ZipFile(conflict_out) as zf:
+        conflict_manifest = deserialize_manifest(zf.read(MANIFEST_FILENAME).decode("utf-8"))
+    assert conflict_manifest.categories["claude_skills"].local_path == "~/.claude/skills"

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import tempfile
 from pathlib import Path
 
@@ -48,6 +49,30 @@ def build_cleanup_command(profile_name: str) -> str:
     in every bundle and on our own machines.
     """
     return _CLEANUP_TEMPLATE.format(profile=profile_name)
+
+
+def _portable_raw_config(selections: list[ExportSelection], raw_config: dict) -> dict:
+    """Force home-relative local_paths for every selected category.
+
+    A deployment bundle exists to travel to another machine. SyncCategory
+    expands `~` eagerly, so a manifest built from the model carries THIS
+    host's absolute paths — useless, or quietly wrong, on a host whose home
+    directory differs. Categories that genuinely live outside home keep their
+    absolute path; the install-side home guard refuses those, which is the
+    right answer for them.
+    """
+    home = Path.home()
+    raw = copy.deepcopy(raw_config) if raw_config else {}
+    categories = raw.setdefault("sync_categories", {})
+    for selection in selections:
+        expanded = Path(selection.category.local_path).expanduser()
+        try:
+            relative = expanded.relative_to(home)
+        except ValueError:
+            continue
+        entry = categories.setdefault(selection.category_name, {})
+        entry["local_path"] = "~" if relative == Path(".") else f"~/{relative}"
+    return raw
 
 
 def _deployment_section(resolved: ResolvedProfile) -> DeploymentSection:
@@ -118,4 +143,5 @@ def build_bundle(
                     )
                 section.sweep_globs.setdefault(CLEANUP_CATEGORY, []).append(CLEANUP_COMMAND_NAME)
 
-        return exporter.export_to_zip(selections, output_path, raw_config, deployment=section)
+        portable_raw_config = _portable_raw_config(selections, raw_config)
+        return exporter.export_to_zip(selections, output_path, portable_raw_config, deployment=section)
