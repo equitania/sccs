@@ -18,8 +18,10 @@ from sccs.doctor.schema import DoctorConfig
 from sccs.transfer.manifest import (
     MANIFEST_FILENAME,
     ExportManifest,
+    ManifestCategory,
     ManifestItem,
     deserialize_manifest,
+    is_single_file_category,
 )
 from sccs.utils.paths import create_backup, matches_any_pattern, safe_copy
 
@@ -221,7 +223,7 @@ class Importer:
                     continue
 
                 try:
-                    target_base = self._resolve_target_base(cat_name, cat_data.local_path)
+                    target_base = self._resolve_target_base(cat_name, cat_data)
                 except ValueError as e:
                     logger.error("Rejected category %s: %s", cat_name, e)
                     result.errors.append(str(e))
@@ -243,7 +245,7 @@ class Importer:
         result.success = len(result.errors) == 0
         return result
 
-    def _resolve_target_base(self, cat_name: str, manifest_local_path: str) -> Path:
+    def _resolve_target_base(self, cat_name: str, cat_data: ManifestCategory) -> Path:
         """Resolve and validate the target base directory for a category.
 
         The manifest-supplied `local_path` is attacker-controlled (it's read
@@ -253,21 +255,31 @@ class Importer:
         `local_path` for that category. This prevents a hostile ZIP from
         redirecting writes to arbitrary paths such as ``~/.ssh``.
 
+        A single-file category (`starship_config`, `gitconfig`) carries the
+        FILE as its `local_path`, and `_apply_item` appends the item name to
+        whatever comes back from here. Returning the file path would build
+        ``~/.config/starship.toml/starship.toml`` and crash in ``mkdir`` on
+        any host that already has the file — so such a category resolves to
+        the file's PARENT. Same convention as the export side, see
+        `manifest.is_single_file_category`.
+
         Args:
             cat_name: Category name from the manifest.
-            manifest_local_path: local_path string from the manifest.
+            cat_data: The manifest's category section.
 
         Returns:
-            Resolved, absolute target base path.
+            Resolved, absolute target base directory.
 
         Raises:
             ValueError: If the category is unknown or the path escapes the
                 configured allowlist.
         """
+        manifest_local_path = cat_data.local_path
         manifest_path = Path(manifest_local_path).expanduser().resolve()
+        single_file = is_single_file_category(cat_data)
 
         if self._config is None:
-            return manifest_path
+            return manifest_path.parent if single_file else manifest_path
 
         category = self._config.sync_categories.get(cat_name)
         if category is None:
@@ -283,7 +295,7 @@ class Importer:
                 f"does not match local configuration ({category.local_path})"
             )
 
-        return expected
+        return expected.parent if single_file else expected
 
     def _apply_item(
         self,

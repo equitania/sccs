@@ -1161,3 +1161,141 @@ class TestImportCLI:
         result = runner.invoke(cli, ["import", str(zip_path), "--all", "--overwrite", "--include-managed"])
         assert result.exit_code == 0, f"Output: {result.output}"
         assert (target_dir / "gsd-ship.md").exists()
+
+
+# --- Final review, CRITICAL 2: a category whose local_path names the FILE ---
+#
+# `starship_config` carries `~/.config/starship.toml` as its local_path, not a
+# directory. The importer appended the item name to it and built
+# `~/.config/starship.toml/starship.toml`; on any host that already had the
+# file, `target.parent.mkdir()` then raised FileExistsError outside the
+# per-item try, so the traceback escaped `apply()` entirely.
+
+
+class TestSingleFileCategory:
+    """Export and import must agree on where a single-file category lands."""
+
+    @staticmethod
+    def _home(tmp_path, monkeypatch):
+        home = tmp_path / "sf-home"
+        (home / ".config").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(Path, "home", lambda: home)
+        return home
+
+    @staticmethod
+    def _config(home):
+        return SccsConfig.model_validate(
+            {
+                "repository": {"path": str(home / "repo")},
+                "sync_categories": {
+                    "starship_config": {
+                        "enabled": True,
+                        "local_path": "~/.config/starship.toml",
+                        "repo_path": "config/starship.toml",
+                        "item_type": "file",
+                    }
+                },
+            }
+        )
+
+    def _bundle(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path, monkeypatch)
+        (home / ".config" / "starship.toml").write_text('format = "$all"\n', encoding="utf-8")
+        config = self._config(home)
+        exporter = Exporter(config)
+        scanned = exporter.scan_available_items()
+        assert [i.name for i in scanned["starship_config"]] == ["starship.toml"]
+        out = tmp_path / "sf.zip"
+        assert exporter.export_to_zip(exporter.build_selections_all(scanned), out, {}).success
+        return out
+
+    def test_manifest_marks_the_category_as_single_file(self, tmp_path, monkeypatch):
+        from sccs.transfer.manifest import is_single_file_category
+
+        zip_path = self._bundle(tmp_path, monkeypatch)
+        importer = Importer(zip_path)
+        manifest = importer.load_manifest()
+        assert is_single_file_category(manifest.categories["starship_config"])
+
+    def test_plain_import_writes_the_file_itself(self, tmp_path, monkeypatch):
+        """`sccs import` with a config — the path that predates deploy.
+
+        Export and import share one home: a plain export stamps the absolute
+        source path into the manifest, and the config guard in
+        `_resolve_target_base` requires the two to match.
+        """
+        zip_path = self._bundle(tmp_path, monkeypatch)
+        home = tmp_path / "sf-home"
+        (home / ".config" / "starship.toml").unlink()
+
+        importer = Importer(zip_path, config=self._config(home))
+        importer.load_manifest()
+        result = importer.apply(importer.build_selections_all(), overwrite=True)
+
+        assert result.success, result.errors
+        assert (home / ".config" / "starship.toml").read_text(encoding="utf-8") == 'format = "$all"\n'
+        assert not (home / ".config" / "starship.toml" / "starship.toml").exists()
+
+    def test_plain_import_over_an_existing_file_does_not_crash(self, tmp_path, monkeypatch):
+        """The crash needed the file to be there already — so leave it there."""
+        zip_path = self._bundle(tmp_path, monkeypatch)
+        home = tmp_path / "sf-home"
+        (home / ".config" / "starship.toml").write_text("# theirs\n", encoding="utf-8")
+
+        importer = Importer(zip_path, config=self._config(home))
+        importer.load_manifest()
+        result = importer.apply(importer.build_selections_all(), overwrite=True, backup=False)
+
+        assert result.success, result.errors
+        assert (home / ".config" / "starship.toml").read_text(encoding="utf-8") == 'format = "$all"\n'
+
+    def test_legacy_import_without_config_writes_the_file_itself(self, tmp_path, monkeypatch):
+        """No config on the host — the branch `deploy install` uses."""
+        zip_path = self._bundle(tmp_path, monkeypatch)
+
+        target = tmp_path / "sf-target3"
+        (target / ".config").mkdir(parents=True)
+        (target / ".config" / "starship.toml").write_text("# theirs\n", encoding="utf-8")
+        monkeypatch.setenv("HOME", str(target))
+        monkeypatch.setattr(Path, "home", lambda: target)
+
+        importer = Importer(zip_path, config=None)
+        importer.load_manifest()
+        result = importer.apply(importer.build_selections_all(), overwrite=True)
+
+        assert result.success, result.errors
+        assert (target / ".config" / "starship.toml").is_file()
+
+    def test_directory_backed_file_category_is_unaffected(self, tmp_path, monkeypatch):
+        """A `file` category pointing at a DIRECTORY keeps its old behaviour."""
+        home = tmp_path / "dir-home"
+        (home / ".claude" / "commands").mkdir(parents=True)
+        (home / ".claude" / "commands" / "one.md").write_text("# one\n", encoding="utf-8")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        config = SccsConfig.model_validate(
+            {
+                "repository": {"path": str(home / "repo")},
+                "sync_categories": {
+                    "claude_commands": {
+                        "enabled": True,
+                        "local_path": "~/.claude/commands",
+                        "repo_path": ".claude/commands",
+                        "item_type": "file",
+                        "item_pattern": "*.md",
+                    }
+                },
+            }
+        )
+        exporter = Exporter(config)
+        out = tmp_path / "dir.zip"
+        scanned = exporter.scan_available_items()
+        assert exporter.export_to_zip(exporter.build_selections_all(scanned), out, {}).success
+
+        (home / ".claude" / "commands" / "one.md").unlink()
+        importer = Importer(out, config=config)
+        importer.load_manifest()
+        assert importer.apply(importer.build_selections_all(), overwrite=True).success
+        assert (home / ".claude" / "commands" / "one.md").read_text(encoding="utf-8") == "# one\n"

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import platform
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 
 import yaml
 from pydantic import BaseModel
@@ -30,6 +31,32 @@ class ManifestCategory(BaseModel):
     item_type: str
     local_path: str  # Unexpanded path (e.g. ~/.claude/skills)
     items: list[ManifestItem]
+
+
+def is_single_file_category(category: ManifestCategory) -> bool:
+    """True when the category's `local_path` names the file itself.
+
+    Mirrors the export-side convention in `sync.item.scan_items_for_category`:
+    a `file` category whose `local_path` is a plain path to a single file
+    (`starship_config` -> `~/.config/starship.toml`, `gitconfig` ->
+    `~/.gitconfig`) yields exactly one item named after that file. Every other
+    `file` category points at a DIRECTORY and yields the files inside it.
+
+    The import side cannot repeat the export side's `local_path.is_dir()`
+    test — on a fresh customer host the path does not exist yet — so the
+    manifest itself has to carry the answer, and it does: for a single-file
+    category, and only for one, every item name equals the basename of
+    `local_path`.
+    """
+    if category.item_type != "file":
+        return False
+    raw = category.local_path
+    if not raw or raw.endswith("/") or any(ch in raw for ch in "*?["):
+        return False
+    base_name = PurePosixPath(raw.replace("\\", "/")).name
+    if not base_name or base_name in {".", ".."}:
+        return False
+    return bool(category.items) and all(item.name == base_name for item in category.items)
 
 
 class DeploymentSection(BaseModel):
