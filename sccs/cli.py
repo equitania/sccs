@@ -4,6 +4,7 @@
 import re
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -3710,6 +3711,435 @@ def profile_off(ctx: click.Context, name: str, yes: bool, output_json: bool) -> 
 def profile_on(ctx: click.Context, name: str, yes: bool, output_json: bool) -> None:
     """Bring NAME's parked artefacts back into ~/.claude/."""
     _run_profile_switch(ctx, name, enable=True, yes=yes, output_json=output_json)
+
+
+@cli.group("deploy")
+def deploy_group() -> None:
+    """Build scenario-scoped bundles for foreign hosts — and take them back.
+
+    \b
+    A deployment profile names the skills, commands, agents and shell files
+    one situation needs (Odoo work on a customer server, FastReport, the
+    shell only). `deploy export` bundles exactly those; `deploy install`
+    unpacks them on the target host and writes a receipt; `deploy revoke`
+    reads that receipt and removes what we brought.
+
+    \b
+    Shell configuration listed under a profile's `retain` stays behind.
+    Everything else — skills, agents, framework files, and the session
+    transcripts that quote them — leaves.
+
+    \b
+    Examples:
+        sccs deploy list                     Show profiles
+        sccs deploy show odoo-server         What would be bundled
+        sccs deploy export odoo-server       Build the bundle
+        sccs deploy install bundle.zip       Install on the target host
+        sccs deploy status                   What of ours is here
+        sccs deploy revoke --dry-run         Preview the removal
+    """
+
+
+def _load_deployment_profiles():
+    """Resolve the deployment profile map, config or not."""
+    from sccs.deploy.schema import resolve_deployment_profiles
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        return resolve_deployment_profiles(None)
+    return resolve_deployment_profiles(config.deployment_profiles)
+
+
+def _deploy_receipt_manager():
+    from sccs.deploy.receipt import ReceiptManager
+
+    return ReceiptManager(Path.home() / ".config" / "sccs" / ".deploy_receipt.yaml")
+
+
+@deploy_group.command("list")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def deploy_list(ctx: click.Context, output_json: bool) -> None:
+    """List deployment profiles."""
+    from sccs.deploy.schema import DeploymentProfileError
+    from sccs.output.json_emit import emit_json, emit_json_error
+
+    console = ctx.obj["console"]
+    try:
+        profiles = _load_deployment_profiles()
+    except DeploymentProfileError as e:
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
+        sys.exit(1)
+
+    rows = [
+        {
+            "name": name,
+            "description": p.description,
+            "target_platform": p.target_platform,
+            "categories": sorted(p.include),
+            "retain": sorted(p.retain),
+        }
+        for name, p in sorted(profiles.items())
+    ]
+
+    if output_json:
+        emit_json({"profiles": rows})
+        return
+
+    for row in rows:
+        console.print(f"  [bold]{row['name']}[/bold] → {row['target_platform']}")
+        console.print(f"         [dim]{row['description']}[/dim]")
+        console.print(f"         [dim]{len(row['categories'])} categories, retains {len(row['retain'])}[/dim]")
+
+
+@deploy_group.command("show")
+@click.argument("name")
+@click.option("--platform", "platform", default=None, help="Override the profile's target platform")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def deploy_show(ctx: click.Context, name: str, platform: str | None, output_json: bool) -> None:
+    """Show what a profile would bundle."""
+    from sccs.deploy.resolve import resolve_profile
+    from sccs.deploy.schema import DeploymentProfileError
+    from sccs.output.json_emit import emit_json, emit_json_error
+
+    console = ctx.obj["console"]
+    try:
+        config = load_config()
+        profiles = _load_deployment_profiles()
+        resolved = resolve_profile(config, name, profiles, target_platform=platform)
+    except (FileNotFoundError, DeploymentProfileError) as e:
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
+        sys.exit(1)
+
+    categories = {s.category_name: [i.name for i in s.items] for s in resolved.selections}
+    payload = {
+        "success": True,
+        "profile": name,
+        "target_platform": platform or resolved.profile.target_platform,
+        "total_items": resolved.total_items,
+        "categories": categories,
+        "missing_items": [list(m) for m in resolved.missing_items],
+        "missing_deps": [list(d) for d in resolved.missing_deps],
+    }
+
+    if output_json:
+        emit_json(payload)
+        return
+
+    console.print(f"\n[bold]{name}[/bold] — {resolved.profile.description}")
+    console.print(f"Target: {payload['target_platform']} · {resolved.total_items} items\n")
+    for category, names in sorted(categories.items()):
+        retained = " [dim](retained on revoke)[/dim]" if category in resolved.profile.retain else ""
+        console.print(f"  [bold]{category}[/bold] ({len(names)}){retained}")
+        console.print(f"    [dim]{', '.join(sorted(names))}[/dim]")
+    for category, item in resolved.missing_items:
+        console.print_warning(f"Named but not found: {category}/{item}")
+    for skill, parent in resolved.missing_deps:
+        console.print_warning(f"{skill} inherits from {parent}, which is not in the bundle")
+
+
+@deploy_group.command("export")
+@click.argument("name")
+@click.option("-o", "--output", "output_path", type=click.Path(path_type=Path), default=None)
+@click.option("--platform", "platform", default=None, help="Override the profile's target platform")
+@click.option("-n", "--dry-run", is_flag=True, help="Resolve and report, write no ZIP")
+@click.option("--allow-missing-deps", is_flag=True, help="Bundle despite unmet skill dependencies")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def deploy_export(
+    ctx: click.Context,
+    name: str,
+    output_path: Path | None,
+    platform: str | None,
+    dry_run: bool,
+    allow_missing_deps: bool,
+    output_json: bool,
+) -> None:
+    """Build a deployment bundle from a profile."""
+    from sccs.deploy.bundle import build_bundle
+    from sccs.deploy.resolve import resolve_profile
+    from sccs.deploy.schema import DeploymentProfileError
+    from sccs.output.json_emit import emit_json, emit_json_error
+
+    console = ctx.obj["console"]
+    try:
+        config = load_config()
+        profiles = _load_deployment_profiles()
+        resolved = resolve_profile(config, name, profiles, target_platform=platform)
+    except (FileNotFoundError, DeploymentProfileError) as e:
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
+        sys.exit(1)
+
+    if resolved.missing_deps and not allow_missing_deps:
+        detail = "; ".join(f"{s} needs {p}" for s, p in resolved.missing_deps)
+        message = f"Unmet skill dependencies: {detail}. Add them to the profile, or pass --allow-missing-deps."
+        if output_json:
+            emit_json_error(message, missing_deps=[list(d) for d in resolved.missing_deps])
+        else:
+            console.print_error(message)
+        sys.exit(1)
+
+    if output_path is None:
+        output_path = Path.cwd() / f"sccs-{name}-{datetime.now().strftime('%Y%m%d')}.zip"
+
+    if dry_run:
+        payload = {
+            "success": True,
+            "dry_run": True,
+            "profile": name,
+            "output": str(output_path),
+            "total_items": resolved.total_items,
+        }
+        if output_json:
+            emit_json(payload)
+        else:
+            console.print_info(f"Would bundle {resolved.total_items} items into {output_path}")
+        return
+
+    result = build_bundle(config, resolved, output_path, load_raw_user_data())
+
+    if not result.success:
+        if output_json:
+            emit_json_error(result.error or "Export failed")
+        else:
+            console.print_error(f"Export failed: {result.error}")
+        sys.exit(1)
+
+    if output_json:
+        emit_json(
+            {
+                "success": True,
+                "profile": name,
+                "output": str(result.output_path),
+                "total_items": result.total_items,
+                "total_categories": result.total_categories,
+            }
+        )
+        return
+
+    console.print_success(f"Bundled {result.total_items} items for profile '{name}'")
+    console.print_info(f"  Archive: {result.output_path}")
+
+
+@deploy_group.command("install")
+@click.argument("zip_path", type=click.Path(exists=True, path_type=Path))
+@click.option("-n", "--dry-run", is_flag=True, help="Preview without writing")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def deploy_install(ctx: click.Context, zip_path: Path, dry_run: bool, output_json: bool) -> None:
+    """Install a deployment bundle and write the receipt."""
+    from sccs.deploy.install import install_bundle
+    from sccs.output.json_emit import emit_json, emit_json_error
+
+    console = ctx.obj["console"]
+
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        # A customer host has no config of ours. That is the normal case.
+        config = None
+
+    outcome = install_bundle(
+        zip_path,
+        config=config,
+        receipt_manager=_deploy_receipt_manager(),
+        dry_run=dry_run,
+    )
+
+    if not outcome.success:
+        message = "; ".join(outcome.errors) or "Install failed"
+        if output_json:
+            emit_json_error(message, profile=outcome.profile)
+        else:
+            console.print_error(message)
+        sys.exit(1)
+
+    if output_json:
+        emit_json(
+            {
+                "success": True,
+                "dry_run": dry_run,
+                "profile": outcome.profile,
+                "installed": outcome.installed,
+                "skipped": outcome.skipped,
+            }
+        )
+        return
+
+    verb = "Would install" if dry_run else "Installed"
+    console.print_success(f"{verb} {outcome.installed} artefacts (profile '{outcome.profile}')")
+    if not dry_run:
+        console.print_info("  Run `sccs deploy revoke` to remove them again.")
+
+
+@deploy_group.command("status")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def deploy_status(ctx: click.Context, output_json: bool) -> None:
+    """Show what SCCS installed on this host."""
+    from sccs.output.json_emit import emit_json, emit_json_error
+
+    console = ctx.obj["console"]
+    try:
+        receipt = _deploy_receipt_manager().load()
+    except ValueError as e:
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
+        sys.exit(1)
+
+    rows = [
+        {
+            "profile": r.profile,
+            "installed_at": r.installed_at,
+            "sccs_version": r.sccs_version,
+            "artefacts": len(r.entries),
+            "retained_categories": sorted(r.retain),
+            "pre_existing": sum(1 for e in r.entries if e.pre_existing),
+        }
+        for r in receipt.installs
+    ]
+
+    if output_json:
+        emit_json({"installs": rows})
+        return
+
+    if not rows:
+        console.print_info("Nothing installed by `sccs deploy` on this host.")
+        return
+    for row in rows:
+        console.print(
+            f"  [bold]{row['profile']}[/bold] — {row['artefacts']} artefacts, installed {row['installed_at']}"
+        )
+        console.print(
+            f"         [dim]{row['pre_existing']} pre-existing (kept), "
+            f"retains {', '.join(row['retained_categories']) or 'nothing'}[/dim]"
+        )
+
+
+@deploy_group.command("revoke")
+@click.option("--profile", "profile", default=None, help="Revoke only this profile")
+@click.option("-n", "--dry-run", is_flag=True, help="Preview without removing")
+@click.option("--keep-traces", is_flag=True, help="Leave transcripts, plans and history in place")
+@click.option("-y", "--yes", is_flag=True, help="Skip the confirmation prompt")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def deploy_revoke(
+    ctx: click.Context,
+    profile: str | None,
+    dry_run: bool,
+    keep_traces: bool,
+    yes: bool,
+    output_json: bool,
+) -> None:
+    """Remove what SCCS installed, and verify it is gone."""
+    from sccs.deploy.revoke import build_revoke_plan, execute_revoke
+    from sccs.output.json_emit import emit_json, emit_json_error
+
+    console = ctx.obj["console"]
+    manager = _deploy_receipt_manager()
+
+    try:
+        plan = build_revoke_plan(manager, profile=profile, keep_traces=keep_traces)
+    except ValueError as e:
+        if output_json:
+            emit_json_error(str(e))
+        else:
+            console.print_error(str(e))
+        sys.exit(1)
+
+    if not plan.items and not plan.traces:
+        if output_json:
+            emit_json(
+                {
+                    "success": True,
+                    "dry_run": dry_run,
+                    "removed": 0,
+                    "errors": [],
+                    "leftovers": [],
+                    "shared": [],
+                }
+            )
+        else:
+            console.print_info("Nothing to revoke on this host.")
+        return
+
+    if not output_json:
+        console.print(f"\n[bold]Would remove ({len(plan.to_remove)}):[/bold]")
+        for item in plan.to_remove:
+            flag = " [yellow](modified since installation)[/yellow]" if item.modified else ""
+            console.print(f"  {item.entry.category}/{item.entry.name}{flag}")
+        if plan.retained:
+            console.print(f"\n[bold]Stays ({len(plan.retained)}):[/bold]")
+            for item in plan.retained:
+                console.print(f"  [dim]{item.entry.category}/{item.entry.name}[/dim]")
+        if plan.shared:
+            console.print(f"\n[bold]Shared, kept ({len(plan.shared)}):[/bold]")
+            for item in plan.shared:
+                console.print(
+                    f"  [dim]{item.entry.category}/{item.entry.name} (another installed profile still uses it)[/dim]"
+                )
+        if plan.untouched:
+            console.print(f"\n[bold]Not ours, untouched ({len(plan.untouched)}):[/bold]")
+            for item in plan.untouched:
+                console.print(f"  [dim]{item.entry.category}/{item.entry.name}[/dim]")
+        if plan.traces:
+            console.print(f"\n[bold]Work traces ({len(plan.traces)}):[/bold]")
+            for trace in plan.traces:
+                console.print(f"  {trace.path} — [dim]{trace.label}[/dim]")
+
+    if not dry_run and not yes:
+        if not sys.stdout.isatty():
+            message = "Refusing to revoke without a TTY — pass --yes for non-interactive use."
+            if output_json:
+                emit_json_error(message)
+            else:
+                console.print_error(message)
+            sys.exit(1)
+        answer = click.prompt("\nSoll das wirklich entfernt werden? (ja/nein)", default="nein")
+        if answer.strip().lower() not in {"ja", "yes"}:
+            console.print_warning("Aborted — nothing removed.")
+            sys.exit(1)
+
+    result = execute_revoke(plan, manager, dry_run=dry_run)
+    shared_names = [f"{item.entry.category}/{item.entry.name}" for item in plan.shared]
+
+    if output_json:
+        payload = {
+            "success": result.success,
+            "dry_run": dry_run,
+            "removed": result.removed,
+            "errors": result.errors,
+            "leftovers": result.leftovers,
+            "shared": shared_names,
+        }
+        emit_json(payload)
+        sys.exit(0 if result.success else 1)
+
+    if result.leftovers:
+        console.print_error(f"{len(result.leftovers)} artefacts survived the removal:")
+        for leftover in result.leftovers:
+            console.print(f"  {leftover}")
+    for error in result.errors:
+        console.print_error(error)
+
+    if result.success:
+        verb = "Would remove" if dry_run else "Removed"
+        console.print_success(f"{verb} {result.removed} artefacts — sweep clean")
+    else:
+        sys.exit(1)
 
 
 @cli.group("statusline")
