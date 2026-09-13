@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.67.1 (13.09.2026)
+
+### Changed (pi retired from the CAO fleet)
+
+- **`DEFAULT_CAO_PROVIDERS` is empty.** The only bundled provider patch — pi (`pi_cli`), a worker CAO does not ship — is gone, together with its six anchor sites. `sccs doctor check` no longer reports a `cao provider: pi_cli` row, and `sccs doctor install` no longer offers to patch pi back into the installed CAO package after a `cao update`.
+- **The mechanism stays.** A provider declared in `doctor.cao_providers` or `doctor.extra_cao_providers` is checked and patched exactly as in v2.64.0; only the bundled default was removed. The provider source still never ships in this package.
+- The error for a missing provider source no longer points at a `cao_provider` sync category, which a host without pi does not have.
+
 ## Version 2.67.0 (13.09.2026)
 
 ### Added (HyperFrames — a skill package the doctor installs, updates and checks)

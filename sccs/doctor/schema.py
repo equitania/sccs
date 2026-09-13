@@ -700,17 +700,17 @@ class CaoPatchSite(BaseModel):
 class CaoProviderSpec(BaseModel):
     """An extra agent provider patched into an installed CAO.
 
-    The provider *source* deliberately lives outside this package (default:
-    the private sync repo, materialised at `~/.config/cao/provider`). SCCS
-    publishes to PyPI and GitHub, and which agent CLIs a fleet routes work
-    across is not something this package carries.
+    The provider *source* deliberately lives outside this package, in a
+    private location named by `source_dir`. SCCS publishes to PyPI and
+    GitHub, and which agent CLIs a fleet routes work across is not something
+    this package carries. None is bundled; declare one in doctor.cao_providers.
     """
 
-    name: str = Field(description="Provider id as CAO knows it, e.g. 'pi_cli'")
-    binary: str = Field(description="Binary the provider drives, e.g. 'pi'")
+    name: str = Field(description="Provider id as CAO knows it, e.g. 'my_cli'")
+    binary: str = Field(description="Binary the provider drives, e.g. 'my'")
     source_dir: str = Field(description="Directory holding the provider source (tilde ok)")
-    source_file: str = Field(description="File name inside source_dir, e.g. 'pi_cli.py'")
-    package_subpath: str = Field(description="Destination inside the package, e.g. 'providers/pi_cli.py'")
+    source_file: str = Field(description="File name inside source_dir, e.g. 'my_cli.py'")
+    package_subpath: str = Field(description="Destination inside the package, e.g. 'providers/my_cli.py'")
     sites: list[CaoPatchSite] = Field(default_factory=list, description="Registration sites to patch")
 
     @field_validator("name", "binary")

@@ -13,10 +13,11 @@
 #
 # What lives where, deliberately:
 #   * the mechanism (find, verify, patch)  → here, in the published package
-#   * the provider source itself           → the private sync repo, materialised
-#                                            at ~/.config/cao/provider
+#   * the provider source itself           → a private location named by the
+#                                            provider's `source_dir`
 # SCCS publishes to PyPI and GitHub; which agent CLIs a fleet routes work
-# across is not something this package carries.
+# across is not something this package carries. No provider is bundled
+# (DEFAULT_CAO_PROVIDERS is empty) — declare one in `doctor.cao_providers`.
 
 from __future__ import annotations
 
@@ -228,7 +229,7 @@ def apply_provider_patch(spec: CaoProviderSpec, package: Path) -> list[str]:
     """
     source = _source_path(spec)
     if not source.is_file():
-        raise RuntimeError(f"provider source not found: {source} — run `sccs sync --category cao_provider`")
+        raise RuntimeError(f"provider source not found: {source} — sync or restore the provider source first")
 
     # Accumulate per file, not per site: providers/manager.py carries two
     # sites (the import and the instantiation branch). Deriving both from the

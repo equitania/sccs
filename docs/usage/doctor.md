@@ -61,16 +61,18 @@ Der [CLI Agent Orchestrator](https://github.com/awslabs/cli-agent-orchestrator) 
 
 Die Provider-Datei nur zu versionieren transportiert sie, hält CAO aber nicht am Laufen. Genau diese Lücke schließt der Doctor: `sccs doctor check` meldet einen entfernten Provider, `sccs doctor install` spielt ihn wieder ein.
 
+**Seit v2.67.1 ist kein Provider mehr mitgeliefert.** Der einzige, Pi (`pi_cli`), wurde aus der Flotte genommen; `DEFAULT_CAO_PROVIDERS` ist leer, und ohne eigene Deklaration zeigt `doctor check` keine CAO-Zeile. Der Mechanismus bleibt für Provider, die in `doctor.cao_providers` bzw. `doctor.extra_cao_providers` deklariert sind (Name, Binary, `source_dir`, `source_file`, `package_subpath` und die Patch-Stellen mit Anker, Einfügung und Marker):
+
 ```
-cao provider: pi_cli   ❌ MISSING   removed by a CAO update — run `sccs doctor install`
-cao provider: pi_cli   ✅ OK        patched into /Users/…/site-packages/cli_agent_orchestrator
+cao provider: <name>   ❌ MISSING   removed by a CAO update — run `sccs doctor install`
+cao provider: <name>   ✅ OK        patched into /Users/…/site-packages/cli_agent_orchestrator
 ```
 
-**Die Quelle liegt bewusst nicht im Paket.** SCCS wird nach PyPI und GitHub veröffentlicht; nur der *Mechanismus* (finden, prüfen, patchen) steht in `sccs/doctor/cao.py`. Die Provider-Datei selbst kommt über die Sync-Kategorie `cao_provider` nach `~/.config/cao/provider` — dieselbe Trennlinie, nach der in v2.60.0 die CAO-Agentenprofile aus diesem Repository verschwunden sind.
+**Die Quelle liegt bewusst nicht im Paket.** SCCS wird nach PyPI und GitHub veröffentlicht; nur der *Mechanismus* (finden, prüfen, patchen) steht in `sccs/doctor/cao.py`. Die Provider-Datei selbst liegt an einem privaten Ort (`source_dir`) — dieselbe Trennlinie, nach der in v2.60.0 die CAO-Agentenprofile aus diesem Repository verschwunden sind.
 
-**Das Opt-in ist das Zusammentreffen beider, kein Schalter.** Eine Zeile erscheint nur, wenn ein installiertes CAO **und** die synchronisierte Quelle vorhanden sind. Fehlt eines von beiden, erscheint nichts — wer die Quelle nie synchronisiert hat, hat das Feature nicht angefordert und wird nicht darauf hingewiesen.
+**Das Opt-in ist das Zusammentreffen beider, kein Schalter.** Eine Zeile erscheint nur, wenn ein installiertes CAO **und** die Quelle des deklarierten Providers vorhanden sind. Fehlt eines von beiden, erscheint nichts.
 
-**Ein verschobener Ankerpunkt wird gemeldet, nie repariert.** Ändert CAO seinen eigenen Aufbau, meldet der Doctor `CAO layout changed` und druckt, wo die Ankerpunkte in `DEFAULT_CAO_PROVIDERS` neu abzuleiten sind. Ein halb angewandter Patch hinterlässt ein Paket, das zwar importiert, aber beim Start scheitert — schlimmer als ein ungepatchtes. Aus demselben Grund läuft die Prüfung **vollständig durch, bevor die erste Datei geschrieben wird**.
+**Ein verschobener Ankerpunkt wird gemeldet, nie repariert.** Ändert CAO seinen eigenen Aufbau, meldet der Doctor `CAO layout changed` und druckt, wo die Ankerpunkte in der Provider-Deklaration neu abzuleiten sind. Ein halb angewandter Patch hinterlässt ein Paket, das zwar importiert, aber beim Start scheitert — schlimmer als ein ungepatchtes. Aus demselben Grund läuft die Prüfung **vollständig durch, bevor die erste Datei geschrieben wird**.
 
 Nach dem Einspielen den CAO-Server neu starten, damit der Provider geladen wird.
 
@@ -316,16 +318,18 @@ The [CLI Agent Orchestrator](https://github.com/awslabs/cli-agent-orchestrator) 
 
 Versioning the provider file transports it but does not keep CAO working. That is the gap the doctor closes: `sccs doctor check` reports a wiped provider, `sccs doctor install` puts it back.
 
+**Since v2.67.1 no provider is bundled.** The only one, pi (`pi_cli`), was retired from the fleet; `DEFAULT_CAO_PROVIDERS` is empty, and without a declaration of your own `doctor check` shows no CAO row. The mechanism remains for providers declared in `doctor.cao_providers` or `doctor.extra_cao_providers` (name, binary, `source_dir`, `source_file`, `package_subpath` and the patch sites with anchor, insertion and marker):
+
 ```
-cao provider: pi_cli   ❌ MISSING   removed by a CAO update — run `sccs doctor install`
-cao provider: pi_cli   ✅ OK        patched into /Users/…/site-packages/cli_agent_orchestrator
+cao provider: <name>   ❌ MISSING   removed by a CAO update — run `sccs doctor install`
+cao provider: <name>   ✅ OK        patched into /Users/…/site-packages/cli_agent_orchestrator
 ```
 
-**The source is deliberately not bundled.** SCCS publishes to PyPI and GitHub; only the *mechanism* (locate, verify, patch) lives in `sccs/doctor/cao.py`. The provider file itself arrives through the `cao_provider` sync category at `~/.config/cao/provider` — the same line that took the CAO agent profiles out of this repository in v2.60.0.
+**The source is deliberately not bundled.** SCCS publishes to PyPI and GitHub; only the *mechanism* (locate, verify, patch) lives in `sccs/doctor/cao.py`. The provider file itself lives in a private location (`source_dir`) — the same line that took the CAO agent profiles out of this repository in v2.60.0.
 
-**The opt-in is the pairing, not a flag.** A row appears only when an installed CAO **and** the synced source are both present. Missing either means no row at all — someone who never synced the source has not asked for this feature and is not advertised at.
+**The opt-in is the pairing, not a flag.** A row appears only when an installed CAO **and** the declared provider's source are both present. Missing either means no row at all.
 
-**A moved anchor is reported, never repaired.** If CAO changes its own layout, the doctor reports `CAO layout changed` and prints where to re-derive the anchors in `DEFAULT_CAO_PROVIDERS`. A half-applied patch leaves a package that imports but fails at launch — worse than an unpatched one. For the same reason verification runs to completion **before the first file is written**.
+**A moved anchor is reported, never repaired.** If CAO changes its own layout, the doctor reports `CAO layout changed` and prints where to re-derive the anchors in the provider declaration. A half-applied patch leaves a package that imports but fails at launch — worse than an unpatched one. For the same reason verification runs to completion **before the first file is written**.
 
 Restart the CAO server afterwards so the provider is loaded.
 

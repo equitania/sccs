@@ -713,8 +713,8 @@ def _cao_provider_actions(statuses: list | None) -> list[DoctorAction]:
                         f"# CAO's layout has changed — SCCS will not guess where to patch.\n"
                         f"# Package: {st.package_path}\n"
                         f"{problems}\n"
-                        f"# Re-derive the anchors in sccs/doctor/defaults.py "
-                        f"(DEFAULT_CAO_PROVIDERS) against the installed package."
+                        f"# Re-derive the anchors in the provider declaration "
+                        f"(doctor.cao_providers) against the installed package."
                     ),
                     runnable=False,
                     component=component,

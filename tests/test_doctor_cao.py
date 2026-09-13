@@ -420,41 +420,22 @@ class TestPathSafety:
 
 
 # --------------------------------------------------------------------------
-# The bundled pi_cli spec must stay in step with the source of truth
+# Bundled defaults: none since pi was retired (v2.67.1)
 # --------------------------------------------------------------------------
 
 
-class TestBundledPiProviderSpec:
-    def test_pi_provider_is_bundled(self):
-        names = [s.name for s in DEFAULT_CAO_PROVIDERS]
-        assert "pi_cli" in names
+class TestBundledProviderDefaults:
+    def test_no_provider_is_bundled(self):
+        """pi was the only bundled provider; with it gone the doctor must stay
+        silent on every host unless a provider is declared in config."""
+        assert DEFAULT_CAO_PROVIDERS == []
+        assert DoctorConfig().effective_cao_providers() == []
 
-    def test_covers_every_registration_site(self):
-        """Six sites; miss one and CAO imports but never launches a pi worker."""
-        spec = next(s for s in DEFAULT_CAO_PROVIDERS if s.name == "pi_cli")
-        assert {site.rel_path for site in spec.sites} == {
-            "models/provider.py",
-            "providers/manager.py",
-            "cli/commands/launch.py",
-            "api/main.py",
-            "utils/tool_mapping.py",
-        }
-        assert len(spec.sites) == 6  # manager.py carries two: import + branch
-
-    def test_every_marker_appears_in_its_own_insertion(self):
+    def test_every_marker_appears_in_its_own_insertion(self, tmp_path):
         """Otherwise the patch is not idempotent — it would re-apply forever."""
-        for spec in DEFAULT_CAO_PROVIDERS:
-            for site in spec.sites:
-                assert site.marker in site.insertion, f"{spec.name}/{site.rel_path}"
-
-    def test_source_dir_is_the_synced_private_location(self):
-        """The provider source stays in the private sync repo — never bundled
-        into this package, which publishes to PyPI and GitHub."""
-        spec = next(s for s in DEFAULT_CAO_PROVIDERS if s.name == "pi_cli")
-        assert spec.source_dir == "~/.config/cao/provider"
-
-    def test_config_exposes_the_defaults(self):
-        assert DoctorConfig().effective_cao_providers() == DEFAULT_CAO_PROVIDERS
+        spec = _make_spec(tmp_path)
+        for site in spec.sites:
+            assert site.marker in site.insertion, f"{spec.name}/{site.rel_path}"
 
     def test_config_can_replace_and_extend(self, tmp_path):
         extra = _make_spec(tmp_path)
@@ -518,7 +499,7 @@ class TestCaoProviderActions:
         assert actions[0].runnable is False
         assert actions[0].python_callable is None
         assert "models/provider.py" in actions[0].manual_block
-        assert "DEFAULT_CAO_PROVIDERS" in actions[0].manual_block
+        assert "doctor.cao_providers" in actions[0].manual_block
 
     def test_one_action_per_provider(self, cao_tree, tmp_path):
         from sccs.doctor.installer import _cao_provider_actions
