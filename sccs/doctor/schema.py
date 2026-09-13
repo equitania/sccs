@@ -857,6 +857,14 @@ class DoctorConfig(BaseModel):
         default_factory=list,
         description="Additional fully-specified CLI tools appended to the resolved cli_tools.",
     )
+    skill_packages: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Opt-in list of built-in skill packages installed through the `skills` "
+            "CLI (e.g. ['hyperframes']). Empty by default → no rows, no installs. "
+            "Unknown names are ignored. See sccs/doctor/skill_packages.py."
+        ),
+    )
     cao_providers: list[CaoProviderSpec] | None = Field(
         default=None,
         description=(
@@ -1000,3 +1008,28 @@ class DoctorConfig(BaseModel):
 
         resolved = [BUILTIN_CLI_TOOLS[name] for name in self.cli_tools if name in BUILTIN_CLI_TOOLS]
         return resolved + list(self.extra_cli_tools)
+
+    def effective_skill_packages(self) -> list[Any]:
+        """Resolve opt-in skill package names into specs.
+
+        Profile-blind on purpose, like effective_npx_tools(): the sync excludes
+        derived from it must keep matching a parked package's skills.
+        """
+        from sccs.doctor.skill_packages import resolve_skill_packages
+
+        return resolve_skill_packages(self.skill_packages)
+
+    def installable_skill_packages(
+        self,
+        profiles: dict[str, Any] | None = None,
+        state_manager: Any | None = None,
+    ) -> list[Any]:
+        """Skill packages to check/install — minus those of a switched-off profile.
+
+        Without this, `doctor install/update` would run `skills add` again and
+        write the skills `sccs profile off` parked straight back.
+        """
+        from sccs.doctor.profiles import disabled_skill_packages, resolve_profiles
+
+        disabled = disabled_skill_packages(resolve_profiles(profiles), state_manager)
+        return [p for p in self.effective_skill_packages() if p.name not in disabled]

@@ -58,6 +58,17 @@ Der Parkbereich liegt außerhalb von `~/.claude/` und damit ohnehin außerhalb d
 
 `doctor.protected_hooks` (Default `gsd-`) schützt weiterhin gegen `disallowed_hooks` — eine ausdrücklich angeforderte Profil-Abschaltung sticht diesen Schutzwall.
 
+### Profil `hyperframes` (ab v2.67.0)
+
+Das mitgelieferte Profil `hyperframes` parkt die 20 Video-Skills aus `heygen-com/hyperframes`. Anders als bei GSD haben sie **kein gemeinsames Präfix** (`figma`, `slideshow`, `general-video` …), deshalb gibt es kein Glob: welche Skills dazugehören, liest SCCS beim Umschalten aus der Lock-Datei der `skills`-CLI (`~/.agents/.skill-lock.json`, alle Einträge mit `source: heygen-com/hyperframes`). Ein eigener Skill, der zufällig `figma` heißt, aber nicht aus dem Paket stammt, bleibt liegen.
+
+```bash
+sccs profile off hyperframes     # Video-Skills für den Alltag abschalten
+sccs profile on hyperframes      # vor der Videoarbeit zurückholen
+```
+
+Solange das Profil aus ist, überspringt der Doctor das Skill-Paket (`DoctorConfig.installable_skill_packages()`), sonst würde `doctor update` die Skills sofort zurückschreiben. Geparkt werden nur die Kopien in `~/.claude/skills/`; Kopien, die die `skills`-CLI für andere Agenten unter `~/.agents/skills/` angelegt hat, bleiben unberührt.
+
 ### Eigene Profile
 
 Profile stehen in `~/.config/sccs/config.yaml` unter dem Top-Level-Schlüssel `profiles:`. Ein Eintrag mit dem Namen eines mitgelieferten Profils **ersetzt** dessen Spezifikation vollständig.
@@ -79,6 +90,7 @@ profiles:
 | `hooks` | Substring-Muster gegen `hooks[*].hooks[*].command` — gleiche Semantik wie `doctor.disallowed_hooks` |
 | `statusline_fallback_preset` | Name des Statusline-Presets, auf das umgestellt wird |
 | `npx_tools` | Namen der Doctor-npx-Tools, die diese Artefakte installieren |
+| `skill_packages` | Namen der Doctor-Skill-Pakete (z.B. `hyperframes`); die Skill-Namen kommen aus der `skills`-Lock-Datei |
 
 Profilnamen dürfen nur Kleinbuchstaben, Ziffern, `-` und `_` enthalten.
 
@@ -222,6 +234,17 @@ The parking area lives outside `~/.claude/` and is therefore out of sync scope a
 
 `doctor.protected_hooks` (default `gsd-`) still protects against `disallowed_hooks` — an explicitly requested profile switch overrides that guard.
 
+### The `hyperframes` profile (since v2.67.0)
+
+The bundled `hyperframes` profile parks the 20 video skills from `heygen-com/hyperframes`. Unlike GSD they share **no common prefix** (`figma`, `slideshow`, `general-video`, …), so there is no glob: SCCS reads which skills belong to the package from the `skills` CLI lock file (`~/.agents/.skill-lock.json`, every entry with `source: heygen-com/hyperframes`) at switch time. A private skill that happens to be called `figma` but did not come from the package stays where it is.
+
+```bash
+sccs profile off hyperframes     # switch the video skills off for everyday work
+sccs profile on hyperframes      # bring them back before video work
+```
+
+While the profile is off, the doctor skips the skill package (`DoctorConfig.installable_skill_packages()`); otherwise `doctor update` would write the skills straight back. Only the copies in `~/.claude/skills/` are parked; copies the `skills` CLI made for other agents under `~/.agents/skills/` are left alone.
+
 ### Custom profiles
 
 Profiles live in `~/.config/sccs/config.yaml` under the top-level `profiles:` key. An entry named like a bundled profile **fully replaces** its spec.
@@ -243,6 +266,7 @@ profiles:
 | `hooks` | Substring patterns against `hooks[*].hooks[*].command` — same semantics as `doctor.disallowed_hooks` |
 | `statusline_fallback_preset` | Name of the statusline preset to switch to |
 | `npx_tools` | Names of the doctor npx tools that install these artefacts |
+| `skill_packages` | Names of doctor skill packages (e.g. `hyperframes`); the skill names come from the `skills` lock file |
 
 Profile names may contain lowercase letters, digits, `-` and `_` only.
 

@@ -40,6 +40,21 @@ doctor:
 
 `zoxide` (smarter `cd`) wird auf **allen** Plattformen geprüft (winget/`brew install zoxide`/Install-Script), **Microsoft Coreutils** (`Microsoft.Coreutils`, Rust-uutils-Port von `cat`/`grep`/`wc`/`cut`/`xargs`) **nur Windows** — gibt PowerShell dieselben Unix-Befehle wie Linux/macOS/WSL. Erkennung: `which` für „auf PATH", auf Windows zusätzlich `winget list --id <id>` als autoritative Install-Prüfung (fängt die WinGet-Links-nicht-auf-PATH-Falle). Zustände: `OK` / gelb „installed, not on PATH" (+ PowerShell-PATH-Copy-Paste-Block unter der Tabelle) / blau „not installed (optional)". **Nur Hinweis — fehlend = kein Exit 1.** `doctor install` bietet `winget install`/`brew install` (confirm-gated); SCCS mutiert nie selbst PATH/Profil. Hinweis: zoxide braucht zusätzlich `zoxide init <shell>` im Profil für den `z`-Befehl (bewusst nicht durch den Doctor — er stellt nur die Binary sicher); Coreutils braucht keine Profil-Init. Shell-Conflicts (PS-Aliase `cat`/`sort`/`tee` gewinnen gegen die `.exe` → mit `cat.exe`/`sort.exe` aufrufen): siehe <https://github.com/microsoft/coreutils#shell-conflicts>.
 
+### Skill-Pakete (HyperFrames) — ab v2.67.0
+
+Skill-Sammlungen, die über die `skills`-CLI aus einem GitHub-Repository kommen, verwaltet der Doctor wie GSD — aber nur auf Rechnern, auf denen sie eingeschaltet sind:
+
+```yaml
+doctor:
+  skill_packages: [hyperframes]
+```
+
+- **`doctor check`** zeigt eine Zeile `skills: hyperframes`. Welche Skills erwartet werden, steht in der Lock-Datei der `skills`-CLI (`~/.agents/.skill-lock.json`, Einträge mit `source: heygen-com/hyperframes`); ohne Lock gilt die mitgelieferte Liste der 20 Skills. Geprüft wird, ob jeder Skill als echtes Verzeichnis mit `SKILL.md` in `~/.claude/skills/` liegt und ob die `SKILL.md` ladbar ist (gültiges YAML, Beschreibung ≤ 1024 Zeichen). Fehlende oder nur verlinkte Skills zählen als Problem (Exit 1); eine nicht ladbare `SKILL.md` wird gelb gemeldet, ist aber kein Fehler, weil sie nur upstream behoben werden kann. Die Versionsspalte zeigt das Datum der letzten Aktualisierung aus dem Lock — die `skills`-CLI führt keine Versionsnummer, deshalb meldet `check` auch kein „update available“.
+- **`doctor install`** installiert ein fehlendes Paket für Claude Code: `npx -y skills add heygen-com/hyperframes --global --agent claude-code --skill '*' --yes --copy`. `--copy` ist Absicht — standardmäßig verlinkt die CLI, und einen Symlink würde der Sync-Scan überspringen und ein Profil nur als Link parken.
+- **`doctor update` / `optimize`** führen denselben Befehl immer aus. Er ersetzt jedes Skill-Verzeichnis vollständig und aktualisiert den Lock; lokale Änderungen an den Skills gehen dabei verloren.
+- **Sync-Ausschluss:** Alle Skills, die der Lock dem Paket zuschreibt, sind von `sccs sync`, Export und den Agent-Exporten ausgeschlossen — auch ohne Opt-in, denn jeder Rechner holt sie ohnehin von upstream. Die mitgelieferte Namensliste wirkt nur bei eingeschaltetem Paket, damit ein eigener Skill namens `figma` auf einem Rechner ohne HyperFrames weiter synchronisiert.
+- **Abschalten:** `sccs profile off hyperframes` parkt die Skills, und der Doctor installiert sie dann nicht erneut (siehe [Profiles](profiles.md)).
+
 ### CAO-Provider nach einem `cao update` wiederherstellen — ab v2.64.0
 
 Der [CLI Agent Orchestrator](https://github.com/awslabs/cli-agent-orchestrator) (CAO) löst seine Provider über eine **fest verdrahtete if/elif-Kette** auf, die aus einem Enum gespeist wird — kein Erweiterungspunkt. Sein Plugin-System hilft nicht: CAO-Plugins sind reine Beobachter und können keinen Provider registrieren. Einen zusätzlichen Provider anzubinden heißt deshalb, das **installierte Paket** an sechs Stellen zu ergänzen — und jedes `cao update`, `uv tool upgrade` oder Neuinstallieren ersetzt dieses Paket und entfernt alles davon wieder. Das erste Anzeichen ist ein Worker, der nicht mehr startet.
@@ -279,6 +294,21 @@ doctor:
 ```
 
 `zoxide` (smart `cd`) is checked on **all** platforms (winget / `brew install zoxide` / install script); **Microsoft Coreutils** (`Microsoft.Coreutils`, the Rust uutils port of `cat`/`grep`/`wc`/`cut`/`xargs`) is **Windows-only** — it gives PowerShell the same UNIX commands as Linux/macOS/WSL. Detection: `which` for "on PATH"; on Windows a `winget list --id <id>` fallback is the authoritative install check (catches the WinGet-Links-not-on-PATH trap). States: `OK` / yellow "installed, not on PATH" (+ a copy-paste PowerShell PATH block below the table) / blue "not installed (optional)". **Informational only — missing = no exit 1.** `doctor install` offers `winget install` / `brew install` (confirm-gated); SCCS never edits PATH/profile itself. Note: zoxide also needs `zoxide init <shell>` in the profile for the `z` command (intentionally not done by the doctor — it only ensures the binary); Coreutils needs no profile init. Shell conflicts (PowerShell aliases `cat`/`sort`/`tee` win over the `.exe` → call `cat.exe`/`sort.exe`): see <https://github.com/microsoft/coreutils#shell-conflicts>.
+
+### Skill packages (HyperFrames) — since v2.67.0
+
+Skill collections that the `skills` CLI fetches from a GitHub repository are managed like GSD — but only on machines where they are switched on:
+
+```yaml
+doctor:
+  skill_packages: [hyperframes]
+```
+
+- **`doctor check`** shows a `skills: hyperframes` row. The expected skills come from the `skills` CLI lock file (`~/.agents/.skill-lock.json`, entries with `source: heygen-com/hyperframes`); without a lock the bundled list of 20 skills applies. It checks that every skill is a real directory with a `SKILL.md` in `~/.claude/skills/` and that the `SKILL.md` will load (valid YAML, description ≤ 1024 characters). Missing or merely symlinked skills count as a problem (exit 1); an unloadable `SKILL.md` is shown in yellow but is not a failure, because only upstream can fix it. The Version column shows the lock's last update date — the `skills` CLI records no version number, so `check` never reports "update available" either.
+- **`doctor install`** installs a missing package for Claude Code: `npx -y skills add heygen-com/hyperframes --global --agent claude-code --skill '*' --yes --copy`. `--copy` is deliberate — the CLI symlinks by default, and a symlink would be skipped by the sync scan and parked as a bare link by a profile.
+- **`doctor update` / `optimize`** always run the same command. It replaces every skill directory wholesale and refreshes the lock; local edits to those skills are lost.
+- **Sync exclusion:** every skill the lock attributes to the package is excluded from `sccs sync`, export and the agent exports — even without opt-in, since each machine fetches them from upstream anyway. The bundled name list only applies to an enabled package, so a private skill called `figma` keeps syncing on a machine without HyperFrames.
+- **Switching off:** `sccs profile off hyperframes` parks the skills, and the doctor then does not reinstall them (see [Profiles](profiles.md)).
 
 ### Restoring a CAO provider after a `cao update` — since v2.64.0
 

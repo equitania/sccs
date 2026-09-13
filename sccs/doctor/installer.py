@@ -39,6 +39,11 @@ from sccs.doctor.detectors import (
 )
 from sccs.doctor.runner import DoctorError, _run
 from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec
+from sccs.doctor.skill_packages import (
+    SkillPackageStatus,
+    skill_package_install_actions,
+    skill_package_update_actions,
+)
 from sccs.doctor.state import DoctorStateManager
 from sccs.utils.logging import get_logger
 from sccs.utils.paths import atomic_write, expand_path
@@ -1603,6 +1608,7 @@ def build_install_plan(
     cli_tools: list[CliToolStatus] | None = None,
     cao_providers: list | None = None,
     statusline_presets: list | None = None,
+    skill_packages: list[SkillPackageStatus] | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -1627,6 +1633,7 @@ def build_install_plan(
     actions.extend(_npx_install_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
     # Orphan cleanup runs after the npx install rewrites the tool manifest.
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
+    actions.extend(skill_package_install_actions(skill_packages, install_deps=install_deps))
     if bundled_skills:
         actions.extend(_bundled_skill_repair_actions(bundled_skills, npx_tools))
     if browser_bundles:
@@ -1662,6 +1669,7 @@ def build_update_plan(
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
     cao_providers: list | None = None,
+    skill_packages: list[SkillPackageStatus] | None = None,
 ) -> InstallPlan:
     """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones.
 
@@ -1689,6 +1697,7 @@ def build_update_plan(
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
     # Orphan cleanup runs after the npx refresh rewrites the tool manifest.
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
+    actions.extend(skill_package_update_actions(skill_packages, install_deps=install_deps))
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     actions.extend(_cli_tool_install_actions(cli_tools))
@@ -1717,6 +1726,7 @@ def build_optimize_plan(
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
     cao_providers: list | None = None,
+    skill_packages: list[SkillPackageStatus] | None = None,
     strict: bool = False,
 ) -> InstallPlan:
     """Plan a one-shot optimize pass.
@@ -1801,6 +1811,7 @@ def build_optimize_plan(
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
     # Orphan cleanup runs after the npx refresh rewrites the tool manifest.
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
+    actions.extend(skill_package_update_actions(skill_packages, install_deps=install_deps))
 
     # Spec'd-but-missing MCP servers get a manual_block (no auto-add).
     actions.extend(_mcp_server_install_warnings(mcp_servers))

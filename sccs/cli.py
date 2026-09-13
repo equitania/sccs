@@ -3059,6 +3059,7 @@ def _collect_doctor_statuses(
         SettingsHookDetector,
         StatusLineDetector,
     )
+    from sccs.doctor.skill_packages import SkillPackageDetector
     from sccs.doctor.state import DoctorStateManager
 
     # Install-/marketplace-check list: excludes allowlist_only entries (LSPs,
@@ -3071,7 +3072,9 @@ def _collect_doctor_statuses(
     # Install/check list: drops tools belonging to a switched-off profile, so
     # `doctor install/update` cannot resurrect artefacts `sccs profile off`
     # parked. Sync excludes still use the full effective_npx_tools() list.
-    npx_specs = doctor_cfg.installable_npx_tools(profiles if profiles is not None else _load_profiles())
+    profile_map = profiles if profiles is not None else _load_profiles()
+    npx_specs = doctor_cfg.installable_npx_tools(profile_map)
+    skill_package_specs = doctor_cfg.installable_skill_packages(profile_map)
     permission_specs = doctor_cfg.effective_permission_checks()
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
     status_line_specs = doctor_cfg.effective_status_line_checks()
@@ -3104,6 +3107,7 @@ def _collect_doctor_statuses(
         "settings_path": settings_hook_detector.settings_path,
         "gsd_orphans": GsdOrphanDetector().get_statuses(npx_specs),
         "cli_tools": CliToolDetector().get_statuses(cli_tool_specs),
+        "skill_packages": SkillPackageDetector().get_statuses(skill_package_specs),
         # Silent unless BOTH an installed CAO and the synced provider
         # source exist — that pairing is the opt-in.
         "cao_providers": CaoDetector().get_statuses(cao_provider_specs),
@@ -3215,6 +3219,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
             status_lines=statuses.get("status_lines"),
             gsd_orphans=statuses.get("gsd_orphans"),
             cao_providers=statuses.get("cao_providers"),
+            skill_packages=statuses.get("skill_packages"),
         )
         updates = has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"])
         emit_json(
@@ -3239,6 +3244,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
                 "statusline_presets": statuses.get("statusline_presets"),
                 "gsd_orphans": statuses.get("gsd_orphans"),
                 "cli_tools": statuses.get("cli_tools"),
+                "skill_packages": statuses.get("skill_packages"),
                 "cao_providers": statuses.get("cao_providers"),
             }
         )
@@ -3262,6 +3268,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         cao_providers=statuses.get("cao_providers"),
         statusline_presets=statuses.get("statusline_presets"),
         powershell=statuses.get("powershell"),
+        skill_packages=statuses.get("skill_packages"),
     )
 
     if has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"]):
@@ -3283,6 +3290,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cao_providers=statuses.get("cao_providers"),
+        skill_packages=statuses.get("skill_packages"),
     ):
         console.print()
         console.print_warning("Run `sccs doctor install` to fix missing items.")
@@ -3322,6 +3330,7 @@ def doctor_install(ctx: click.Context, yes: bool, output_json: bool) -> None:
         cli_tools=statuses.get("cli_tools"),
         cao_providers=statuses.get("cao_providers"),
         statusline_presets=statuses.get("statusline_presets"),
+        skill_packages=statuses.get("skill_packages"),
     )
 
     if plan.is_empty():
@@ -3385,6 +3394,7 @@ def doctor_update(ctx: click.Context, yes: bool, output_json: bool) -> None:
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
         cao_providers=statuses.get("cao_providers"),
+        skill_packages=statuses.get("skill_packages"),
     )
 
     if plan.is_empty():
@@ -3464,6 +3474,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
         cao_providers=statuses.get("cao_providers"),
+        skill_packages=statuses.get("skill_packages"),
         strict=strict,
     )
 

@@ -1,5 +1,20 @@
 # Release Notes
 
+## Version 2.67.0 (13.09.2026)
+
+### Added (HyperFrames — a skill package the doctor installs, updates and checks)
+
+- **`doctor.skill_packages`** — opt-in list of skill bundles fetched by the `skills` CLI (`npx skills add <owner/repo>`). Bundled is `hyperframes` (`heygen-com/hyperframes`, 20 video skills). Nothing is checked by default, so a server without video work sees no new row.
+- **`sccs doctor install`** installs a missing package for Claude Code with `npx -y skills add heygen-com/hyperframes --global --agent claude-code --skill '*' --yes --copy`. `--copy` is deliberate: the CLI symlinks by default, and a symlink in `~/.claude/skills/` is skipped by the sync scan and would be parked as a bare link. **`doctor update` and `optimize`** run the same command every time — verified to replace each skill directory wholesale and refresh the lock.
+- **`sccs doctor check`** shows a `skills: hyperframes` row: missing or only symlinked skills are a problem (exit 1); a `SKILL.md` that will not load (invalid YAML, description over 1024 characters) is reported in yellow but is not a failure, because only upstream can fix it. The Version column shows the lock's last update date — the `skills` CLI records a folder hash, not a version, so `check` does not claim an update is available. `--json` carries a `skill_packages` key.
+- **Membership comes from the `skills` lock file**, not a glob. Twelve of the twenty skills have no `hyperframes` prefix (`figma`, `slideshow`, `general-video`, …), so the one-glob approach used for `gsd-*` cannot work. Every entry in `~/.agents/.skill-lock.json` records its `source`; SCCS reads that. The bundled name list is only a fallback for a host without a lock.
+- **The skills never sync.** Every skill the lock attributes to the package is added to the doctor-managed excludes — and therefore to `sccs sync`, export and the agent exports — regardless of opt-in, the same way `gsd-*` is. The fallback name list only applies to an *enabled* package, so a private skill that happens to be called `figma` keeps syncing on a machine where HyperFrames is not installed.
+- **Profile `hyperframes`** — `sccs profile off hyperframes` parks the package's skills under `~/.config/sccs/profiles/hyperframes/`, `on` brings them back. `ProfileSpec.skill_packages` resolves the skill names from the lock at switch time, and `DoctorConfig.installable_skill_packages()` drops a switched-off package so `doctor install/update` cannot write the skills straight back. Copies the `skills` CLI made for other agents under `~/.agents/skills/` are not touched.
+
+### Why this needed its own mechanism
+
+The skills had been installed with `npx skills add heygen-com/hyperframes`, but without Claude Code among the selected agents: they sat in `~/.agents/skills/` only, and Claude Code never saw them. The doctor now reports exactly that state as `missing` and installs the Claude Code copy.
+
 ## Version 2.66.0 (01.09.2026)
 
 ### Fixed (the statusline was the one artefact that never travelled)

@@ -115,7 +115,7 @@ def test_user_override_replaces_bundled_spec():
 
 def test_user_profile_is_added_alongside_defaults():
     resolved = resolve_profiles({"odoo": ProfileSpec(skills=["odoo*"])})
-    assert set(resolved) == {"gsd", "odoo"}
+    assert set(resolved) == {*DEFAULT_PROFILES, "odoo"}
 
 
 @pytest.mark.parametrize("bad", ["GSD", "-gsd", "gsd/../etc", "", "gsd profile"])

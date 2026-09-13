@@ -64,6 +64,12 @@ def get_doctor_managed_excludes(
     for tool in doctor_config.effective_npx_tools():
         patterns.update(DEFAULT_MANAGED_PATTERNS.get(tool.name, []))
 
+    # Skills written by `npx skills add` (e.g. HyperFrames). Their names share
+    # no prefix, so they come from the skills lock file — see skill_packages.py.
+    from sccs.doctor.skill_packages import managed_skill_names
+
+    patterns.update(managed_skill_names(doctor_config.effective_skill_packages()))
+
     patterns.update(doctor_config.managed_excludes)
 
     overrides = getattr(statusline_config, "presets", None)

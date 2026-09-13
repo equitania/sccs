@@ -519,6 +519,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # zoxide is checked on all platforms (winget/brew/script); coreutils
         # (Microsoft.Coreutils) only on Windows. Empty = no extra rows.
         "cli_tools": [],
+        # Opt-in skill packages installed through the `skills` CLI, e.g.:
+        #   skill_packages: [hyperframes]
+        # `doctor install` copies them into ~/.claude/skills, `doctor update`
+        # refreshes them. Their skills never sync — each host fetches them from
+        # upstream. Switch them off with `sccs profile off hyperframes`.
+        "skill_packages": [],
     },
 }
 

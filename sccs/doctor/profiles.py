@@ -100,6 +100,16 @@ class ProfileSpec(BaseModel):
             "instead of writing the artefacts straight back."
         ),
     )
+    skill_packages: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of doctor skill packages (sccs/doctor/skill_packages.py) whose "
+            "skills belong to this profile. The skill names are read from the "
+            "`skills` CLI lock file at switch time, because a package's skills "
+            "share no common prefix. While the profile is off, `sccs doctor "
+            "install/update` skips the package."
+        ),
+    )
 
     @field_validator("statusline_fallback_preset")
     @classmethod
@@ -125,6 +135,13 @@ DEFAULT_PROFILES: dict[str, ProfileSpec] = {
         hooks=["gsd-"],
         statusline_fallback_preset="claude-code-statusline",
         npx_tools=["@opengsd/gsd-core"],
+    ),
+    # `npx skills add heygen-com/hyperframes` writes 20 video skills, most of
+    # them without a common prefix (figma, slideshow, …) — so the names come
+    # from the skills lock file, not from a glob. No agents, hooks or statusline.
+    "hyperframes": ProfileSpec(
+        description="HyperFrames video skills (heygen-com/hyperframes)",
+        skill_packages=["hyperframes"],
     ),
 }
 
@@ -295,6 +312,23 @@ def disabled_npx_tools(
     return tools
 
 
+def disabled_skill_packages(
+    profiles: dict[str, ProfileSpec],
+    state_manager: ProfileStateManager | None = None,
+) -> set[str]:
+    """Skill package names belonging to profiles that are currently switched off.
+
+    Same role as disabled_npx_tools(), for DoctorConfig.installable_skill_packages().
+    """
+    mgr = state_manager or ProfileStateManager()
+    packages: set[str] = set()
+    for name in mgr.disabled_names():
+        spec = profiles.get(name)
+        if spec:
+            packages.update(spec.skill_packages)
+    return packages
+
+
 def disabled_hook_patterns(
     profiles: dict[str, ProfileSpec],
     state_manager: ProfileStateManager | None = None,
@@ -364,11 +398,14 @@ class ProfileManager:
         park_root: Path | None = None,
         state_manager: ProfileStateManager | None = None,
         statusline_presets: dict[str, Any] | None = None,
+        skill_packages: dict[str, Any] | None = None,
     ) -> None:
         self.profiles = profiles
         self.claude_dir = claude_dir or DEFAULT_CLAUDE_DIR
         self.park_root = park_root or DEFAULT_PARK_ROOT
         self.state = state_manager or ProfileStateManager()
+        # None → BUILTIN_SKILL_PACKAGES, resolved on use; injectable for tests.
+        self._skill_packages = skill_packages
         # Resolved lazily so importing profiles.py does not drag in the
         # statusline module for callers that never switch a profile.
         self._statusline_presets = statusline_presets
@@ -392,11 +429,24 @@ class ProfileManager:
 
     # -- discovery ---------------------------------------------------- #
 
+    def _package_skill_names(self, spec: ProfileSpec) -> list[str]:
+        if not spec.skill_packages:
+            return []
+        from sccs.doctor.skill_packages import BUILTIN_SKILL_PACKAGES, package_skill_names
+
+        known = self._skill_packages if self._skill_packages is not None else BUILTIN_SKILL_PACKAGES
+        names: list[str] = []
+        for pkg in spec.skill_packages:
+            if pkg in known:
+                names.extend(package_skill_names(known[pkg]))
+        return names
+
     def _live_skills(self, spec: ProfileSpec) -> list[Path]:
         root = self.claude_dir / "skills"
-        if not spec.skills or not root.is_dir():
+        patterns = list(spec.skills) + self._package_skill_names(spec)
+        if not patterns or not root.is_dir():
             return []
-        return sorted(p for p in root.iterdir() if p.is_dir() and matches_any_pattern(p.name, spec.skills))
+        return sorted(p for p in root.iterdir() if p.is_dir() and matches_any_pattern(p.name, patterns))
 
     def _live_agents(self, spec: ProfileSpec) -> list[Path]:
         root = self.claude_dir / "agents"

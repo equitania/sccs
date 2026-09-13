@@ -172,6 +172,32 @@ def _cli_tool_row(status: CliToolStatus) -> tuple[str, str, str, str]:
     return (label, _INFO, "", "not installed (optional) — run `sccs doctor install`")
 
 
+def _skill_package_row(status) -> tuple[str, str, str, str]:
+    """One row per opt-in skill package (e.g. HyperFrames).
+
+    The Version column shows the lock file's last update date: the `skills`
+    CLI records a folder hash, not a release number, so there is nothing more
+    honest to show.
+    """
+    spec = status.spec
+    label = f"skills: {spec.name}"
+    version = status.updated_at or ""
+    total = len(status.expected)
+    if status.state == "ok":
+        return (label, _OK, version, f"{total} skills in {spec.target_dir}")
+    if status.state == "missing":
+        return (label, _MISSING, "", f"not installed for {spec.agent} — run `sccs doctor install`")
+    if status.state == "partial":
+        parts = []
+        if status.missing:
+            parts.append(f"{len(status.missing)} missing")
+        if status.symlinked:
+            parts.append(f"{len(status.symlinked)} symlinked")
+        return (label, _MISSING, version, f"{', '.join(parts)} of {total} — run `sccs doctor install`")
+    names = ", ".join(sorted(status.invalid))
+    return (label, _STALE, version, f"will not load: {names} — upstream SKILL.md, try `sccs doctor update`")
+
+
 def _cao_provider_row(status) -> tuple[str, str, str, str]:
     """One row per extra provider patched into an installed CAO.
 
@@ -227,6 +253,7 @@ def render_doctor_report(
     statusline_presets: list | None = None,
     powershell: PowerShellStatus | None = None,
     min_pwsh_major: int = 7,
+    skill_packages: list | None = None,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -248,6 +275,8 @@ def render_doctor_report(
         table.add_row(*_plugin_row(plugin_st))
     for npx_st in npx_tools:
         table.add_row(*_npx_row(npx_st))
+    for pkg_st in skill_packages or []:
+        table.add_row(*_skill_package_row(pkg_st))
     if bundled_skills:
         for skill_st in bundled_skills:
             table.add_row(*_bundled_skill_row(skill_st))
@@ -465,6 +494,7 @@ def has_problems(
     status_lines: list[StatusLineStatus] | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cao_providers: list | None = None,
+    skill_packages: list | None = None,
 ) -> bool:
     """Return True if any component is missing/outdated or has a permission issue."""
     if not (node.installed and node.meets_minimum):
@@ -490,6 +520,10 @@ def has_problems(
     # A provider wiped by a `cao update` is a real defect: the fleet still
     # advertises pi workers that can no longer start.
     if cao_providers and any(c.state != "patched" for c in cao_providers):
+        return True
+    # An opted-in package that is missing is a defect SCCS can fix. A SKILL.md
+    # that will not load is upstream's to fix — shown, but not a failure.
+    if skill_packages and any(s.needs_install for s in skill_packages):
         return True
     return bool(browser_bundles and any(not b.all_present for b in browser_bundles))
 
