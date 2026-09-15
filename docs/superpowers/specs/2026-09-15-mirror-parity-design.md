@@ -107,7 +107,7 @@ Rules the table does not show:
 - Homebrew cannot pin versions at all; the install path uses `--no-upgrade`, so
   parity there means "same packages", not "each at its current version".
   uv and npm are pinned to the source's version.
-- Homebrew *extras* are computed against `brew leaves` (top-level formulae) and
+- Homebrew *extras* are computed against `brew leaves --installed-on-request` (what `brew bundle dump` writes) and
   `brew list --cask`, never against the full dependency closure, so a dependency
   pulled in by a Brewfile entry is never offered for removal.
 - A repo with local modifications (`git status --porcelain` non-empty) is

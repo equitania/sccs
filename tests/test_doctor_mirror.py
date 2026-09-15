@@ -326,7 +326,7 @@ class TestBrewDetector:
         from sccs.doctor import mirror
 
         table = {
-            ("leaves",): leaves,
+            ("leaves", "--installed-on-request"): leaves,
             ("list", "--formula", "--full-name"): formulae,
             ("list", "--cask"): casks,
             ("tap",): taps,

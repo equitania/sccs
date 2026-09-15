@@ -286,15 +286,19 @@ class BrewStatus:
 class BrewDetector:
     """Missing = in the Brewfile but not installed (checked against the FULL
     installed formula list, so a Brewfile entry that arrived as a dependency
-    counts as present). Extra = a *leaf* (`brew leaves`) not in the Brewfile —
-    never a dependency, so nothing pulled in by a wanted package is ever
-    offered for removal."""
+    counts as present). Extra = a *leaf installed on request*
+    (`brew leaves --installed-on-request`, the same set `brew bundle dump`
+    writes) not in the Brewfile — never a dependency, so nothing pulled in by
+    a wanted package is ever offered for removal."""
 
     def get_status(self, brewfile: Path, ignore: list[str]) -> BrewStatus:
         if not brewfile.is_file():
             return BrewStatus(state="no_brewfile")
         wanted = parse_brewfile(brewfile.read_text(encoding="utf-8"))
-        leaves = run_brew_lines("leaves")
+        # `--installed-on-request` is what `brew bundle dump` writes: a build
+        # dependency that ends up a leaf (rust after `brew install beam`) is
+        # neither in the Brewfile nor wanted, and must not read as an extra.
+        leaves = run_brew_lines("leaves", "--installed-on-request")
         formulae = run_brew_lines("list", "--formula", "--full-name")
         casks = run_brew_lines("list", "--cask")
         taps = run_brew_lines("tap")
