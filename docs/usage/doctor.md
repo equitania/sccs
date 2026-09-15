@@ -55,6 +55,57 @@ doctor:
 - **Sync-Ausschluss:** Alle Skills, die der Lock dem Paket zuschreibt, sind von `sccs sync`, Export und den Agent-Exporten ausgeschlossen — auch ohne Opt-in, denn jeder Rechner holt sie ohnehin von upstream. Die mitgelieferte Namensliste wirkt nur bei eingeschaltetem Paket, damit ein eigener Skill namens `figma` auf einem Rechner ohne HyperFrames weiter synchronisiert.
 - **Abschalten:** `sccs profile off hyperframes` parkt die Skills, und der Doctor installiert sie dann nicht erneut (siehe [Profiles](profiles.md)).
 
+### Spiegel-Abgleich (zweiter Mac) — ab v2.68.0
+
+Ein zweiter Mac soll dieselbe Software tragen wie der Live-Rechner. Der Doctor
+gleicht vier Bereiche ab: Homebrew (Formulae, Casks, Taps), uv-Tools und
+npm-Globals, eigene Git-Checkouts und Fisher-Plugins.
+
+```yaml
+doctor:
+  mirror:
+    source_host: live-mac            # Hostname des Live-Rechners; Domain-Suffix egal
+    cleanup: true                    # Überzähliges unter `optimize --strict` anbieten
+    repos:
+      - url: git@gitlab.example:org/beam.git
+        path: ~/gitbase/example/beam
+    ignore_brew: []                  # Namen, die der Abgleich nie anfasst
+    ignore_uv_tools: []
+    ignore_npm: []
+```
+
+Der Rechner, dessen Hostname passt, ist die **Quelle**; jeder andere ist
+**Spiegel**. Ohne `source_host` zeigt der Doctor keine Spiegelzeilen.
+
+- **Quelle**: `sccs doctor update` schreibt Brewfile (`brew bundle dump`) und
+  `~/.config/sccs/inventory.yaml` neu; beide werden über die Kategorien
+  `homebrew_bundle` und `sccs_inventory` verteilt. `doctor check` meldet
+  `STALE`, wenn die Dateien nicht mehr dem Live-Stand entsprechen. Die Quelle
+  wird nie aus dem Inventar verändert. `doctor optimize` spleißt dieselben
+  Spiegel-Aktionen wie `update` ein, erfasst also auf der Quelle ebenfalls
+  den Bestand neu.
+- **Spiegel**: `doctor check` zeigt je Bereich fehlend, überzählig, falsche
+  Version (`mirror: brew`, `mirror: uv`, `mirror: npm`, `mirror: repo <name>`,
+  `mirror: fisher`). Fehlendes ist rot und Exit 1; Überzähliges ist gelb und
+  kein Fehler. `doctor install` installiert Fehlendes (`brew bundle install`,
+  `uv tool install name==version`, `npm install -g name@version`, `git clone`,
+  `git pull --ff-only`, `fisher install <name>` je Plugin einzeln — nie
+  `fisher update`, das ohne Argumente jedes Plugin entfernt, das nicht in
+  `fish_plugins` steht, also auf dem Install-Pfad eine Entfernung wäre); uv
+  und npm werden auf die Version der Quelle gepinnt, Homebrew kennt keine
+  Versionen. Ein Checkout mit lokalen Änderungen wird gemeldet und nie
+  angefasst. Ein Spiegel schreibt das Inventar nie. `brew bundle install`
+  läuft mit 30 Minuten Timeout, `git clone` mit 15 Minuten; alle anderen
+  Aktionen nutzen den Doctor-Standard von 5 Minuten.
+- **Entfernen**: nur `sccs doctor optimize --strict`, eine Aktion je
+  überzähligem Paket, jede einzeln zu bestätigen — `--yes` bestätigt dabei
+  auch Entfernungen, wie schon bei fremden Plugins; die eigentliche
+  Absicherung ist, dass Entfernungen außerhalb von `--strict` mit
+  `cleanup: true` gar nicht erst in den Plan kommen. `npm`, `corepack` und
+  `sccs` werden nie entfernt; ein nicht-strikter Lauf auf einem Spiegel mit
+  Überzähligem und `cleanup: true` zeigt stattdessen einen einzigen
+  Hinweisblock; `cleanup: false` schaltet Entfernungen ganz ab.
+
 ### CAO-Provider nach einem `cao update` wiederherstellen — ab v2.64.0
 
 Der [CLI Agent Orchestrator](https://github.com/awslabs/cli-agent-orchestrator) (CAO) löst seine Provider über eine **fest verdrahtete if/elif-Kette** auf, die aus einem Enum gespeist wird — kein Erweiterungspunkt. Sein Plugin-System hilft nicht: CAO-Plugins sind reine Beobachter und können keinen Provider registrieren. Einen zusätzlichen Provider anzubinden heißt deshalb, das **installierte Paket** an sechs Stellen zu ergänzen — und jedes `cao update`, `uv tool upgrade` oder Neuinstallieren ersetzt dieses Paket und entfernt alles davon wieder. Das erste Anzeichen ist ein Worker, der nicht mehr startet.
@@ -311,6 +362,55 @@ doctor:
 - **`doctor update` / `optimize`** always run the same command. It replaces every skill directory wholesale and refreshes the lock; local edits to those skills are lost.
 - **Sync exclusion:** every skill the lock attributes to the package is excluded from `sccs sync`, export and the agent exports — even without opt-in, since each machine fetches them from upstream anyway. The bundled name list only applies to an enabled package, so a private skill called `figma` keeps syncing on a machine without HyperFrames.
 - **Switching off:** `sccs profile off hyperframes` parks the skills, and the doctor then does not reinstall them (see [Profiles](profiles.md)).
+
+### Mirror parity (second Mac) — since v2.68.0
+
+A second Mac is to carry the same software as the live workstation. The doctor
+reconciles four areas: Homebrew (formulae, casks, taps), uv tools and npm
+globals, own git checkouts, and Fisher plugins.
+
+```yaml
+doctor:
+  mirror:
+    source_host: live-mac            # hostname of the live workstation; domain suffix ignored
+    cleanup: true                    # offer removals under `optimize --strict`
+    repos:
+      - url: git@gitlab.example:org/beam.git
+        path: ~/gitbase/example/beam
+    ignore_brew: []                  # names the reconciliation never touches
+    ignore_uv_tools: []
+    ignore_npm: []
+```
+
+The host whose hostname matches is the **source**; every other host is a
+**mirror**. Without `source_host` the doctor shows no mirror rows.
+
+- **Source**: `sccs doctor update` rewrites the Brewfile (`brew bundle dump`)
+  and `~/.config/sccs/inventory.yaml`; both travel through the `homebrew_bundle`
+  and `sccs_inventory` categories. `doctor check` reports `STALE` when the files
+  no longer match the live state. The source is never modified from the
+  inventory. `doctor optimize` splices in the same mirror actions as
+  `update`, so on the source it also re-captures the inventory.
+- **Mirror**: `doctor check` reports missing, extra and wrong-version per area
+  (`mirror: brew`, `mirror: uv`, `mirror: npm`, `mirror: repo <name>`,
+  `mirror: fisher`). Missing is red and exit 1; extras are yellow and not a
+  failure. `doctor install` installs what is missing (`brew bundle install`,
+  `uv tool install name==version`, `npm install -g name@version`, `git clone`,
+  `git pull --ff-only`, `fisher install <name>` one plugin at a time — never
+  `fisher update`, which with no arguments uninstalls every plugin absent
+  from `fish_plugins`, and would therefore be a removal on the install path);
+  uv and npm are pinned to the source's version, Homebrew has no versions. A
+  checkout with local changes is reported and never touched. A mirror never
+  writes the inventory. `brew bundle install` runs with a 30-minute timeout,
+  `git clone` with 15 minutes; every other action uses the doctor's default
+  of 5 minutes.
+- **Removal**: only `sccs doctor optimize --strict`, one action per extra,
+  each confirmed on its own — `--yes` confirms removals too, exactly as for
+  foreign plugins today; the actual protection is that removals never enter
+  the plan outside `--strict` with `cleanup: true`. `npm`, `corepack` and
+  `sccs` are never removed; a non-strict run on a mirror with extras and
+  `cleanup: true` instead prints a single advisory block; `cleanup: false`
+  switches removals off entirely.
 
 ### Restoring a CAO provider after a `cao update` — since v2.64.0
 

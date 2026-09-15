@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.68.0 (15.09.2026)
+
+### Added (mirror parity — a second Mac identical to the live workstation)
+
+- **`doctor.mirror`** — `source_host` names the live workstation; every other host is a mirror. `sccs doctor check` gains a `mirror:` block for Homebrew, uv tools, npm globals, own git checkouts and Fisher plugins; `install` adds what is missing; `optimize --strict` offers one confirm-gated removal per extra.
+- **Two files carry the truth**: the Brewfile (category `homebrew_bundle`, now a bundled default on macOS) and `~/.config/sccs/inventory.yaml` (new category `sccs_inventory`). On the source, `doctor update` rewrites both; `doctor check` says `STALE` when they no longer match the live state — the missing piece behind a Brewfile that had drifted for weeks. `doctor optimize` splices in the same mirror actions as `update`, so it re-captures the inventory on the source too.
+- **Two rules, pinned by tests**: the source is never modified from the inventory, and a mirror never writes the inventory. Removals exist only under `optimize --strict` with `cleanup: true`; `npm`, `corepack` and `sccs` are never removed; Homebrew extras are computed against `brew leaves`, so a dependency is never offered for removal; a checkout with local changes is reported and never touched. A non-strict `optimize` run on a mirror with extras and `cleanup: true` prints a single advisory block instead of queuing anything.
+- **Fisher plugins install and remove one at a time** (`fish -c "fisher install <name>"` / `fish -c "fisher remove <name>"`, the latter only under `--strict`) — never `fisher update`, which with no arguments uninstalls every plugin absent from `fish_plugins` and would therefore be a removal on the install path.
+- **`--yes` confirms every action in the plan, removals included** — exactly as it already does for foreign plugins under `optimize --strict`; the protection is that a removal never enters the plan outside `--strict` with `cleanup: true`.
+- **Per-action timeouts**: `brew bundle install` runs with a 30-minute timeout, `git clone` with 15 minutes; every other mirror action uses the doctor's 5-minute default.
+- uv and npm are pinned to the source's version; Homebrew cannot pin, so parity there means the same packages, each current.
+- **Existing configs**: `sccs config upgrade` and `sccs sync --migrate` now offer the two new categories, `homebrew_bundle` (macOS) and `sccs_inventory`, to configs created before v2.68.0.
+
 ## Version 2.67.2 (15.09.2026)
 
 ### Fixed (fish config drifted on a second Mac while `sccs status` said "unchanged")

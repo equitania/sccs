@@ -71,6 +71,8 @@ Alle Felder, die ein `SyncCategory` in `config.yaml` aufnehmen kann:
 | `fish_functions` | `~/.config/fish/functions/` | alle | Fish-Funktionen — seit 2.67.2 standardmäßig aus, `fish_config` deckt sie ab |
 | `fish_functions_macos` | `~/.config/fish/functions/macos/` | macOS | macOS-spezifische Funktionen |
 | `starship_config` | `~/.config/starship.toml` | alle | Starship-Prompt |
+| `homebrew_bundle` | `~/.config/homebrew/Brewfile` | macOS | Homebrew-Bundle, Wahrheit für den Spiegel-Abgleich |
+| `sccs_inventory` | `~/.config/sccs/inventory.yaml` | alle | Software-Inventar der Quelle (uv-Tools, npm-Globals), schreibt nur `doctor update` |
 
 ### Die Statuszeile über mehrere Rechner
 
@@ -211,6 +213,8 @@ All fields a `SyncCategory` accepts in `config.yaml`:
 | `fish_functions` | `~/.config/fish/functions/` | all | Fish custom functions — disabled by default since 2.67.2, `fish_config` covers them |
 | `fish_functions_macos` | `~/.config/fish/functions/macos/` | macOS | macOS-specific functions |
 | `starship_config` | `~/.config/starship.toml` | all | Starship prompt |
+| `homebrew_bundle` | `~/.config/homebrew/Brewfile` | macOS | Homebrew bundle, truth for the mirror area |
+| `sccs_inventory` | `~/.config/sccs/inventory.yaml` | all | Source software inventory (uv tools, npm globals), written only by `doctor update` |
 
 ### The statusline across machines
 

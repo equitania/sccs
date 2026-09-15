@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.67.2  ·  **Python:** ≥3.10
+- **Version:** 2.68.0  ·  **Python:** ≥3.10
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -185,6 +185,9 @@ sccs doctor install            # install missing pieces, confirm per action
 sccs doctor install --yes      # unattended (CI): skip all confirms
 sccs doctor update             # update plugins + refresh npx tools (safe maintenance, no prompts)
 sccs doctor optimize --strict  # install + remove foreign plugins/MCP servers (destructive: still confirms)
+sccs doctor check              # … shows `mirror: …` rows on a mirror (v2.68.0)
+sccs doctor update             # on the source: rewrite Brewfile + inventory.yaml
+sccs doctor optimize --strict  # on a mirror: confirm each extra individually
 # Opt-in optional CLI tools (informational, never exit 1): set in config.yaml →
 #   doctor: { cli_tools: [zoxide, coreutils] }   # zoxide all-OS, coreutils Windows-only (winget)
 ```
@@ -293,6 +296,8 @@ sccs config show               # current config; also: validate | edit | init [-
     skill slot is claimed by a real skill is never written — `--replace-foreign` does not release that.
   - `doctor optimize --strict` *removes* foreign plugins/MCP servers; doctor's hook removal / statusline
     rewrite are confirm-gated — `--yes` skips those confirms too. Use `--yes` only in CI.
+  - `sccs doctor` mirror area: the host named by `doctor.mirror.source_host` is never modified;
+    removals only under `optimize --strict`, one confirm each.
   - `integrations sync-all` updates existing SCCS-managed targets by DEFAULT (unlike the individual
     export commands) — that is what makes it a maintenance command. It still never touches a foreign
     target without `--replace-foreign`, and never exports Codex hooks.
