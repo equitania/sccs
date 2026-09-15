@@ -412,6 +412,7 @@ def render_doctor_report(
     _print_permission_remediation(console, permissions)
     _print_orphan_remediation(console, gsd_orphans)
     _print_winget_path_remediation(console, cli_tools)
+    _print_mirror_details(console, mirror)
 
 
 def _statusline_preset_row(st) -> tuple[str, str, str, str] | None:
@@ -452,6 +453,54 @@ def _statusline_preset_row(st) -> tuple[str, str, str, str] | None:
         # loud: the user configured this and is not seeing it.
         detail = f"installed · not in use — `sccs statusline use {st.name}`"
     return (component, "OK", version or "", detail)
+
+
+def _mirror_detail_lines(report: MirrorReport | None) -> list[str]:
+    """Names behind the mirror counts — a count alone tells the operator
+    nothing about what `doctor install` will pull in or what `optimize
+    --strict` would offer to remove (found on a real mirror, 15.09.2026)."""
+    if report is None or report.role != "mirror":
+        return []
+    lines: list[str] = []
+
+    def add(label: str, names: list[str]) -> None:
+        if names:
+            lines.append(f"  {label}: {', '.join(names)}")
+
+    brew = report.brew
+    if brew is not None:
+        add("brew missing (taps)", brew.missing_taps)
+        add("brew missing (formulae)", brew.missing_formulae)
+        add("brew missing (casks)", brew.missing_casks)
+        add("brew extra (taps)", brew.extra_taps)
+        add("brew extra (formulae)", brew.extra_formulae)
+        add("brew extra (casks)", brew.extra_casks)
+    for area in (report.uv, report.npm):
+        if area is None:
+            continue
+        add(f"{area.area} missing", [f"{p.name} {p.version}" for p in area.missing])
+        add(f"{area.area} version", [f"{d.name} {d.have} → {d.want}" for d in area.version_differs])
+        add(f"{area.area} extra", area.extra)
+    for repo in report.repos:
+        if repo.state != "ok":
+            lines.append(f"  repo {repo.path.name}: {repo.state}")
+    if report.fisher is not None:
+        add("fisher missing", report.fisher.missing)
+        add("fisher extra", report.fisher.extra)
+    return lines
+
+
+def _print_mirror_details(console: Console, report: MirrorReport | None) -> None:
+    lines = _mirror_detail_lines(report)
+    if not lines:
+        return
+    console.print()
+    console.print("[yellow]Mirror — what differs from the source:[/yellow]")
+    for line in lines:
+        console.print(line, highlight=False, markup=False)
+    console.print("  [dim]missing/version → `sccs doctor install`[/dim]")
+    console.print("  [dim]extra → offered one by one under `sccs doctor optimize --strict`[/dim]")
+    console.print()
 
 
 def _print_node_hint(

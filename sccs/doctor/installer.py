@@ -1950,6 +1950,11 @@ def execute_plan(
             result.outcomes.append(ActionOutcome(label=action.label, status="skipped", detail="user declined"))
             continue
 
+        # Say what runs before it runs: `brew bundle install` or a clone can
+        # take minutes, and a plan that prints only its summary at the end
+        # looks hung (found on a real mirror, 15.09.2026).
+        out_print(f"  … {action.label}")
+
         try:
             if action.python_callable is not None:
                 # In-process action (e.g. bundled-skill copy). Errors are

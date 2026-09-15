@@ -1062,6 +1062,27 @@ class TestReporter:
         assert has_problems(**base, mirror=_report(role="source", source_stale=True)) is False
         assert has_problems(**base, mirror=None) is False
 
+    def test_detail_lines_name_every_package(self):
+        from sccs.doctor.mirror import BrewStatus, FisherStatus, PackageAreaStatus, PackageRef, VersionDiff
+        from sccs.doctor.reporter import _mirror_detail_lines
+
+        rep = _report(
+            brew=BrewStatus(state="drift", missing_formulae=["bat"], extra_casks=["davit"]),
+            uv=PackageAreaStatus(
+                area="uv",
+                state="drift",
+                missing=[PackageRef(name="odoodev-equitania", version="0.68.0")],
+                version_differs=[VersionDiff(name="sccs", have="2.67.2", want="2.68.0")],
+                extra=["build"],
+            ),
+            fisher=FisherStatus(state="drift", missing=["jethrokuan/z"]),
+        )
+        text = "\n".join(_mirror_detail_lines(rep))
+        for needle in ("bat", "davit", "odoodev-equitania 0.68.0", "sccs 2.67.2 → 2.68.0", "build", "jethrokuan/z"):
+            assert needle in text
+        assert _mirror_detail_lines(_report(role="source")) == []
+        assert _mirror_detail_lines(None) == []
+
     def test_render_includes_mirror_block(self, home: Path):
         from rich.console import Console
 
@@ -1089,6 +1110,7 @@ class TestReporter:
         )
         text = console.export_text()
         assert "mirror: brew" in text and "mirror: role" in text
+        assert "what differs from the source" in text and "bat" in text
 
 
 class TestJsonEmit:
@@ -1170,3 +1192,16 @@ class TestCliWiring:
         assert "def doctor_check" in text and "check_updates=update_check" in text, (
             "doctor check should keep deriving fetch from --update-check/--no-update-check, not fetch_repos"
         )
+
+
+class TestExecuteProgress:
+    def test_execute_plan_prints_the_action_before_running_it(self, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor.installer import DoctorAction, InstallPlan, execute_plan
+
+        seen: list[str] = []
+        monkeypatch.setattr("sccs.doctor.installer._run", lambda cmd, **kw: _Proc(stdout="done"))
+        plan = InstallPlan(
+            actions=[DoctorAction(label="brew bundle install — 6 missing", cmd=["brew", "x"], auto_confirm=True)]
+        )
+        execute_plan(plan, assume_yes=True, print_fn=seen.append)
+        assert any("… brew bundle install — 6 missing" in line for line in seen)

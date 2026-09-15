@@ -5,6 +5,7 @@
 ### Fixed (the source's Brewfile was never rewritten)
 
 - **`brew bundle dump` ran with `--describe`**, which Homebrew 7 has disabled ("Calling the `--describe` switch is disabled! Use the default behaviour instead."); descriptions are written by default now. Every `sccs doctor update` on the source logged "brew bundle dump failed — Brewfile left as is" and kept the stale file while the inventory was written — found on the first real run. The switch is gone, and the wrapper now logs Homebrew's own last error line instead of a bare "failed".
+- **Names, not just counts.** `doctor check` prints a block "Mirror — what differs from the source" under the table with every missing, wrong-version and extra package per area, and `doctor install`/`update`/`optimize` print each action before it runs — a `brew bundle install` that takes minutes no longer looks hung. Found on the first real mirror run ("6 missing · 40 extra" says nothing about what will be installed).
 - **Homebrew extras use `brew leaves --installed-on-request`**, the set `brew bundle dump` writes. Plain `brew leaves` also lists a build dependency that nothing depends on any more — `rust` after `brew install beam` — so the source reported "1 extra" right after its own dump, and a mirror would have been offered `brew uninstall rust`.
 
 ## Version 2.68.0 (15.09.2026)
