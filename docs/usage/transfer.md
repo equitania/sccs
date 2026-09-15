@@ -106,7 +106,7 @@ Skipping 129 doctor-managed items (gsd-*, playwright-cli) — 'sccs doctor insta
 | Szenario | Empfohlener Befehl |
 |----------|-------------------|
 | Skills an Kunden liefern | `sccs export -c claude_skills -o kunde.zip` |
-| Fish-Config für Linux-Server | `sccs export -c fish_config -c fish_functions --all` |
+| Fish-Config für Linux-Server | `sccs export -c fish_config --all` |
 | Komplett-Setup für neues System | `sccs export --all -o full-setup.zip` |
 | Vorschau vor dem Import | `sccs import setup.zip --dry-run` |
 | Sicheres Update bestehender Configs | `sccs import setup.zip --overwrite` |
@@ -214,7 +214,7 @@ Skipping 129 doctor-managed items (gsd-*, playwright-cli) — 'sccs doctor insta
 | Scenario | Recommended Command |
 |----------|-------------------|
 | Deliver skills to customer | `sccs export -c claude_skills -o customer.zip` |
-| Fish config for Linux server | `sccs export -c fish_config -c fish_functions --all` |
+| Fish config for Linux server | `sccs export -c fish_config --all` |
 | Full setup for new system | `sccs export --all -o full-setup.zip` |
 | Preview before import | `sccs import setup.zip --dry-run` |
 | Safe update of existing configs | `sccs import setup.zip --overwrite` |

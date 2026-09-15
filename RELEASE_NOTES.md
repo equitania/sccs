@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.67.2 (15.09.2026)
+
+### Fixed (fish config drifted on a second Mac while `sccs status` said "unchanged")
+
+- **`fish_config` now covers the Python helpers**: `scripts/*.py` and `functions/*.py` are part of the default include list. Twenty-one fish functions and alias files call `scripts/shell_safety.py` (`uvclean`, `pyclean`, `gclean`, `dps`, `cmds`, `backup`, `gbd`, `grhh`, …); on a second Mac all of them failed because the directory had never been synced. Nothing was reported — a category cannot report a file it does not know about.
+- **`fish_functions` is disabled by default.** It tracked the same files as `fish_config` (`functions/*.fish`) with a second, independent sync state. Any divergence — a file first synced through one category, then edited — turned into a CONFLICT in the other, and a default `sccs sync` has no conflict resolver without `-i`/`-f`: it counts the conflict and leaves the file alone. The definition stays for configs and deploy profiles that name it; `fish_functions_macos` remains enabled, it alone covers `functions/macos/`.
+- **`fish_config` excludes `functions/macos/*`**: `fnmatch` lets `functions/*.fish` reach into subdirectories, so without the exclude `fish_config` and `fish_functions_macos` would have overlapped in the same way.
+- New test class `TestFishDefaultsCoverEachFileOnce` scans a fixture fish tree against the shipped defaults with the real scanner and fails if any file is claimed by two enabled categories, or if the Python helpers are claimed by none.
+
+### Existing configs
+
+`config.yaml` on each host carries its own copy of the category definitions. To pick this up, add `scripts/*.py` and `functions/*.py` to `fish_config.include`, add `functions/macos/*` to its `exclude`, and set `fish_functions.enabled: false` — or let the `sccs_config` category carry the edited file to the other hosts.
+
 ## Version 2.67.1 (13.09.2026)
 
 ### Changed (pi retired from the CAO fleet)

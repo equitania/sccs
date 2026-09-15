@@ -262,6 +262,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "config.fish",
                 "README.md",
                 "functions/*.fish",
+                # v2.67.2: the Python helpers the fish functions call. Without
+                # them a synced `uvclean`/`gclean` fails on every other host.
+                "functions/*.py",
+                "scripts/*.py",
                 "conf.d/*.fish",
                 "completions/*.fish",
             ],
@@ -272,6 +276,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "conf.d/*local*.fish",
                 "conf.d/*secret*.fish",
                 "*.macos.fish",
+                # fnmatch lets `functions/*.fish` reach into subdirectories;
+                # `functions/macos/` belongs to fish_functions_macos alone.
+                "functions/macos/*",
             ],
             "platforms": ["macos", "linux"],
         },
@@ -288,9 +295,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "exclude": [],
             "platforms": ["macos"],
         },
-        # Fish Functions (separate category)
+        # Fish Functions — disabled since v2.67.2: `fish_config` already covers
+        # `functions/*.fish`, and two categories tracking the same file keep two
+        # independent sync states, so any divergence became a silent CONFLICT.
+        # Kept as a definition for configs and deploy profiles that name it.
         "fish_functions": {
-            "enabled": True,
+            "enabled": False,
             "description": "Fish Shell Custom Functions",
             "local_path": "~/.config/fish/functions",
             "repo_path": ".config/fish/functions",

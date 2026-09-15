@@ -309,6 +309,86 @@ class TestDefaults:
         assert "repository" in parsed
 
 
+class TestFishDefaultsCoverEachFileOnce:
+    """v2.67.2: the fish defaults must cover every file exactly once, and
+    must cover the Python helpers the fish functions call.
+
+    Found on a real second Mac: `fish_config` (`functions/*.fish`) and
+    `fish_functions` (`*.fish`) tracked the same files with two independent
+    sync states, so any divergence became a silent CONFLICT; and
+    `scripts/*.py` — called by 21 fish helpers — was covered by nothing.
+    """
+
+    @staticmethod
+    def _fish_tree(root: Path) -> list[Path]:
+        files = [
+            root / "config.fish",
+            root / "README.md",
+            root / "conf.d" / "30-aliases.fish",
+            root / "conf.d" / "20-tools.macos.fish",
+            root / "functions" / "uvpublish.fish",
+            root / "functions" / "__safe_remove.fish",
+            root / "functions" / "__bass.py",
+            root / "functions" / "macos" / "only-mac.fish",
+            root / "scripts" / "shell_safety.py",
+            root / "completions" / "sccs.fish",
+        ]
+        for f in files:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("# x\n")
+        return files
+
+    def _scan_defaults(self, fish_root: Path, repo: Path) -> dict[str, set[Path]]:
+        from sccs.sync.item import scan_items_for_category
+
+        seen: dict[str, set[Path]] = {}
+        for name, raw in DEFAULT_CONFIG["sync_categories"].items():
+            if not raw["local_path"].startswith("~/.config/fish"):
+                continue
+            if not raw.get("enabled", True):
+                continue
+            data = dict(raw)
+            data["local_path"] = raw["local_path"].replace("~/.config/fish", str(fish_root))
+            cat = SyncCategory.model_validate(data)
+            items = scan_items_for_category(name, cat, fish_root, repo, DEFAULT_CONFIG["global_exclude"])
+            seen[name] = {Path(i.local_path).resolve() for i in items if i.local_path}
+        return seen
+
+    def test_every_fish_file_belongs_to_exactly_one_enabled_category(self, temp_dir: Path):
+        fish_root = (temp_dir / "fish").resolve()
+        repo = temp_dir / "repo"
+        self._fish_tree(fish_root)
+        seen = self._scan_defaults(fish_root, repo)
+
+        owners: dict[Path, list[str]] = {}
+        for name, paths in seen.items():
+            for p in paths:
+                owners.setdefault(p, []).append(name)
+        doubled = {p.relative_to(fish_root): names for p, names in owners.items() if len(names) > 1}
+        assert doubled == {}, f"files tracked by two categories: {doubled}"
+
+    def test_python_helpers_are_covered(self, temp_dir: Path):
+        fish_root = temp_dir / "fish"
+        repo = temp_dir / "repo"
+        self._fish_tree(fish_root)
+        seen = self._scan_defaults(fish_root, repo)
+        covered = set().union(*seen.values())
+
+        assert (fish_root / "scripts" / "shell_safety.py").resolve() in covered
+        assert (fish_root / "functions" / "__bass.py").resolve() in covered
+        # The private helper the safety functions depend on keeps travelling.
+        assert (fish_root / "functions" / "__safe_remove.fish").resolve() in covered
+        # And the macOS-only function directory is still someone's job.
+        assert (fish_root / "functions" / "macos" / "only-mac.fish").resolve() in covered
+
+    def test_fish_functions_is_disabled_by_default(self):
+        cats = DEFAULT_CONFIG["sync_categories"]
+        assert cats["fish_functions"]["enabled"] is False
+        assert cats["fish_functions_macos"]["enabled"] is True
+        assert "scripts/*.py" in cats["fish_config"]["include"]
+        assert "functions/*.py" in cats["fish_config"]["include"]
+
+
 class TestRemoteValidation:
     """Block option-like remote names that would trigger git argument injection."""
 

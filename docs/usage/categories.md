@@ -66,9 +66,9 @@ Alle Felder, die ein `SyncCategory` in `config.yaml` aufnehmen kann:
 
 | Kategorie | Pfad | Plattform | Beschreibung |
 |-----------|------|-----------|-------------|
-| `fish_config` | `~/.config/fish/` | alle | Fish-Shell-Konfiguration |
+| `fish_config` | `~/.config/fish/` | alle | Fish-Shell-Konfiguration inkl. `functions/`, `conf.d/`, `completions/`, `scripts/*.py` |
 | `fish_config_macos` | `~/.config/fish/conf.d/*.macos.fish` | macOS | macOS-spezifische conf.d |
-| `fish_functions` | `~/.config/fish/functions/` | alle | Fish-Funktionen |
+| `fish_functions` | `~/.config/fish/functions/` | alle | Fish-Funktionen — seit 2.67.2 standardmäßig aus, `fish_config` deckt sie ab |
 | `fish_functions_macos` | `~/.config/fish/functions/macos/` | macOS | macOS-spezifische Funktionen |
 | `starship_config` | `~/.config/starship.toml` | alle | Starship-Prompt |
 
@@ -206,9 +206,9 @@ All fields a `SyncCategory` accepts in `config.yaml`:
 
 | Category | Path | Platform | Description |
 |----------|------|----------|-------------|
-| `fish_config` | `~/.config/fish/` | all | Fish shell configuration |
+| `fish_config` | `~/.config/fish/` | all | Fish shell configuration incl. `functions/`, `conf.d/`, `completions/`, `scripts/*.py` |
 | `fish_config_macos` | `~/.config/fish/conf.d/*.macos.fish` | macOS | macOS-specific conf.d |
-| `fish_functions` | `~/.config/fish/functions/` | all | Fish custom functions |
+| `fish_functions` | `~/.config/fish/functions/` | all | Fish custom functions — disabled by default since 2.67.2, `fish_config` covers them |
 | `fish_functions_macos` | `~/.config/fish/functions/macos/` | macOS | macOS-specific functions |
 | `starship_config` | `~/.config/starship.toml` | all | Starship prompt |
 
