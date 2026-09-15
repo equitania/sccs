@@ -867,3 +867,115 @@ class TestPlanWiring:
         rep = _report(uv=PackageAreaStatus(area="uv", state="drift", missing=[PackageRef(name="x", version="1")]))
         plan = build_optimize_plan(**base, **opt, mirror=rep, strict=False)
         assert sum(1 for a in plan.actions if a.component == "mirror:uv:x") == 1
+
+
+class TestReporter:
+    def test_rows_for_mirror_with_drift(self, home: Path):
+        from sccs.doctor.mirror import (
+            BrewStatus,
+            FisherStatus,
+            MirrorRepoSpec,
+            PackageAreaStatus,
+            PackageRef,
+            RepoStatus,
+        )
+        from sccs.doctor.reporter import _mirror_rows
+
+        spec = MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path="~/gitbase/example/beam")
+        rep = _report(
+            brew=BrewStatus(state="drift", missing_formulae=["bat"], extra_formulae=["ffmpeg"]),
+            uv=PackageAreaStatus(area="uv", state="drift", missing=[PackageRef(name="x", version="1")]),
+            npm=PackageAreaStatus(area="npm", state="ok"),
+            repos=[RepoStatus(spec=spec, state="behind")],
+            fisher=FisherStatus(state="ok"),
+        )
+        rows = {r[0]: r for r in _mirror_rows(rep)}
+        assert "mirror of live-mac" in rows["mirror: role"][3]
+        assert (
+            "MISSING" in rows["mirror: brew"][1]
+            and "1 missing" in rows["mirror: brew"][3]
+            and "1 extra" in rows["mirror: brew"][3]
+        )
+        assert "MISSING" in rows["mirror: uv"][1]
+        assert "OK" in rows["mirror: npm"][1]
+        assert "OUTDATED" in rows["mirror: repo beam"][1]
+        assert "OK" in rows["mirror: fisher"][1]
+
+    def test_only_extras_is_stale_not_missing(self):
+        from sccs.doctor.mirror import BrewStatus
+        from sccs.doctor.reporter import _mirror_rows
+
+        rows = {r[0]: r for r in _mirror_rows(_report(brew=BrewStatus(state="drift", extra_casks=["davit"])))}
+        assert "STALE" in rows["mirror: brew"][1]
+
+    def test_fisher_only_extras_is_stale(self):
+        from sccs.doctor.mirror import FisherStatus
+        from sccs.doctor.reporter import _mirror_rows
+
+        rows = {r[0]: r for r in _mirror_rows(_report(fisher=FisherStatus(state="drift", extra=["old/plugin"])))}
+        assert "STALE" in rows["mirror: fisher"][1]
+
+    def test_source_rows(self):
+        from sccs.doctor.reporter import _mirror_rows
+
+        rows = {r[0]: r for r in _mirror_rows(_report(role="source", source_stale=True))}
+        assert "STALE" in rows["mirror: role"][1] and "sccs doctor update" in rows["mirror: role"][3]
+        rows = {r[0]: r for r in _mirror_rows(_report(role="source", source_stale=False))}
+        assert "OK" in rows["mirror: role"][1] and "inventory current" in rows["mirror: role"][3]
+
+    def test_no_rows_when_off(self):
+        from sccs.doctor.reporter import _mirror_rows
+
+        assert _mirror_rows(None) == []
+
+    def test_has_problems_only_for_mirror_drift(self):
+        from sccs.doctor.defaults import get_node_install_spec
+        from sccs.doctor.detectors import ClaudeCliStatus, NodeStatus
+        from sccs.doctor.mirror import BrewStatus
+        from sccs.doctor.reporter import has_problems
+
+        base = dict(
+            node=NodeStatus(
+                installed=True,
+                version="22.0.0",
+                major=22,
+                meets_minimum=True,
+                install_hint=get_node_install_spec("macos"),
+                platform="macos",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            plugins=[],
+            npx_tools=[],
+        )
+        assert has_problems(**base, mirror=_report(brew=BrewStatus(state="drift", missing_formulae=["bat"]))) is True
+        assert has_problems(**base, mirror=_report(brew=BrewStatus(state="drift", extra_formulae=["x"]))) is False
+        assert has_problems(**base, mirror=_report(role="source", source_stale=True)) is False
+        assert has_problems(**base, mirror=None) is False
+
+    def test_render_includes_mirror_block(self, home: Path):
+        from rich.console import Console
+
+        from sccs.doctor.defaults import get_node_install_spec
+        from sccs.doctor.detectors import ClaudeCliStatus, NodeStatus
+        from sccs.doctor.mirror import BrewStatus
+        from sccs.doctor.reporter import render_doctor_report
+
+        console = Console(record=True, width=120, force_terminal=False)
+        render_doctor_report(
+            console,
+            node=NodeStatus(
+                installed=True,
+                version="22.0.0",
+                major=22,
+                meets_minimum=True,
+                install_hint=get_node_install_spec("macos"),
+                platform="macos",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            plugins=[],
+            npx_tools=[],
+            min_node_major=22,
+            mirror=_report(brew=BrewStatus(state="drift", missing_formulae=["bat"])),
+        )
+        text = console.export_text()
+        assert "mirror: brew" in text and "mirror: role" in text
