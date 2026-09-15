@@ -32,6 +32,7 @@ from sccs.doctor.detectors import (
     NodeDetector,
     NodeStatus,
     NpxToolDetector,
+    PluginStatus,
     PowerShellDetector,
     PowerShellStatus,
     SettingsHookDetector,
@@ -5501,13 +5502,21 @@ class TestScopePatch:
 
     def test_install_plan_includes_scope_action_for_gsd(self):
         cfg = DoctorConfig()
-        s = _make_status_set()  # GSD missing → install action generated
-        plan = build_install_plan(cfg, **s)
+        s = _make_status_set()  # GSD missing; optional since v2.68.0 → only with --with-optional
+        assert "npx:@opengsd/gsd-core:scope" not in [a.component for a in build_install_plan(cfg, **s).actions]
+        plan = build_install_plan(cfg, **s, include_optional=True)
         assert "npx:@opengsd/gsd-core:scope" in [a.component for a in plan.actions]
 
     def test_update_plan_includes_scope_action_for_gsd(self):
+        from sccs.doctor.detectors import NpxToolStatus
+
         cfg = DoctorConfig()
         s = _make_status_set()
+        # update refreshes GSD only where it is installed (optional since v2.68.0)
+        s["npx_tools"] = [
+            NpxToolStatus(spec=spec, available=True, binary_path=None, detection_source="state")
+            for spec in DEFAULT_NPX_TOOLS
+        ]
         plan = build_update_plan(cfg, **s)
         assert "npx:@opengsd/gsd-core:scope" in [a.component for a in plan.actions]
 
@@ -5553,3 +5562,161 @@ class TestDefaultPluginBaseline:
         """A duplicate name@marketplace would emit the same install action twice."""
         pairs = [(p.name, p.marketplace) for p in DEFAULT_CLAUDE_PLUGINS]
         assert len(pairs) == len(set(pairs))
+
+
+class TestOfficialMarketplaceSource:
+    """v2.68.0: every required plugin from Anthropic's official marketplace
+    carries the marketplace source, so `doctor install` can register the
+    marketplace on a fresh host instead of printing a manual block.
+
+    Found on a real second Mac: five plugins were skipped with "depends on
+    plugin-marketplace:claude-plugins-official:exists" while context-mode,
+    whose entry has a source, installed fine.
+    """
+
+    def test_required_official_plugins_carry_the_source(self):
+        official = [
+            p for p in DEFAULT_CLAUDE_PLUGINS if p.marketplace == "claude-plugins-official" and not p.allowlist_only
+        ]
+        assert len(official) >= 5
+        for spec in official:
+            assert spec.marketplace_source == "anthropics/claude-plugins-official", spec.name
+
+    def test_install_plan_registers_the_official_marketplace(self):
+        from sccs.doctor.detectors import MarketplaceStatus
+        from sccs.doctor.installer import _plugin_install_actions
+
+        spec = next(p for p in DEFAULT_CLAUDE_PLUGINS if p.name == "superpowers")
+        plugin = PluginStatus(spec=spec, installed=False, update_available=None, detection_source="missing")
+        market = MarketplaceStatus(name="claude-plugins-official", registered=False)
+        actions = _plugin_install_actions([plugin], marketplaces=[market])
+        assert any(
+            a.runnable and a.cmd == ["claude", "plugin", "marketplace", "add", "anthropics/claude-plugins-official"]
+            for a in actions
+        )
+
+
+class TestOptionalNpxTools:
+    """v2.68.0: `@opengsd/gsd-core` is optional — no MISSING row, no install
+    offer and no `npx` refresh on a host that does not have it; installed
+    only with `sccs doctor install --with-optional`. `playwright-cli` stays
+    required. The `gsd-*` sync exclude is profile- and option-blind and
+    keeps working everywhere."""
+
+    def _status(self, name: str, available: bool):
+        from sccs.doctor.detectors import NpxToolStatus
+
+        spec = next(s for s in DEFAULT_NPX_TOOLS if s.name == name)
+        return NpxToolStatus(
+            spec=spec, available=available, binary_path=None, detection_source="path" if available else "missing"
+        )
+
+    def test_gsd_is_optional_playwright_is_not(self):
+        by_name = {s.name: s for s in DEFAULT_NPX_TOOLS}
+        assert by_name["@opengsd/gsd-core"].optional is True
+        assert by_name["playwright-cli"].optional is False
+        assert NpxToolSpec(name="x", invocation=["npx", "x"]).optional is False
+
+    def test_row_is_info_not_missing(self):
+        from sccs.doctor.reporter import _INFO, _MISSING, _npx_row
+
+        _, state, _, detail = _npx_row(self._status("@opengsd/gsd-core", available=False))
+        assert state == _INFO and "optional" in detail and "--with-optional" in detail
+        _, state, _, _ = _npx_row(self._status("playwright-cli", available=False))
+        assert state == _MISSING
+
+    def test_has_problems_ignores_missing_optional(self):
+        from sccs.doctor.reporter import has_problems
+
+        base = dict(
+            node=NodeStatus(
+                installed=True,
+                version="22.0.0",
+                major=22,
+                meets_minimum=True,
+                install_hint=get_node_install_spec("macos"),
+                platform="macos",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            plugins=[],
+        )
+        assert has_problems(**base, npx_tools=[self._status("@opengsd/gsd-core", available=False)]) is False
+        assert has_problems(**base, npx_tools=[self._status("playwright-cli", available=False)]) is True
+
+    def test_install_skips_missing_optional_unless_requested(self):
+        from sccs.doctor.installer import _npx_install_actions
+
+        st = self._status("@opengsd/gsd-core", available=False)
+        assert _npx_install_actions([st]) == []
+        actions = _npx_install_actions([st], include_optional=True)
+        assert actions and actions[0].label == "install npx tool @opengsd/gsd-core"
+
+    def test_update_never_installs_a_missing_optional_tool(self):
+        from sccs.doctor.installer import _npx_update_actions
+
+        assert _npx_update_actions([self._status("@opengsd/gsd-core", available=False)]) == []
+        assert [a.label for a in _npx_update_actions([self._status("@opengsd/gsd-core", available=True)])][0] == (
+            "refresh npx tool @opengsd/gsd-core"
+        )
+        assert (
+            _npx_update_actions([self._status("playwright-cli", available=False)])[0].label
+            == "refresh npx tool playwright-cli"
+        )
+
+    def test_orphan_cleanup_skips_absent_optional_tool(self):
+        from sccs.doctor.detectors import GsdOrphanStatus
+        from sccs.doctor.installer import _managed_orphan_cleanup_actions
+
+        orphan = GsdOrphanStatus(
+            tool_name="@opengsd/gsd-core", manifest_found=True, orphan_paths=[Path("/x/gsd-old.md")]
+        )
+        absent = self._status("@opengsd/gsd-core", available=False)
+        present = self._status("@opengsd/gsd-core", available=True)
+        assert _managed_orphan_cleanup_actions([absent], [orphan]) == []
+        assert _managed_orphan_cleanup_actions([present], [orphan]) != []
+
+    def test_plans_thread_include_optional(self):
+        from sccs.doctor.installer import build_install_plan, build_optimize_plan
+
+        base = dict(
+            config=DoctorConfig(),
+            node=NodeStatus(
+                installed=True,
+                version="22.0.0",
+                major=22,
+                meets_minimum=True,
+                install_hint=get_node_install_spec("macos"),
+                platform="macos",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            plugins=[],
+            npx_tools=[self._status("@opengsd/gsd-core", available=False)],
+        )
+        has_gsd = lambda plan: any(a.component == "npx:@opengsd/gsd-core" for a in plan.actions)  # noqa: E731
+        assert not has_gsd(build_install_plan(**base))
+        assert has_gsd(build_install_plan(**base, include_optional=True))
+        opt = dict(foreign_plugins=[], mcp_servers=[], foreign_mcp_servers=[])
+        assert not has_gsd(build_optimize_plan(**base, **opt))
+        assert has_gsd(build_optimize_plan(**base, **opt, include_optional=True))
+
+    @patch("sccs.doctor.installer.build_install_plan")
+    @patch("sccs.doctor.state.DoctorStateManager")
+    @patch("sccs.cli._collect_doctor_statuses")
+    @patch("sccs.cli._load_doctor_config")
+    def test_cli_with_optional_flag(self, mock_cfg, mock_collect, mock_state, mock_plan):
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from sccs.cli import cli
+
+        mock_cfg.return_value = MagicMock()
+        mock_collect.return_value = {"node": {}, "claude_cli": {}, "plugins": [], "npx_tools": []}
+        plan = MagicMock()
+        plan.is_empty.return_value = True
+        mock_plan.return_value = plan
+        result = CliRunner().invoke(cli, ["doctor", "install", "--with-optional", "--json"])
+        assert result.exit_code == 0, result.output
+        assert mock_plan.call_args.kwargs["include_optional"] is True
+        result = CliRunner().invoke(cli, ["doctor", "install", "--json"])
+        assert mock_plan.call_args.kwargs["include_optional"] is False

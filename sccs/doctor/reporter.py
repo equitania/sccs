@@ -154,6 +154,8 @@ def _npx_row(status: NpxToolStatus) -> tuple[str, str, str, str]:
     label = f"npx: {status.spec.name}"
     version = f"v{status.version}" if status.version else ""
     if not status.available:
+        if status.spec.optional:
+            return (label, _INFO, "", "optional — not installed; `sccs doctor install --with-optional` adds it")
         if status.spec.detect_via_state:
             return (label, _MISSING, "", "no successful run on record")
         return (label, _MISSING, "", "binary not on PATH")
@@ -604,7 +606,7 @@ def has_problems(
         return True
     if any(not p.installed for p in plugins):
         return True
-    if any(not t.available for t in npx_tools):
+    if any(not t.available and not t.spec.optional for t in npx_tools):
         return True
     if permissions and any(not p.ok for p in permissions):
         return True

@@ -1066,6 +1066,7 @@ def _npx_install_actions(
     *,
     install_deps: tuple[str, ...] = (),
     use_deps: tuple[str, ...] = (),
+    include_optional: bool = False,
 ) -> list[DoctorAction]:
     """Plan install + post_install + bundled-skill steps for missing npx tools.
 
@@ -1080,6 +1081,8 @@ def _npx_install_actions(
     for st in statuses:
         if st.available:
             continue
+        if st.spec.optional and not include_optional:
+            continue  # optional and absent: the operator asks for it explicitly
         spec = st.spec
         install_component = f"npx:{spec.name}"
         actions.append(
@@ -1119,6 +1122,8 @@ def _npx_update_actions(
     """
     actions: list[DoctorAction] = []
     for st in statuses:
+        if st.spec.optional and not st.available:
+            continue  # update refreshes what is there; it never installs an optional tool
         spec = st.spec
         install_component = f"npx:{spec.name}"
         actions.append(
@@ -1482,6 +1487,8 @@ def _managed_orphan_cleanup_actions(
         spec = tool_status.spec
         if not spec.managed_file_manifest:
             continue
+        if spec.optional and not tool_status.available:
+            continue  # nothing of an absent optional tool is ours to tidy
 
         current = by_name.get(spec.name)
         if current is None:
@@ -1618,6 +1625,7 @@ def build_install_plan(
     statusline_presets: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
     mirror: MirrorReport | None = None,
+    include_optional: bool = False,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -1639,7 +1647,9 @@ def build_install_plan(
     if cli_action:
         actions.append(cli_action)
     actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
-    actions.extend(_npx_install_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
+    actions.extend(
+        _npx_install_actions(npx_tools, install_deps=install_deps, use_deps=use_deps, include_optional=include_optional)
+    )
     # Orphan cleanup runs after the npx install rewrites the tool manifest.
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
     actions.extend(skill_package_install_actions(skill_packages, install_deps=install_deps))
@@ -1747,6 +1757,7 @@ def build_optimize_plan(
     skill_packages: list[SkillPackageStatus] | None = None,
     mirror: MirrorReport | None = None,
     strict: bool = False,
+    include_optional: bool = False,
 ) -> InstallPlan:
     """Plan a one-shot optimize pass.
 
@@ -1835,6 +1846,13 @@ def build_optimize_plan(
     actions.extend(_plugin_install_actions(plugins, marketplaces=marketplaces))
     actions.extend(_plugin_update_actions(plugins))
     actions.extend(_npx_update_actions(npx_tools, install_deps=install_deps, use_deps=use_deps))
+    if include_optional:
+        # `optimize --with-optional`: an absent optional tool is installed here,
+        # the refresh above deliberately skips it.
+        wanted = [s for s in npx_tools if s.spec.optional and not s.available]
+        actions.extend(
+            _npx_install_actions(wanted, install_deps=install_deps, use_deps=use_deps, include_optional=True)
+        )
     # Orphan cleanup runs after the npx refresh rewrites the tool manifest.
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
     actions.extend(skill_package_update_actions(skill_packages, install_deps=install_deps))

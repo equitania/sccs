@@ -40,6 +40,29 @@ doctor:
 
 `zoxide` (smarter `cd`) wird auf **allen** Plattformen geprüft (winget/`brew install zoxide`/Install-Script), **Microsoft Coreutils** (`Microsoft.Coreutils`, Rust-uutils-Port von `cat`/`grep`/`wc`/`cut`/`xargs`) **nur Windows** — gibt PowerShell dieselben Unix-Befehle wie Linux/macOS/WSL. Erkennung: `which` für „auf PATH", auf Windows zusätzlich `winget list --id <id>` als autoritative Install-Prüfung (fängt die WinGet-Links-nicht-auf-PATH-Falle). Zustände: `OK` / gelb „installed, not on PATH" (+ PowerShell-PATH-Copy-Paste-Block unter der Tabelle) / blau „not installed (optional)". **Nur Hinweis — fehlend = kein Exit 1.** `doctor install` bietet `winget install`/`brew install` (confirm-gated); SCCS mutiert nie selbst PATH/Profil. Hinweis: zoxide braucht zusätzlich `zoxide init <shell>` im Profil für den `z`-Befehl (bewusst nicht durch den Doctor — er stellt nur die Binary sicher); Coreutils braucht keine Profil-Init. Shell-Conflicts (PS-Aliase `cat`/`sort`/`tee` gewinnen gegen die `.exe` → mit `cat.exe`/`sort.exe` aufrufen): siehe <https://github.com/microsoft/coreutils#shell-conflicts>.
 
+### Optionale npx-Tools (`@opengsd/gsd-core`) — ab v2.68.0
+
+Ein npx-Tool kann in seiner Spezifikation als `optional` markiert sein; gebündelt
+ist das `@opengsd/gsd-core`, `playwright-cli` bleibt Pflicht. Auf einem Rechner ohne
+das Tool zeigt `doctor check` eine blaue `INFO`-Zeile („optional — not installed“)
+statt `MISSING`, der Exit-Code bleibt 0, `doctor install` und `doctor update` fassen
+es nicht an. Wo es installiert ist, wird es wie bisher geprüft, auf Updates kontrolliert
+und aufgefrischt. Installiert wird es ausdrücklich:
+
+```bash
+sccs doctor install --with-optional     # auch fehlende optionale npx-Tools installieren
+sccs doctor optimize --with-optional    # dito im Optimize-Lauf
+```
+
+Der Sync-Ausschluss für `gsd-*` hängt nicht an diesem Flag und gilt auf jedem Rechner,
+genau wie er das GSD-Profil ignoriert. Nach dem Installieren gilt weiter: ein Wechsel
+wirkt in der nächsten Claude-Code-Sitzung.
+
+Seit derselben Version tragen die fünf Pflicht-Plugins aus Anthropics offiziellem
+Marketplace ihre Quelle (`anthropics/claude-plugins-official`), sodass `doctor install`
+den Marketplace auf einem frischen Rechner selbst registriert, statt einen manuellen
+Block zu drucken.
+
 ### Skill-Pakete (HyperFrames) — ab v2.67.0
 
 Skill-Sammlungen, die über die `skills`-CLI aus einem GitHub-Repository kommen, verwaltet der Doctor wie GSD — aber nur auf Rechnern, auf denen sie eingeschaltet sind:
@@ -354,6 +377,29 @@ doctor:
 ```
 
 `zoxide` (smart `cd`) is checked on **all** platforms (winget / `brew install zoxide` / install script); **Microsoft Coreutils** (`Microsoft.Coreutils`, the Rust uutils port of `cat`/`grep`/`wc`/`cut`/`xargs`) is **Windows-only** — it gives PowerShell the same UNIX commands as Linux/macOS/WSL. Detection: `which` for "on PATH"; on Windows a `winget list --id <id>` fallback is the authoritative install check (catches the WinGet-Links-not-on-PATH trap). States: `OK` / yellow "installed, not on PATH" (+ a copy-paste PowerShell PATH block below the table) / blue "not installed (optional)". **Informational only — missing = no exit 1.** `doctor install` offers `winget install` / `brew install` (confirm-gated); SCCS never edits PATH/profile itself. Note: zoxide also needs `zoxide init <shell>` in the profile for the `z` command (intentionally not done by the doctor — it only ensures the binary); Coreutils needs no profile init. Shell conflicts (PowerShell aliases `cat`/`sort`/`tee` win over the `.exe` → call `cat.exe`/`sort.exe`): see <https://github.com/microsoft/coreutils#shell-conflicts>.
+
+### Optional npx tools (`@opengsd/gsd-core`) — since v2.68.0
+
+An npx tool can be marked `optional` in its spec; bundled that way is
+`@opengsd/gsd-core`, while `playwright-cli` stays required. On a host without the
+tool, `doctor check` shows a blue `INFO` row ("optional — not installed") instead of
+`MISSING`, the exit code stays 0, and `doctor install` and `doctor update` leave it
+alone. Where it is installed it is checked, update-checked and refreshed as before.
+Installing it is explicit:
+
+```bash
+sccs doctor install --with-optional     # also install absent optional npx tools
+sccs doctor optimize --with-optional    # same during an optimize run
+```
+
+The `gsd-*` sync exclude does not depend on this flag and applies on every host,
+just as it ignores the GSD profile. After an install the usual rule holds: the
+change takes effect in the next Claude Code session.
+
+Since the same version the five required plugins from Anthropic's official
+marketplace carry their source (`anthropics/claude-plugins-official`), so
+`doctor install` registers the marketplace itself on a fresh host instead of
+printing a manual block.
 
 ### Skill packages (HyperFrames) — since v2.67.0
 

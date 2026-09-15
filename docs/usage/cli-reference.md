@@ -78,6 +78,7 @@ sccs doctor check                # Read-only Status-Tabelle (Exit 1 bei Probleme
 sccs doctor check --no-update-check  # Ohne Live-Versionsprüfung (offline/schnell)
 sccs doctor install              # Installiert fehlende Komponenten (Confirm pro Action)
 sccs doctor install --yes        # Skip Confirms (CI use only)
+sccs doctor install --with-optional  # Auch fehlende optionale npx-Tools (gsd-core) installieren
 sccs doctor update               # Plugins + npx-Tools aktualisieren
 sccs doctor check                # … zeigt auf einem Spiegel `mirror: …`-Zeilen (v2.68.0)
 sccs doctor update               # auf der Quelle: Brewfile + inventory.yaml neu schreiben
@@ -203,6 +204,7 @@ sccs doctor check                # Read-only status table (exit 1 on problems)
 sccs doctor check --no-update-check  # Skip the live version check (offline/fast)
 sccs doctor install              # Install missing components (confirm per action)
 sccs doctor install --yes        # Skip confirms (CI use only)
+sccs doctor install --with-optional  # Also install absent optional npx tools (gsd-core)
 sccs doctor update               # Update plugins + refresh npx tools
 sccs doctor check                # … shows `mirror: …` rows on a mirror (v2.68.0)
 sccs doctor update               # on the source: rewrite Brewfile + inventory.yaml

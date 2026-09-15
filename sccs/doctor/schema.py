@@ -241,6 +241,15 @@ class NpxToolSpec(BaseModel):
             "`managed_file_manifest` is also set."
         ),
     )
+    optional: bool = Field(
+        default=False,
+        description=(
+            "Optional tool: a host without it gets an INFO row instead of MISSING, "
+            "no install offer unless `sccs doctor install --with-optional`, and no "
+            "`npx` refresh on update. Where it is installed it is checked and "
+            "refreshed like a required tool."
+        ),
+    )
     managed_legacy_dirs: list[str] = Field(
         default_factory=list,
         description=(

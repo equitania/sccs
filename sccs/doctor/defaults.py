@@ -29,10 +29,16 @@ PWSH_WINGET_ID = "Microsoft.PowerShell"
 PWSH_INSTALL_CMD: list[str] = ["winget", "install", "--id", PWSH_WINGET_ID]
 PWSH_UPGRADE_CMD: list[str] = ["winget", "upgrade", "--id", PWSH_WINGET_ID]
 
+# Anthropic's official marketplace. Without the source a fresh host cannot
+# register it, and every required plugin is then skipped with "depends on
+# plugin-marketplace:claude-plugins-official:exists" (found on a second Mac,
+# 15.09.2026) — the source is what lets `doctor install` add it itself.
+_OFFICIAL_SOURCE = "anthropics/claude-plugins-official"
+
 DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
-    PluginSpec(name="skill-creator", marketplace="claude-plugins-official"),
-    PluginSpec(name="superpowers", marketplace="claude-plugins-official"),
-    PluginSpec(name="frontend-design", marketplace="claude-plugins-official"),
+    PluginSpec(name="skill-creator", marketplace="claude-plugins-official", marketplace_source=_OFFICIAL_SOURCE),
+    PluginSpec(name="superpowers", marketplace="claude-plugins-official", marketplace_source=_OFFICIAL_SOURCE),
+    PluginSpec(name="frontend-design", marketplace="claude-plugins-official", marketplace_source=_OFFICIAL_SOURCE),
     # Anthropic's own deep vulnerability scanner (`/security-review`, run inside
     # the session at a chosen effort level). Required rather than allowlist_only:
     # a security scanner is only useful if it is present on EVERY host, not just
@@ -43,11 +49,11 @@ DEFAULT_CLAUDE_PLUGINS: list[PluginSpec] = [
     # other projects or machines. `doctor install` runs a plain
     # `claude plugin install claude-security@claude-plugins-official`, i.e. user
     # scope — the correct home for a doctor-managed baseline.
-    PluginSpec(name="claude-security", marketplace="claude-plugins-official"),
+    PluginSpec(name="claude-security", marketplace="claude-plugins-official", marketplace_source=_OFFICIAL_SOURCE),
     # Keeps CLAUDE.md files auditable and consistent. Relevant on every host: the
     # monorepo carries a global ~/.claude/CLAUDE.md plus one per project, and they
     # drift independently.
-    PluginSpec(name="claude-md-management", marketplace="claude-plugins-official"),
+    PluginSpec(name="claude-md-management", marketplace="claude-plugins-official", marketplace_source=_OFFICIAL_SOURCE),
     # frontend-design also ships from the anthropics/claude-code marketplace.
     # allowlist_only: keeps a locally-installed `@claude-code-plugins` copy from
     # being flagged foreign by `optimize --strict`, WITHOUT producing an "ewig
@@ -136,6 +142,12 @@ DEFAULT_NPX_TOOLS: list[NpxToolSpec] = [
         # We can't patch upstream, so doctor prepends a SCOPE BOUNDARY directive
         # to the offending prompts after every (re)install. See scope_patch.py.
         patch_scope_boundary=True,
+        # v2.68.0: optional — GSD is wanted on some hosts, not all. No MISSING
+        # row, no install offer and no `npx` refresh where it is absent;
+        # `sccs doctor install --with-optional` brings it in. The gsd-* sync
+        # exclude does not depend on this flag (effective_npx_tools is
+        # option-blind, like it is profile-blind).
+        optional=True,
     ),
     NpxToolSpec(
         name="playwright-cli",

@@ -13,6 +13,12 @@
 - uv and npm are pinned to the source's version; Homebrew cannot pin versions at all — the install path uses `--no-upgrade`, so parity there means the same packages, not each at its current version.
 - **Existing configs**: `sccs config upgrade` and `sccs sync --migrate` now offer the two new categories, `homebrew_bundle` (macOS) and `sccs_inventory`, to configs created before v2.68.0.
 
+### Changed (`@opengsd/gsd-core` is optional; the official marketplace registers itself)
+
+- **`NpxToolSpec.optional`** — `@opengsd/gsd-core` is marked optional, `playwright-cli` stays required. A host without GSD sees a blue `INFO` row instead of `MISSING`, exits 0, and neither `doctor install` nor `doctor update` touches it; `doctor update` used to re-run `npx @opengsd/gsd-core …` on every host and therefore installed GSD wherever it was absent. `sccs doctor install --with-optional` (and `optimize --with-optional`) installs it on purpose. Where GSD is installed nothing changes: check, update check and refresh run as before, and the `gsd-*` sync exclude is option-blind, exactly as it is profile-blind.
+- **Orphaned GSD artefacts** are only scanned where GSD is installed.
+- **`marketplace_source` for the official marketplace.** The five required plugins from `claude-plugins-official` now carry `anthropics/claude-plugins-official`. Found on a second Mac: `doctor install` registered `context-mode`'s marketplace and installed it, while the five official plugins were skipped with "depends on plugin-marketplace:claude-plugins-official:exists" and a manual block — the source is what lets the doctor add the marketplace itself.
+
 ### Fixed (review fixes before merge)
 
 - **A transient `uv`/`npm` failure on the source no longer writes an empty inventory.** `capture_inventory` previously turned "tool absent" and "the run failed" alike into `[]`; every mirror then saw the whole area as extras, and `optimize --strict` proposed removing all of it. It now takes the previous inventory and, when a wrapper returns `None`, carries that area's entries forward with a warning instead of blanking it — empty only when there is no previous inventory to fall back to.

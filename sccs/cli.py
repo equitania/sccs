@@ -3315,9 +3315,16 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
 
 @doctor_group.command("install")
 @click.option("--yes", is_flag=True, default=False, help="Skip confirm prompts (CI use only).")
+@click.option(
+    "--with-optional",
+    "include_optional",
+    is_flag=True,
+    default=False,
+    help="Also install optional npx tools that are absent (e.g. @opengsd/gsd-core).",
+)
 @click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON (implies non-interactive).")
 @click.pass_context
-def doctor_install(ctx: click.Context, yes: bool, output_json: bool) -> None:
+def doctor_install(ctx: click.Context, yes: bool, include_optional: bool, output_json: bool) -> None:
     """Install missing system components after a confirm prompt per action."""
     from sccs.doctor.installer import build_install_plan, execute_plan
     from sccs.doctor.reporter import render_execute_result
@@ -3348,6 +3355,7 @@ def doctor_install(ctx: click.Context, yes: bool, output_json: bool) -> None:
         statusline_presets=statuses.get("statusline_presets"),
         skill_packages=statuses.get("skill_packages"),
         mirror=statuses.get("mirror"),
+        include_optional=include_optional,
     )
 
     if plan.is_empty():
@@ -3453,8 +3461,15 @@ def doctor_update(ctx: click.Context, yes: bool, output_json: bool) -> None:
     ),
 )
 @click.option("--yes", is_flag=True, default=False, help="Skip confirm prompts (CI use only).")
+@click.option(
+    "--with-optional",
+    "include_optional",
+    is_flag=True,
+    default=False,
+    help="Also install optional npx tools that are absent (e.g. @opengsd/gsd-core).",
+)
 @click.pass_context
-def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
+def doctor_optimize(ctx: click.Context, strict: bool, yes: bool, include_optional: bool) -> None:
     """Bring the local Claude environment in line with the spec.
 
     Runs build_install_plan + build_update_plan in one pass AND surfaces
@@ -3495,6 +3510,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
         skill_packages=statuses.get("skill_packages"),
         mirror=statuses.get("mirror"),
         strict=strict,
+        include_optional=include_optional,
     )
 
     if plan.is_empty():
