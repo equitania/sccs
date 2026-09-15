@@ -144,7 +144,17 @@ class TestRunnerWrappers:
         seen: list[list[str]] = []
         monkeypatch.setattr(runner, "_run", lambda cmd, **kw: (seen.append(cmd), _Proc())[1])
         assert runner.run_brew_bundle_dump(tmp_path / "Brewfile") is True
-        assert seen == [["brew", "bundle", "dump", "--file", str(tmp_path / "Brewfile"), "--force", "--describe"]]
+        assert seen == [["brew", "bundle", "dump", "--file", str(tmp_path / "Brewfile"), "--force"]]
+
+    def test_brew_bundle_dump_logs_homebrews_error(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog):
+        from sccs.doctor import runner
+
+        monkeypatch.setattr(
+            runner, "_run", lambda cmd, **kw: _Proc(stderr="Error: something Homebrew said\n", returncode=1)
+        )
+        with caplog.at_level("WARNING"):
+            assert runner.run_brew_bundle_dump(tmp_path / "Brewfile") is False
+        assert "something Homebrew said" in caplog.text
 
     def test_npm_global_list_returns_stdout_even_on_exit_1(self, monkeypatch: pytest.MonkeyPatch):
         from sccs.doctor import runner

@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 2.68.1 (15.09.2026)
+
+### Fixed (the source's Brewfile was never rewritten)
+
+- **`brew bundle dump` ran with `--describe`**, which Homebrew 7 has disabled ("Calling the `--describe` switch is disabled! Use the default behaviour instead."); descriptions are written by default now. Every `sccs doctor update` on the source logged "brew bundle dump failed — Brewfile left as is" and kept the stale file while the inventory was written — found on the first real run. The switch is gone, and the wrapper now logs Homebrew's own last error line instead of a bare "failed".
+
 ## Version 2.68.0 (15.09.2026)
 
 ### Added (mirror parity — a second Mac identical to the live workstation)

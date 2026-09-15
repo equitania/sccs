@@ -84,7 +84,7 @@ needs no inventory because `fish_plugins` already syncs.
 ### Capture on the source
 
 `sccs doctor update` on the source rewrites both the Brewfile
-(`brew bundle dump --file <path> --force --describe`) and `inventory.yaml`
+(`brew bundle dump --file <path> --force`; Homebrew 7 writes descriptions by default and rejects `--describe`) and `inventory.yaml`
 (`uv tool list`, `npm ls -g --depth=0 --json`). `doctor check` on the source
 compares Brewfile and inventory against the live state and reports
 `stale — run sccs doctor update` instead of staying silent. That is the missing

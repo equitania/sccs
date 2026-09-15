@@ -17,6 +17,10 @@ import shutil
 import subprocess  # nosec B404 - subprocess is intentional, see HARD RULES above
 from pathlib import Path
 
+from sccs.utils.logging import get_logger
+
+logger = get_logger("sccs.doctor.runner")
+
 # Characters that cmd.exe treats specially. When we have to launch a Windows
 # batch wrapper (npm.cmd/npx.cmd) via `cmd.exe /c`, any argument containing
 # one of these is refused outright — defense-in-depth so a wrapper invocation
@@ -366,15 +370,24 @@ def run_brew_lines(*args: str) -> list[str] | None:
 
 def run_brew_bundle_dump(brewfile: Path) -> bool:
     """Rewrite the Brewfile from the installed set (source host only)."""
+    # No `--describe`: Homebrew 7 disabled the switch ("Calling the
+    # `--describe` switch is disabled! Use the default behaviour instead.")
+    # and writes the descriptions by default. With it every dump failed and
+    # the Brewfile stayed stale (found on the first real `doctor update`).
     try:
         proc = _run(
-            ["brew", "bundle", "dump", "--file", str(brewfile), "--force", "--describe"],
+            ["brew", "bundle", "dump", "--file", str(brewfile), "--force"],
             timeout=120,
             check=False,
         )
-    except DoctorError:
+    except DoctorError as exc:
+        logger.warning("brew bundle dump: %s", exc)
         return False
-    return proc.returncode == 0
+    if proc.returncode != 0:
+        tail = [line for line in (proc.stderr or "").splitlines() if line.strip()]
+        logger.warning("brew bundle dump exited %s: %s", proc.returncode, tail[-1] if tail else "no output")
+        return False
+    return True
 
 
 def run_uv_tool_list() -> str | None:
