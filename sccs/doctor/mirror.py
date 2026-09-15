@@ -32,7 +32,14 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
-from sccs.doctor.runner import run_brew_lines, run_npm_global_list, run_uv_tool_list
+from sccs.doctor.runner import (
+    run_brew_lines,
+    run_fisher_list,
+    run_git_fetch,
+    run_git_status_branch,
+    run_npm_global_list,
+    run_uv_tool_list,
+)
 from sccs.doctor.schema import (  # noqa: F401 — re-exported
     _REPO_URL_PATTERN,
     _VERSION_PATTERN,
@@ -41,7 +48,7 @@ from sccs.doctor.schema import (  # noqa: F401 — re-exported
     _validate_safe_name,
 )
 from sccs.utils.logging import get_logger
-from sccs.utils.paths import atomic_write
+from sccs.utils.paths import atomic_write, expand_path
 
 __all__ = [
     "MirrorConfig",
@@ -68,6 +75,11 @@ __all__ = [
     "PackageAreaStatus",
     "compare_packages",
     "PackageDetector",
+    "RepoStatus",
+    "parse_git_status_branch",
+    "RepoDetector",
+    "FisherStatus",
+    "FisherDetector",
 ]
 
 logger = get_logger("sccs.doctor.mirror")
@@ -326,3 +338,90 @@ class PackageDetector:
         if installed is None:
             return PackageAreaStatus(area=area, state="unavailable")
         return compare_packages(area, wanted, installed, ignore)
+
+
+# --- repos ------------------------------------------------------------------
+
+_BEHIND = re.compile(r"\[(?:[^\]]*, )?behind \d+")
+
+
+def parse_git_status_branch(text: str) -> tuple[bool, bool]:
+    """(behind, dirty) from `git status --porcelain=v1 -b` output."""
+    lines = text.splitlines()
+    if not lines:
+        return (False, False)
+    behind = bool(_BEHIND.search(lines[0]))
+    dirty = any(line.strip() for line in lines[1:])
+    return (behind, dirty)
+
+
+@dataclass
+class RepoStatus:
+    spec: MirrorRepoSpec
+    # "ok" | "missing" | "behind" | "modified" | "not_a_repo" | "error"
+    state: str
+    detail: str = ""
+    fetched: bool = False
+
+    @property
+    def path(self) -> Path:
+        return expand_path(self.spec.path)
+
+
+class RepoDetector:
+    """A repo with local modifications is `modified` even when it is also
+    behind — it is reported and never touched. Fetch failure is recorded in
+    `detail`, the local tracking state still decides."""
+
+    def get_statuses(self, specs: list[MirrorRepoSpec], *, fetch: bool) -> list[RepoStatus]:
+        out: list[RepoStatus] = []
+        for spec in specs:
+            path = expand_path(spec.path)
+            if not path.exists():
+                out.append(RepoStatus(spec=spec, state="missing"))
+                continue
+            fetched = False
+            detail = ""
+            if fetch:
+                fetched = run_git_fetch(path)
+                if not fetched:
+                    detail = "fetch failed — state from last fetch"
+            text = run_git_status_branch(path)
+            if text is None:
+                out.append(RepoStatus(spec=spec, state="not_a_repo", detail="git status failed", fetched=fetched))
+                continue
+            behind, dirty = parse_git_status_branch(text)
+            if dirty:
+                state = "modified"
+            elif behind:
+                state = "behind"
+            else:
+                state = "ok"
+            out.append(RepoStatus(spec=spec, state=state, detail=detail, fetched=fetched))
+        return out
+
+
+# --- fisher -----------------------------------------------------------------
+
+
+@dataclass
+class FisherStatus:
+    # "ok" | "drift" | "unavailable" | "no_plugins_file"
+    state: str
+    missing: list[str] = field(default_factory=list)
+    extra: list[str] = field(default_factory=list)
+
+
+class FisherDetector:
+    def get_status(self, fish_plugins: Path) -> FisherStatus:
+        if not fish_plugins.is_file():
+            return FisherStatus(state="no_plugins_file")
+        wanted = {line.strip() for line in fish_plugins.read_text(encoding="utf-8").splitlines() if line.strip()}
+        installed = run_fisher_list()
+        if installed is None:
+            return FisherStatus(state="unavailable")
+        have = set(installed)
+        st = FisherStatus(state="ok", missing=sorted(wanted - have), extra=sorted(have - wanted))
+        if st.missing or st.extra:
+            st.state = "drift"
+        return st

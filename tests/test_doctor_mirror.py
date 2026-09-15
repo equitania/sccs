@@ -358,3 +358,82 @@ class TestPackageDetector:
         assert st.state == "drift"
         assert st.extra == ["@playwright/cli"]
         assert st.missing == [] and st.version_differs == []
+
+
+class TestRepoDetector:
+    def _spec(self, home: Path, name: str = "beam"):
+        from sccs.doctor.mirror import MirrorRepoSpec
+
+        return MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path=f"~/gitbase/example/{name}")
+
+    def test_parse_status_branch(self):
+        from sccs.doctor.mirror import parse_git_status_branch
+
+        assert parse_git_status_branch("## main...origin/main\n") == (False, False)
+        assert parse_git_status_branch("## main...origin/main [behind 2]\n") == (True, False)
+        assert parse_git_status_branch("## main...origin/main [ahead 1, behind 2]\n M x.fish\n") == (True, True)
+        assert parse_git_status_branch("## main...origin/main\n?? new.fish\n") == (False, True)
+
+    def test_missing(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor.mirror import RepoDetector
+
+        st = RepoDetector().get_statuses([self._spec(home)], fetch=False)[0]
+        assert st.state == "missing"
+
+    def test_not_a_repo(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import RepoDetector
+
+        (home / "gitbase/example/beam").mkdir(parents=True)
+        monkeypatch.setattr(mirror, "run_git_status_branch", lambda p: None)
+        assert RepoDetector().get_statuses([self._spec(home)], fetch=False)[0].state == "not_a_repo"
+
+    def test_behind_modified_ok(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import RepoDetector
+
+        (home / "gitbase/example/beam").mkdir(parents=True)
+        fetched: list[Path] = []
+        monkeypatch.setattr(mirror, "run_git_fetch", lambda p: (fetched.append(p), True)[1])
+        monkeypatch.setattr(mirror, "run_git_status_branch", lambda p: "## main...origin/main [behind 3]\n")
+        st = RepoDetector().get_statuses([self._spec(home)], fetch=True)[0]
+        assert st.state == "behind" and st.fetched is True and fetched
+        monkeypatch.setattr(mirror, "run_git_status_branch", lambda p: "## main...origin/main [behind 3]\n M a\n")
+        assert RepoDetector().get_statuses([self._spec(home)], fetch=False)[0].state == "modified"
+        monkeypatch.setattr(mirror, "run_git_status_branch", lambda p: "## main...origin/main\n")
+        assert RepoDetector().get_statuses([self._spec(home)], fetch=False)[0].state == "ok"
+
+    def test_fetch_failure_does_not_hide_local_state(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import RepoDetector
+
+        (home / "gitbase/example/beam").mkdir(parents=True)
+        monkeypatch.setattr(mirror, "run_git_fetch", lambda p: False)
+        monkeypatch.setattr(mirror, "run_git_status_branch", lambda p: "## main...origin/main\n")
+        st = RepoDetector().get_statuses([self._spec(home)], fetch=True)[0]
+        assert st.state == "ok" and st.fetched is False and "fetch failed" in st.detail
+
+
+class TestFisherDetector:
+    def test_drift(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import FisherDetector
+
+        plugins = tmp_path / "fish_plugins"
+        plugins.write_text("jorgebucaran/fisher\nedc/bass\njethrokuan/z\n", encoding="utf-8")
+        monkeypatch.setattr(mirror, "run_fisher_list", lambda: ["jorgebucaran/fisher", "edc/bass", "old/plugin"])
+        st = FisherDetector().get_status(plugins)
+        assert st.state == "drift"
+        assert st.missing == ["jethrokuan/z"] and st.extra == ["old/plugin"]
+
+    def test_ok_unavailable_and_no_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import FisherDetector
+
+        plugins = tmp_path / "fish_plugins"
+        assert FisherDetector().get_status(plugins).state == "no_plugins_file"
+        plugins.write_text("edc/bass\n", encoding="utf-8")
+        monkeypatch.setattr(mirror, "run_fisher_list", lambda: ["edc/bass"])
+        assert FisherDetector().get_status(plugins).state == "ok"
+        monkeypatch.setattr(mirror, "run_fisher_list", lambda: None)
+        assert FisherDetector().get_status(plugins).state == "unavailable"
