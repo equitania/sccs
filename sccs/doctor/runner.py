@@ -376,7 +376,11 @@ def run_brew_bundle_dump(brewfile: Path) -> bool:
     # the Brewfile stayed stale (found on the first real `doctor update`).
     try:
         proc = _run(
-            ["brew", "bundle", "dump", "--file", str(brewfile), "--force"],
+            # Formulae, casks and taps only: Homebrew 7 would also dump
+            # `uv "…"` and `vscode "…"` lines, and `brew bundle install` on a
+            # mirror then tries to fetch private uv tools from PyPI. uv tools
+            # are the inventory's job.
+            ["brew", "bundle", "dump", "--formula", "--cask", "--tap", "--file", str(brewfile), "--force"],
             timeout=120,
             check=False,
         )
@@ -392,7 +396,11 @@ def run_brew_bundle_dump(brewfile: Path) -> bool:
 
 def run_uv_tool_list() -> str | None:
     try:
-        proc = _run(["uv", "tool", "list"], timeout=30, check=False)
+        proc = _run(
+            ["uv", "tool", "list", "--show-python", "--show-extras", "--show-version-specifiers"],
+            timeout=30,
+            check=False,
+        )
     except DoctorError:
         return None
     if proc.returncode != 0:

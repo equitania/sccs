@@ -97,7 +97,7 @@ piece behind the drifted Brewfile.
 | Area | Truth | Missing / differs → `install` | Extra → `optimize --strict` |
 |---|---|---|---|
 | Homebrew | Brewfile | `brew bundle install --file <path> --no-upgrade`; taps included | `brew uninstall <name>` / `brew uninstall --cask <name>` / `brew untap <tap>` — one action each, never `brew bundle cleanup` |
-| uv tools | inventory | `uv tool install <name>==<version> --reinstall` | `uv tool uninstall <name>` |
+| uv tools | inventory | `uv tool install <name>[extras]==<version> --python <X.Y> --reinstall`; git source: `'<name> @ git+<url>'`; local source: reported as manual, no action | `uv tool uninstall <name>` |
 | npm globals | inventory | `npm install -g <name>@<version>` | `npm uninstall -g <name>` |
 | repos | policy | missing → `git clone <url> <path>`; behind and clean → `git -C <path> pull --ff-only` | never removed |
 | Fisher | `fish_plugins` | `fish -c 'fisher install <name>'` per missing plugin | `fish -c 'fisher remove <name>'` per extra — never `fisher update`, which removes unlisted plugins as a side effect |

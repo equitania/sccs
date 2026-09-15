@@ -122,12 +122,59 @@ NPM_ALWAYS_IGNORED = frozenset({"npm", "corepack"})
 UV_NEVER_REMOVED = frozenset({"sccs"})
 
 _INVENTORY_HEADER = "# Written by `sccs doctor update` on the source host — do not edit by hand.\n"
-_UV_LINE = re.compile(r"^(?P<name>[A-Za-z0-9_.\-]+) v(?P<version>\S+)$")
+_UV_LINE = re.compile(r"^(?P<name>[A-Za-z0-9_.\-]+) v(?P<version>\S+)(?P<rest>(?: \[[^\]]*\])*)$")
+_UV_BRACKET = re.compile(r"\[([^\]]*)\]")
+_PYTHON_PATTERN = re.compile(r"^\d+\.\d+$")
+# git+https://host/path or git+ssh://git@host/path — what `uv tool list
+# --show-version-specifiers` prints for a tool installed from git.
+_GIT_URL_PATTERN = re.compile(r"^git\+(?:https|ssh)://[A-Za-z0-9._@\-]+(?::\d+)?/[A-Za-z0-9_][A-Za-z0-9_./@\-]*$")
+PACKAGE_SOURCES = ("registry", "local", "git")
 
 
 class PackageRef(BaseModel):
     name: str
     version: str
+    # "registry" (an index such as PyPI), "git" (git_url is set) or "local"
+    # (a checkout or wheel on the source host — a mirror cannot fetch it).
+    source: str = "registry"
+    python: str | None = None  # major.minor the tool runs on, e.g. "3.13"
+    extras: list[str] = Field(default_factory=list)
+    git_url: str | None = None
+
+    @field_validator("source")
+    @classmethod
+    def _validate_source(cls, v: str) -> str:
+        if v not in PACKAGE_SOURCES:
+            raise ValueError(f"source must be one of {PACKAGE_SOURCES}: {v!r}")
+        return v
+
+    @field_validator("python")
+    @classmethod
+    def _validate_python(cls, v: str | None) -> str | None:
+        if v is not None and not _PYTHON_PATTERN.match(v):
+            raise ValueError(f"python must be major.minor: {v!r}")
+        return v
+
+    @field_validator("extras")
+    @classmethod
+    def _validate_extras(cls, v: list[str]) -> list[str]:
+        return [_validate_safe_name(e, "extra") for e in v]
+
+    @field_validator("git_url")
+    @classmethod
+    def _validate_git_url(cls, v: str | None) -> str | None:
+        if v is not None and not _GIT_URL_PATTERN.match(v):
+            raise ValueError(f"git_url must be git+https://… or git+ssh://…: {v!r}")
+        return v
+
+    @property
+    def spec(self) -> str:
+        """The requirement `uv tool install` gets: `name[extras]==version`, or
+        `name @ git+url` for a git source."""
+        if self.source == "git" and self.git_url:
+            return f"{self.name} @ {self.git_url}"
+        extras = f"[{','.join(self.extras)}]" if self.extras else ""
+        return f"{self.name}{extras}=={self.version}"
 
     @field_validator("name")
     @classmethod
@@ -151,14 +198,34 @@ class Inventory(BaseModel):
 
 
 def parse_uv_tool_list(text: str) -> list[PackageRef]:
-    """`uv tool list` prints `name vX.Y.Z` followed by `- entrypoint` lines."""
+    """`uv tool list --show-python --show-extras --show-version-specifiers`
+    prints `name vX.Y.Z [required: …] [extras: a, b] [CPython 3.13.12]`
+    followed by `- entrypoint` lines. `required: file://…` is a local
+    checkout or wheel, `required: git+…` a git source; anything else (or no
+    bracket) came from an index. The plain `name vX.Y.Z` form still parses."""
     out: list[PackageRef] = []
     for line in text.splitlines():
         m = _UV_LINE.match(line.strip())
         if not m:
             continue
+        fields: dict[str, object] = {"name": m.group("name"), "version": m.group("version")}
+        for bracket in _UV_BRACKET.findall(m.group("rest") or ""):
+            key, _, value = bracket.partition(":")
+            key, value = key.strip(), value.strip()
+            if key == "required":
+                if value.startswith("file://"):
+                    fields["source"] = "local"
+                elif value.startswith("git+"):
+                    fields["source"] = "git"
+                    fields["git_url"] = value
+            elif key == "extras":
+                fields["extras"] = [e.strip() for e in value.split(",") if e.strip()]
+            elif bracket.startswith(("CPython", "PyPy")):
+                parts = bracket.split()[-1].split(".")
+                if len(parts) >= 2:
+                    fields["python"] = f"{parts[0]}.{parts[1]}"
         try:
-            out.append(PackageRef(name=m.group("name"), version=m.group("version")))
+            out.append(PackageRef.model_validate(fields))
         except ValueError:
             logger.warning("uv tool list: skipping unparsable entry %r", line)
     return out
@@ -336,6 +403,9 @@ class PackageAreaStatus:
     missing: list[PackageRef] = field(default_factory=list)
     extra: list[str] = field(default_factory=list)
     version_differs: list[VersionDiff] = field(default_factory=list)
+    # Wanted but built on the source from a local checkout or wheel: no
+    # registry can serve it, so it is reported (yellow) and never actioned.
+    manual: list[PackageRef] = field(default_factory=list)
 
 
 def compare_packages(
@@ -347,16 +417,18 @@ def compare_packages(
     skip = set(ignore)
     want = {p.name: p for p in wanted if p.name not in skip}
     have = {p.name: p for p in installed if p.name not in skip}
+    automatic = {n for n, p in want.items() if p.source != "local"}
     st = PackageAreaStatus(
         area=area,
         state="ok",
-        missing=[want[n] for n in sorted(set(want) - set(have))],
+        missing=[want[n] for n in sorted((set(want) - set(have)) & automatic)],
         extra=sorted(set(have) - set(want)),
         version_differs=[
             VersionDiff(name=n, have=have[n].version, want=want[n].version)
-            for n in sorted(set(want) & set(have))
+            for n in sorted(set(want) & set(have) & automatic)
             if have[n].version != want[n].version
         ],
+        manual=[want[n] for n in sorted(set(want) - automatic) if n not in have or have[n].version != want[n].version],
     )
     if st.missing or st.extra or st.version_differs:
         st.state = "drift"
@@ -598,7 +670,10 @@ def mirror_install_actions(report: MirrorReport | None) -> list[DoctorAction]:
                 logger.warning("mirror: skipping %s %s — invalid version %r", area.area, name, pkg.version)
                 continue
             if area.area == "uv":
-                cmd = ["uv", "tool", "install", f"{name}=={pkg.version}", "--reinstall"]
+                cmd = ["uv", "tool", "install", pkg.spec]
+                if pkg.python:
+                    cmd += ["--python", pkg.python]
+                cmd.append("--reinstall")
             else:
                 cmd = ["npm", "install", "-g", f"{name}@{pkg.version}"]
             actions.append(

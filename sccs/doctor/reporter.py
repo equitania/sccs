@@ -183,12 +183,12 @@ def _counts(*pairs: tuple[int, str]) -> str:
     return " · ".join(f"{n} {word}" for n, word in pairs if n)
 
 
-def _area_status(missing: int, version: int, extra: int, available: bool) -> str:
+def _area_status(missing: int, version: int, extra: int, available: bool, manual: int = 0) -> str:
     if not available:
         return _INFO
     if missing or version:
         return _MISSING
-    if extra:
+    if extra or manual:
         return _STALE
     return _OK
 
@@ -232,10 +232,13 @@ def _mirror_rows(report: MirrorReport | None) -> list[tuple[str, str, str, str]]
         rows.append(
             (
                 f"mirror: {label}",
-                _area_status(len(area.missing), len(area.version_differs), len(area.extra), True),
+                _area_status(len(area.missing), len(area.version_differs), len(area.extra), True, len(area.manual)),
                 "",
                 _counts(
-                    (len(area.missing), "missing"), (len(area.version_differs), "version"), (len(area.extra), "extra")
+                    (len(area.missing), "missing"),
+                    (len(area.version_differs), "version"),
+                    (len(area.extra), "extra"),
+                    (len(area.manual), "manual"),
                 )
                 or "in sync with inventory",
             )
@@ -481,6 +484,10 @@ def _mirror_detail_lines(report: MirrorReport | None) -> list[str]:
         add(f"{area.area} missing", [f"{p.name} {p.version}" for p in area.missing])
         add(f"{area.area} version", [f"{d.name} {d.have} → {d.want}" for d in area.version_differs])
         add(f"{area.area} extra", area.extra)
+        add(
+            f"{area.area} local on the source — install by hand",
+            [f"{p.name} {p.version}" for p in area.manual],
+        )
     for repo in report.repos:
         if repo.state != "ok":
             lines.append(f"  repo {repo.path.name}: {repo.state}")

@@ -144,7 +144,9 @@ class TestRunnerWrappers:
         seen: list[list[str]] = []
         monkeypatch.setattr(runner, "_run", lambda cmd, **kw: (seen.append(cmd), _Proc())[1])
         assert runner.run_brew_bundle_dump(tmp_path / "Brewfile") is True
-        assert seen == [["brew", "bundle", "dump", "--file", str(tmp_path / "Brewfile"), "--force"]]
+        assert seen == [
+            ["brew", "bundle", "dump", "--formula", "--cask", "--tap", "--file", str(tmp_path / "Brewfile"), "--force"]
+        ]
 
     def test_brew_bundle_dump_logs_homebrews_error(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog):
         from sccs.doctor import runner
@@ -207,6 +209,122 @@ NPM_JSON = """{
     "corepack": {"version": "0.34.0"}
   }
 }"""
+
+
+UV_LIST_RICH = """agentmgr v0.2.2 [required: file:///Users/x/agentmgr-0.2.2-py3-none-any.whl] [CPython 3.13.12]
+- agentmgr
+ascmeta v0.6.1 [required: file:///Users/x/Apple-AppStore-Deploy] [CPython 3.13.12]
+build v1.6.1 [CPython 3.13.12]
+eq-chatbot-core v3.3.0 [extras: image] [CPython 3.13.12]
+mytool v1.0.0 [required: git+https://gitlab.example/org/mytool.git] [CPython 3.12.4]
+"""
+
+
+class TestUvToolSources:
+    """v2.68.1: the inventory records where a uv tool came from, which Python
+    it runs on and which extras it carries — a mirror cannot install a tool
+    the source built from a local checkout, and it must not resolve a tool
+    against the wrong interpreter (both found on the first real mirror)."""
+
+    def test_parse_reads_source_python_and_extras(self):
+        from sccs.doctor.mirror import parse_uv_tool_list
+
+        by_name = {p.name: p for p in parse_uv_tool_list(UV_LIST_RICH)}
+        assert by_name["agentmgr"].source == "local"
+        assert by_name["ascmeta"].source == "local"
+        assert by_name["build"].source == "registry" and by_name["build"].python == "3.13"
+        assert by_name["eq-chatbot-core"].extras == ["image"] and by_name["eq-chatbot-core"].source == "registry"
+        assert (
+            by_name["mytool"].source == "git"
+            and by_name["mytool"].git_url == "git+https://gitlab.example/org/mytool.git"
+        )
+        assert by_name["mytool"].python == "3.12"
+
+    def test_plain_format_still_parses_as_registry(self):
+        from sccs.doctor.mirror import parse_uv_tool_list
+
+        (p,) = parse_uv_tool_list("sccs v2.67.2\n- sccs\n")
+        assert (p.name, p.version, p.source, p.python, p.extras) == ("sccs", "2.67.2", "registry", None, [])
+
+    def test_local_source_is_manual_not_missing(self):
+        from sccs.doctor.mirror import PackageRef, compare_packages
+
+        wanted = [
+            PackageRef(name="ascmeta", version="0.6.1", source="local"),
+            PackageRef(name="build", version="1.6.1"),
+        ]
+        st = compare_packages("uv", wanted, [], ignore=[])
+        assert [p.name for p in st.missing] == ["build"]
+        assert [p.name for p in st.manual] == ["ascmeta"]
+        only_manual = compare_packages("uv", [wanted[0]], [], ignore=[])
+        assert only_manual.state == "ok" and [p.name for p in only_manual.manual] == ["ascmeta"]
+
+    def test_install_actions_carry_python_extras_and_git(self, home: Path):
+        from sccs.doctor.mirror import PackageAreaStatus, PackageRef, mirror_install_actions
+
+        rep = _report(
+            uv=PackageAreaStatus(
+                area="uv",
+                state="drift",
+                missing=[
+                    PackageRef(name="eq-chatbot-core", version="3.3.0", python="3.13", extras=["image"]),
+                    PackageRef(
+                        name="mytool",
+                        version="1.0.0",
+                        source="git",
+                        git_url="git+https://gitlab.example/org/mytool.git",
+                        python="3.12",
+                    ),
+                ],
+                manual=[PackageRef(name="ascmeta", version="0.6.1", source="local")],
+            )
+        )
+        cmds = [a.cmd for a in mirror_install_actions(rep)]
+        assert ["uv", "tool", "install", "eq-chatbot-core[image]==3.3.0", "--python", "3.13", "--reinstall"] in cmds
+        assert [
+            "uv",
+            "tool",
+            "install",
+            "mytool @ git+https://gitlab.example/org/mytool.git",
+            "--python",
+            "3.12",
+            "--reinstall",
+        ] in cmds
+        assert not any("ascmeta" in " ".join(c) for c in cmds if c)
+
+    def test_manual_is_yellow_and_listed_not_drift(self):
+        from sccs.doctor.mirror import PackageAreaStatus, PackageRef
+        from sccs.doctor.reporter import _mirror_detail_lines, _mirror_rows
+
+        rep = _report(
+            uv=PackageAreaStatus(
+                area="uv", state="ok", manual=[PackageRef(name="ascmeta", version="0.6.1", source="local")]
+            )
+        )
+        assert rep.has_drift is False
+        rows = {r[0]: r for r in _mirror_rows(rep)}
+        assert "STALE" in rows["mirror: uv"][1] and "1 manual" in rows["mirror: uv"][3]
+        assert any("ascmeta 0.6.1" in line and "by hand" in line for line in _mirror_detail_lines(rep))
+
+    def test_inventory_roundtrip_keeps_the_new_fields(self, tmp_path: Path):
+        from sccs.doctor.mirror import Inventory, PackageRef, load_inventory, write_inventory
+
+        inv = Inventory(
+            captured_at="t",
+            captured_on="live-mac",
+            uv_tools=[
+                PackageRef(
+                    name="mytool",
+                    version="1.0.0",
+                    source="git",
+                    git_url="git+https://gitlab.example/org/mytool.git",
+                    python="3.12",
+                    extras=["x"],
+                )
+            ],
+        )
+        write_inventory(tmp_path / "inv.yaml", inv)
+        assert load_inventory(tmp_path / "inv.yaml") == inv
 
 
 class TestInventory:

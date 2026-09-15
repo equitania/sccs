@@ -124,6 +124,12 @@ Der Rechner, dessen Hostname passt, ist die **Quelle**; jeder andere ist
   Checkout ein `git fetch`, mit 30 Sekunden Timeout je Repository.
   `brew bundle install` läuft mit 30 Minuten Timeout, `git clone` mit
   15 Minuten; alle anderen Aktionen nutzen den Doctor-Standard von 5 Minuten.
+- **Lokal gebaute uv-Tools**: Ein Tool, das die Quelle aus einem lokalen
+  Checkout oder Wheel installiert hat, kann kein Spiegel automatisch holen. Es
+  wird gelb als „manual“ gemeldet und unter der Tabelle aufgeführt; Tools aus
+  einem Index oder aus Git installiert der Doctor mit derselben Python-Version
+  und denselben Extras wie auf der Quelle. Das Brewfile enthält nur Formeln,
+  Casks und Taps.
 - **Entfernen**: nur `sccs doctor optimize --strict`, eine Aktion je
   überzähligem Paket, jede einzeln zu bestätigen — `--yes` bestätigt dabei
   auch Entfernungen, wie schon bei fremden Plugins; die eigentliche
@@ -461,6 +467,11 @@ The host whose hostname matches is the **source**; every other host is a
   bounded to 30 seconds per repository. `brew bundle install` runs with a
   30-minute timeout, `git clone` with 15 minutes; every other action uses
   the doctor's default of 5 minutes.
+- **Locally built uv tools**: a tool the source installed from a local
+  checkout or wheel cannot be fetched by a mirror. It is reported in yellow as
+  "manual" and listed under the table; tools from an index or from git are
+  installed with the same Python version and extras as on the source. The
+  Brewfile carries formulae, casks and taps only.
 - **Removal**: only `sccs doctor optimize --strict`, one action per extra,
   each confirmed on its own — `--yes` confirms removals too, exactly as for
   foreign plugins today; the actual protection is that removals never enter
