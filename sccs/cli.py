@@ -27,6 +27,7 @@ from sccs.config.migration import (
     get_categories_to_offer,
     get_category_info,
 )
+from sccs.doctor.mirror import collect_mirror_report
 from sccs.git import commit, get_remote_status, has_uncommitted_changes, pull, push, stage_all
 from sccs.git.resolve import (
     DivergenceStrategy,
@@ -3086,6 +3087,7 @@ def _collect_doctor_statuses(
     claude_cli_status = ClaudeCliDetector().get_status()
     plugin_detector = ClaudePluginDetector()
     settings_hook_detector = SettingsHookDetector()
+    mirror = collect_mirror_report(getattr(doctor_cfg, "mirror", None), fetch=check_updates)
 
     result = {
         "node": NodeDetector().get_status(doctor_cfg.min_node_major),
@@ -3112,6 +3114,7 @@ def _collect_doctor_statuses(
         # source exist — that pairing is the opt-in.
         "cao_providers": CaoDetector().get_statuses(cao_provider_specs),
         "statusline_presets": _collect_statusline_preset_statuses(),
+        "mirror": mirror,
     }
 
     if include_foreign:
@@ -3220,6 +3223,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
             gsd_orphans=statuses.get("gsd_orphans"),
             cao_providers=statuses.get("cao_providers"),
             skill_packages=statuses.get("skill_packages"),
+            mirror=statuses.get("mirror"),
         )
         updates = has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"])
         emit_json(
@@ -3246,6 +3250,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
                 "cli_tools": statuses.get("cli_tools"),
                 "skill_packages": statuses.get("skill_packages"),
                 "cao_providers": statuses.get("cao_providers"),
+                "mirror": statuses.get("mirror"),
             }
         )
         sys.exit(1 if problems else 0)
@@ -3269,6 +3274,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         statusline_presets=statuses.get("statusline_presets"),
         powershell=statuses.get("powershell"),
         skill_packages=statuses.get("skill_packages"),
+        mirror=statuses.get("mirror"),
     )
 
     if has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"]):
@@ -3291,6 +3297,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         gsd_orphans=statuses.get("gsd_orphans"),
         cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
+        mirror=statuses.get("mirror"),
     ):
         console.print()
         console.print_warning("Run `sccs doctor install` to fix missing items.")
@@ -3331,6 +3338,7 @@ def doctor_install(ctx: click.Context, yes: bool, output_json: bool) -> None:
         cao_providers=statuses.get("cao_providers"),
         statusline_presets=statuses.get("statusline_presets"),
         skill_packages=statuses.get("skill_packages"),
+        mirror=statuses.get("mirror"),
     )
 
     if plan.is_empty():
@@ -3395,6 +3403,7 @@ def doctor_update(ctx: click.Context, yes: bool, output_json: bool) -> None:
         cli_tools=statuses.get("cli_tools"),
         cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
+        mirror=statuses.get("mirror"),
     )
 
     if plan.is_empty():
@@ -3475,6 +3484,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
         cli_tools=statuses.get("cli_tools"),
         cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
+        mirror=statuses.get("mirror"),
         strict=strict,
     )
 

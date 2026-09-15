@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -979,3 +981,60 @@ class TestReporter:
         )
         text = console.export_text()
         assert "mirror: brew" in text and "mirror: role" in text
+
+
+class TestJsonEmit:
+    def test_emit_json_serializes_mirror_report(self, capsys: pytest.CaptureFixture):
+        from sccs.doctor.mirror import BrewStatus
+        from sccs.output.json_emit import emit_json
+
+        emit_json({"m": _report(brew=BrewStatus(state="drift", missing_formulae=["bat"]))})
+        output = capsys.readouterr().out
+        lines = [line for line in output.splitlines() if line.strip()]
+        assert len(lines) == 1, lines
+        payload = json.loads(lines[0])
+        assert payload["m"]["role"] == "mirror"
+        assert payload["m"]["brew"]["missing_formulae"] == ["bat"]
+
+
+class TestCliWiring:
+    def _parse_clean(self, output: str):
+        assert "\x1b" not in output
+        lines = [line for line in output.splitlines() if line.strip()]
+        assert len(lines) == 1, lines
+        return json.loads(lines[0])
+
+    @patch("sccs.doctor.reporter.has_updates", return_value=False)
+    @patch("sccs.doctor.reporter.has_problems", return_value=True)
+    @patch("sccs.cli._collect_doctor_statuses")
+    @patch("sccs.cli._load_doctor_config")
+    def test_check_json_carries_mirror(self, mock_cfg, mock_collect, mock_probs, mock_upd):
+        from click.testing import CliRunner
+
+        from sccs.cli import cli
+        from sccs.doctor.mirror import BrewStatus
+
+        mock_cfg.return_value = MagicMock(min_node_major=22)
+        mock_collect.return_value = {
+            "node": {},
+            "claude_cli": {},
+            "plugins": [],
+            "npx_tools": [],
+            "mirror": _report(brew=BrewStatus(state="drift", missing_formulae=["bat"])),
+        }
+
+        result = CliRunner().invoke(cli, ["doctor", "check", "--json", "--no-update-check"])
+        payload = self._parse_clean(result.output)
+        assert payload["mirror"]["role"] == "mirror"
+        assert payload["mirror"]["brew"]["missing_formulae"] == ["bat"]
+        assert payload["has_problems"] is True
+
+    def test_default_categories(self):
+        from sccs.config.defaults import DEFAULT_CONFIG
+
+        cats = DEFAULT_CONFIG["sync_categories"]
+        assert cats["homebrew_bundle"]["local_path"] == "~/.config/homebrew/Brewfile"
+        assert cats["homebrew_bundle"]["platforms"] == ["macos"]
+        assert cats["sccs_inventory"]["local_path"] == "~/.config/sccs/inventory.yaml"
+        assert cats["sccs_inventory"]["repo_path"] == ".config/sccs/inventory.yaml"
+        assert cats["sccs_inventory"]["enabled"] is True
