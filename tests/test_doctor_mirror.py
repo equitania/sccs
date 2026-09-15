@@ -176,7 +176,17 @@ class TestRunnerWrappers:
             runner, "_run", lambda cmd, **kw: (seen.append(cmd), _Proc(stdout="jorgebucaran/fisher\nedc/bass\n"))[1]
         )
         assert runner.run_fisher_list() == ["jorgebucaran/fisher", "edc/bass"]
-        assert seen == [["fish", "-c", "fisher list"]]
+        assert seen == [["fish", "-c", runner.FISHER_LIST_SCRIPT]]
+
+    def test_fisher_present_but_nothing_recorded_is_an_empty_list(self, monkeypatch: pytest.MonkeyPatch):
+        """`fisher list` exits 1 with no plugins recorded; the script maps that to exit 0 and
+        an empty list, so every plugin in fish_plugins becomes *missing* — not 'fisher absent'."""
+        from sccs.doctor import runner
+
+        monkeypatch.setattr(runner, "_run", lambda cmd, **kw: _Proc(stdout="", returncode=0))
+        assert runner.run_fisher_list() == []
+        monkeypatch.setattr(runner, "_run", lambda cmd, **kw: _Proc(stdout="", returncode=3))
+        assert runner.run_fisher_list() is None
 
 
 UV_LIST = """agentmgr v0.2.2

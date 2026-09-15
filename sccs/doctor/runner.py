@@ -431,10 +431,20 @@ def run_git_fetch(path: Path) -> bool:
     return proc.returncode == 0
 
 
+FISHER_LIST_SCRIPT = "functions -q fisher; or exit 3; fisher list; exit 0"
+
+
 def run_fisher_list() -> list[str] | None:
-    """Fisher is a fish function, so it only exists inside fish."""
+    """Fisher is a fish function, so it only exists inside fish.
+
+    Presence is decided by `functions -q fisher` (exit 3 → None). The list
+    itself is taken as it is: `fisher list` exits 1 when no plugin is
+    recorded yet — a fresh host whose fisher.fish arrived through the sync
+    but whose universal `_fisher_plugins` is empty — and that is "nothing
+    installed", not "fisher missing" (found on a real mirror, 15.09.2026).
+    """
     try:
-        proc = _run(["fish", "-c", "fisher list"], timeout=30, check=False)
+        proc = _run(["fish", "-c", FISHER_LIST_SCRIPT], timeout=30, check=False)
     except DoctorError:
         return None
     if proc.returncode != 0:
