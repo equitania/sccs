@@ -261,6 +261,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "include": [
                 "config.fish",
                 "README.md",
+                "fish_plugins",
                 "functions/*.fish",
                 # v2.67.2: the Python helpers the fish functions call. Without
                 # them a synced `uvclean`/`gclean` fails on every other host.

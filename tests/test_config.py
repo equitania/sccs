@@ -324,6 +324,7 @@ class TestFishDefaultsCoverEachFileOnce:
         files = [
             root / "config.fish",
             root / "README.md",
+            root / "fish_plugins",
             root / "conf.d" / "30-aliases.fish",
             root / "conf.d" / "20-tools.macos.fish",
             root / "functions" / "uvpublish.fish",
@@ -376,6 +377,7 @@ class TestFishDefaultsCoverEachFileOnce:
 
         assert (fish_root / "scripts" / "shell_safety.py").resolve() in covered
         assert (fish_root / "functions" / "__bass.py").resolve() in covered
+        assert (fish_root / "fish_plugins").resolve() in covered
         # The private helper the safety functions depend on keeps travelling.
         assert (fish_root / "functions" / "__safe_remove.fish").resolve() in covered
         # And the macOS-only function directory is still someone's job.

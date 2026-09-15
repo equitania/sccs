@@ -27,7 +27,6 @@ from sccs.config.migration import (
     get_categories_to_offer,
     get_category_info,
 )
-from sccs.doctor.mirror import collect_mirror_report
 from sccs.git import commit, get_remote_status, has_uncommitted_changes, pull, push, stage_all
 from sccs.git.resolve import (
     DivergenceStrategy,
@@ -3025,6 +3024,7 @@ def _collect_doctor_statuses(
     include_foreign: bool = False,
     check_updates: bool = False,
     profiles=None,
+    fetch_repos: bool | None = None,
 ):
     """Build all detector results once. Returns a dict for reuse.
 
@@ -3040,6 +3040,13 @@ def _collect_doctor_statuses(
 
     `profiles` overrides the profile map used to filter out npx tools owned
     by a switched-off profile; None loads it from config.yaml.
+
+    `fetch_repos` controls whether the mirror repo detector runs `git fetch`
+    before comparing against `origin` — without it, a mirror stuck `behind`
+    never sees the `git pull --ff-only` action, since the tracking branch is
+    never refreshed. None (the default) follows `check_updates`; install,
+    update and optimize pass True explicitly so they fetch even though they
+    don't also want the plugin/npx-tool registry lookups `check_updates` implies.
     """
     from sccs.doctor.cao import CaoDetector
     from sccs.doctor.defaults import MIN_PWSH_MAJOR
@@ -3060,6 +3067,7 @@ def _collect_doctor_statuses(
         SettingsHookDetector,
         StatusLineDetector,
     )
+    from sccs.doctor.mirror import collect_mirror_report
     from sccs.doctor.skill_packages import SkillPackageDetector
     from sccs.doctor.state import DoctorStateManager
 
@@ -3087,7 +3095,8 @@ def _collect_doctor_statuses(
     claude_cli_status = ClaudeCliDetector().get_status()
     plugin_detector = ClaudePluginDetector()
     settings_hook_detector = SettingsHookDetector()
-    mirror = collect_mirror_report(getattr(doctor_cfg, "mirror", None), fetch=check_updates)
+    fetch = check_updates if fetch_repos is None else fetch_repos
+    mirror = collect_mirror_report(doctor_cfg.mirror, fetch=fetch)
 
     result = {
         "node": NodeDetector().get_status(doctor_cfg.min_node_major),
@@ -3317,7 +3326,7 @@ def doctor_install(ctx: click.Context, yes: bool, output_json: bool) -> None:
     console = ctx.obj["console"]
     doctor_cfg = _load_doctor_config()
     state = DoctorStateManager()
-    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state)
+    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state, fetch_repos=True)
 
     plan = build_install_plan(
         doctor_cfg,
@@ -3383,7 +3392,7 @@ def doctor_update(ctx: click.Context, yes: bool, output_json: bool) -> None:
     console = ctx.obj["console"]
     doctor_cfg = _load_doctor_config()
     state = DoctorStateManager()
-    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state)
+    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state, fetch_repos=True)
 
     plan = build_update_plan(
         doctor_cfg,
@@ -3463,7 +3472,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool) -> None:
     console = ctx.obj["console"]
     doctor_cfg = _load_doctor_config()
     state = DoctorStateManager()
-    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state, include_foreign=True)
+    statuses = _collect_doctor_statuses(doctor_cfg, state_manager=state, include_foreign=True, fetch_repos=True)
 
     plan = build_optimize_plan(
         doctor_cfg,

@@ -93,10 +93,14 @@ Der Rechner, dessen Hostname passt, ist die **Quelle**; jeder andere ist
   `fisher update`, das ohne Argumente jedes Plugin entfernt, das nicht in
   `fish_plugins` steht, also auf dem Install-Pfad eine Entfernung wäre); uv
   und npm werden auf die Version der Quelle gepinnt, Homebrew kennt keine
-  Versionen. Ein Checkout mit lokalen Änderungen wird gemeldet und nie
-  angefasst. Ein Spiegel schreibt das Inventar nie. `brew bundle install`
-  läuft mit 30 Minuten Timeout, `git clone` mit 15 Minuten; alle anderen
-  Aktionen nutzen den Doctor-Standard von 5 Minuten.
+  Versionen. Ein Checkout mit lokalen Änderungen (`modified`) oder ein
+  unlesbarer Checkout (`not_a_repo`) wird gelb gemeldet, ohne die Prüfung
+  scheitern zu lassen, und nie angefasst — beides kann nur ein Mensch lösen.
+  Ein Spiegel schreibt das Inventar nie. `check` (mit dem Standard-Update-Check),
+  `install`, `update` und `optimize` laufen dafür in jedem konfigurierten
+  Checkout ein `git fetch`, mit 30 Sekunden Timeout je Repository.
+  `brew bundle install` läuft mit 30 Minuten Timeout, `git clone` mit
+  15 Minuten; alle anderen Aktionen nutzen den Doctor-Standard von 5 Minuten.
 - **Entfernen**: nur `sccs doctor optimize --strict`, eine Aktion je
   überzähligem Paket, jede einzeln zu bestätigen — `--yes` bestätigt dabei
   auch Entfernungen, wie schon bei fremden Plugins; die eigentliche
@@ -105,6 +109,9 @@ Der Rechner, dessen Hostname passt, ist die **Quelle**; jeder andere ist
   `sccs` werden nie entfernt; ein nicht-strikter Lauf auf einem Spiegel mit
   Überzähligem und `cleanup: true` zeigt stattdessen einen einzigen
   Hinweisblock; `cleanup: false` schaltet Entfernungen ganz ab.
+  Enthält der Plan eine Aktion, die `sccs` selbst neu installiert
+  (`uv tool install sccs==…`), danach `sccs doctor install` erneut ausführen,
+  um den Rest des Plans abzuarbeiten.
 
 ### CAO-Provider nach einem `cao update` wiederherstellen — ab v2.64.0
 
@@ -400,17 +407,23 @@ The host whose hostname matches is the **source**; every other host is a
   `fisher update`, which with no arguments uninstalls every plugin absent
   from `fish_plugins`, and would therefore be a removal on the install path);
   uv and npm are pinned to the source's version, Homebrew has no versions. A
-  checkout with local changes is reported and never touched. A mirror never
-  writes the inventory. `brew bundle install` runs with a 30-minute timeout,
-  `git clone` with 15 minutes; every other action uses the doctor's default
-  of 5 minutes.
+  checkout with local changes (`modified`) or one that cannot be read
+  (`not_a_repo`) is reported in yellow, without failing the check, and never
+  touched — both are things only a human can fix. A mirror never writes the
+  inventory. `check` (with the default update check), `install`, `update`
+  and `optimize` all run `git fetch` in each configured checkout for this,
+  bounded to 30 seconds per repository. `brew bundle install` runs with a
+  30-minute timeout, `git clone` with 15 minutes; every other action uses
+  the doctor's default of 5 minutes.
 - **Removal**: only `sccs doctor optimize --strict`, one action per extra,
   each confirmed on its own — `--yes` confirms removals too, exactly as for
   foreign plugins today; the actual protection is that removals never enter
   the plan outside `--strict` with `cleanup: true`. `npm`, `corepack` and
   `sccs` are never removed; a non-strict run on a mirror with extras and
   `cleanup: true` instead prints a single advisory block; `cleanup: false`
-  switches removals off entirely.
+  switches removals off entirely. If the plan contains an action that
+  reinstalls `sccs` itself (`uv tool install sccs==…`), re-run
+  `sccs doctor install` afterwards to work through the rest of the plan.
 
 ### Restoring a CAO provider after a `cao update` — since v2.64.0
 

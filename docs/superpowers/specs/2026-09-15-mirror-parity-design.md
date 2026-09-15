@@ -104,7 +104,8 @@ piece behind the drifted Brewfile.
 
 Rules the table does not show:
 
-- Homebrew cannot pin versions; parity there means "same packages, each current".
+- Homebrew cannot pin versions at all; the install path uses `--no-upgrade`, so
+  parity there means "same packages", not "each at its current version".
   uv and npm are pinned to the source's version.
 - Homebrew *extras* are computed against `brew leaves` (top-level formulae) and
   `brew list --cask`, never against the full dependency closure, so a dependency
@@ -145,7 +146,8 @@ Rules the table does not show:
   same actions as `update`, so on the source it still captures the inventory.
 - `doctor check --json` gains a `mirror` key: `role`, `source_host`, and per
   area the lists `missing`, `extra`, `version_differs`, plus `repos` with
-  `state` ∈ {`ok`, `missing`, `behind`, `modified`}. sccs-gui consumes this.
+  `state` ∈ {`ok`, `missing`, `behind`, `modified`, `not_a_repo`}. sccs-gui
+  consumes this.
 
 ### Code layout
 

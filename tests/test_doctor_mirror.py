@@ -237,16 +237,57 @@ class TestInventory:
         (tmp_path / "wrong.yaml").write_text("version: 1\nuv_tools: 3\n", encoding="utf-8")
         assert load_inventory(tmp_path / "wrong.yaml") is None
 
-    def test_capture_uses_wrappers_and_tolerates_missing_tools(self, monkeypatch: pytest.MonkeyPatch):
+    def test_capture_uses_wrappers(self, monkeypatch: pytest.MonkeyPatch):
         from sccs.doctor import mirror
 
         monkeypatch.setattr(mirror, "run_uv_tool_list", lambda: UV_LIST)
-        monkeypatch.setattr(mirror, "run_npm_global_list", lambda: None)
+        monkeypatch.setattr(mirror, "run_npm_global_list", lambda: NPM_JSON)
         inv = mirror.capture_inventory("live-mac")
         assert [p.name for p in inv.uv_tools] == ["agentmgr", "sccs", "odoodev-equitania"]
-        assert inv.npm_globals == []
+        assert [p.name for p in inv.npm_globals] == ["@playwright/cli", "less"]
         assert inv.captured_on == "live-mac"
         assert inv.version == 1
+
+    def test_capture_carries_forward_previous_when_tool_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
+        """v2.68.1 / finding F1: a transient `uv`/`npm` failure on the source
+        must not write an empty inventory — every mirror would then see the
+        whole area as extras and `optimize --strict` would propose removing
+        it all. `None` from the wrapper (tool absent OR the run failed) keeps
+        the PREVIOUS inventory's entries for that area instead."""
+        import logging
+
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import Inventory, PackageRef
+
+        monkeypatch.setattr(mirror, "run_uv_tool_list", lambda: None)
+        monkeypatch.setattr(mirror, "run_npm_global_list", lambda: NPM_JSON)
+        previous = Inventory(
+            captured_at="2026-09-14T10:00:00",
+            captured_on="live-mac",
+            uv_tools=[PackageRef(name="sccs", version="2.67.2")],
+            npm_globals=[],
+        )
+        with caplog.at_level(logging.WARNING, logger="sccs.doctor.mirror"):
+            inv = mirror.capture_inventory("live-mac", previous)
+        assert inv.uv_tools == previous.uv_tools
+        assert [p.name for p in inv.npm_globals] == ["@playwright/cli", "less"]
+        assert any("keeping the previous inventory's 1 entries" in r.message for r in caplog.records)
+
+    def test_capture_is_empty_with_warning_when_no_previous(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
+        import logging
+
+        from sccs.doctor import mirror
+
+        monkeypatch.setattr(mirror, "run_uv_tool_list", lambda: None)
+        monkeypatch.setattr(mirror, "run_npm_global_list", lambda: NPM_JSON)
+        with caplog.at_level(logging.WARNING, logger="sccs.doctor.mirror"):
+            inv = mirror.capture_inventory("live-mac", None)
+        assert inv.uv_tools == []
+        assert any("no previous inventory, recording an empty list" in r.message for r in caplog.records)
 
 
 BREWFILE = """tap "anomalyco/tap"
@@ -718,7 +759,9 @@ class TestMirrorActions:
         writes: list[Path] = []
         monkeypatch.setattr(mirror, "write_inventory", lambda p, inv: writes.append(p))
         monkeypatch.setattr(mirror, "run_brew_bundle_dump", lambda p: True)
-        monkeypatch.setattr(mirror, "capture_inventory", lambda host: Inventory(captured_at="t", captured_on=host))
+        monkeypatch.setattr(
+            mirror, "capture_inventory", lambda host, previous=None: Inventory(captured_at="t", captured_on=host)
+        )
         for a in mirror_update_actions(_report(role="mirror")):
             if a.python_callable:
                 a.python_callable()
@@ -732,13 +775,37 @@ class TestMirrorActions:
         dumped: list[Path] = []
         written: list[tuple[Path, Inventory]] = []
         monkeypatch.setattr(mirror, "run_brew_bundle_dump", lambda p: (dumped.append(p), True)[1])
-        monkeypatch.setattr(mirror, "capture_inventory", lambda host: Inventory(captured_at="t", captured_on=host))
+        monkeypatch.setattr(
+            mirror, "capture_inventory", lambda host, previous=None: Inventory(captured_at="t", captured_on=host)
+        )
         monkeypatch.setattr(mirror, "write_inventory", lambda p, inv: written.append((p, inv)))
         (a,) = mirror_update_actions(_report(role="source", source_stale=True))
         assert a.component == "mirror:capture" and a.auto_confirm is True and a.python_callable
         a.python_callable()
         assert dumped == [Path("/x/Brewfile")]
         assert written[0][0] == Path("/x/inventory.yaml") and written[0][1].captured_on == "demo-mac"
+
+    def test_source_capture_passes_loaded_previous_inventory(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        """Finding F1: `_capture` must load the existing inventory before
+        recapturing and hand it to `capture_inventory`, so a transient
+        `uv`/`npm` outage can fall back to what was there before."""
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import Inventory, mirror_update_actions
+
+        known = Inventory(captured_at="2026-09-14T10:00:00", captured_on="live-mac")
+        monkeypatch.setattr(mirror, "load_inventory", lambda p: known)
+        monkeypatch.setattr(mirror, "run_brew_bundle_dump", lambda p: True)
+        monkeypatch.setattr(mirror, "write_inventory", lambda p, inv: None)
+        seen: list[Inventory | None] = []
+
+        def _fake_capture(host, previous=None):
+            seen.append(previous)
+            return Inventory(captured_at="t", captured_on=host)
+
+        monkeypatch.setattr(mirror, "capture_inventory", _fake_capture)
+        (a,) = mirror_update_actions(_report(role="source", source_stale=True))
+        a.python_callable()
+        assert seen == [known]
 
     def test_source_update_runs_even_when_current(self):
         """`doctor update` on the source always refreshes — that is what keeps
@@ -802,6 +869,22 @@ class TestMirrorActions:
         assert rep.has_drift is False
         assert rep.has_extras is True
         assert mirror_install_actions(rep) == []
+
+    def test_modified_or_not_a_repo_is_not_drift(self, home: Path):
+        """Finding F4: a `modified` checkout or a broken git repo is something
+        only a human can fix — `sccs doctor install` cannot act on it, so it
+        must not fail the check (yellow, exit 0), only `missing`/`behind` do."""
+        from sccs.doctor.mirror import MirrorRepoSpec, RepoStatus
+
+        spec_a = MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path="~/gitbase/example/beam")
+        spec_b = MirrorRepoSpec(url="git@gitlab.example:org/two.git", path="~/gitbase/example/two")
+        rep = _report(
+            repos=[
+                RepoStatus(spec=spec_a, state="modified"),
+                RepoStatus(spec=spec_b, state="not_a_repo"),
+            ]
+        )
+        assert rep.has_drift is False
 
     def test_none_report_yields_nothing(self):
         from sccs.doctor.mirror import mirror_install_actions, mirror_remove_actions, mirror_update_actions
@@ -916,6 +999,21 @@ class TestReporter:
 
         rows = {r[0]: r for r in _mirror_rows(_report(fisher=FisherStatus(state="drift", extra=["old/plugin"])))}
         assert "STALE" in rows["mirror: fisher"][1]
+
+    def test_not_a_repo_row_is_stale(self, home: Path):
+        """Finding F4: a broken checkout is yellow like `modified`, never the
+        red MISSING a `git clone` action could fix."""
+        from sccs.doctor.mirror import MirrorRepoSpec, RepoStatus
+        from sccs.doctor.reporter import _mirror_rows
+
+        spec = MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path="~/gitbase/example/beam")
+        rows = {
+            r[0]: r
+            for r in _mirror_rows(
+                _report(repos=[RepoStatus(spec=spec, state="not_a_repo", detail="git status failed")])
+            )
+        }
+        assert "STALE" in rows["mirror: repo beam"][1]
 
     def test_source_rows(self):
         from sccs.doctor.reporter import _mirror_rows
@@ -1038,3 +1136,27 @@ class TestCliWiring:
         assert cats["sccs_inventory"]["local_path"] == "~/.config/sccs/inventory.yaml"
         assert cats["sccs_inventory"]["repo_path"] == ".config/sccs/inventory.yaml"
         assert cats["sccs_inventory"]["enabled"] is True
+
+    def test_install_update_optimize_fetch_repos(self):
+        """v2.68.1: `install`/`update`/`optimize` never fetched, so a mirror
+        stuck `behind` never saw its `git pull --ff-only` action refresh.
+        `_collect_doctor_statuses` is entangled with a lot of detector
+        plumbing to invoke directly here, so this pins the wiring two ways:
+        the parameter exists, and each of the three call sites in `cli.py`
+        passes it."""
+        import inspect
+
+        from sccs.cli import _collect_doctor_statuses
+
+        sig = inspect.signature(_collect_doctor_statuses)
+        assert "fetch_repos" in sig.parameters
+        assert sig.parameters["fetch_repos"].default is None
+
+        source = Path(__file__).resolve().parent.parent / "sccs" / "cli.py"
+        text = source.read_text(encoding="utf-8")
+        assert text.count("fetch_repos=True") == 3, (
+            "expected install, update and optimize to each pass fetch_repos=True"
+        )
+        assert "def doctor_check" in text and "check_updates=update_check" in text, (
+            "doctor check should keep deriving fetch from --update-check/--no-update-check, not fetch_repos"
+        )

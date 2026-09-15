@@ -244,6 +244,7 @@ def _mirror_rows(report: MirrorReport | None) -> list[tuple[str, str, str, str]]
             "ok": _OK,
             "behind": _OUTDATED,
             "modified": _STALE,
+            "not_a_repo": _STALE,
         }.get(repo.state, _MISSING)
         detail = repo.detail or (repo.spec.url if repo.state != "ok" else str(repo.path))
         rows.append((f"mirror: repo {repo.path.name}", status, "", f"{repo.state} — {detail}"))

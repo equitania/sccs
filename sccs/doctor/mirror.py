@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -204,14 +205,37 @@ def write_inventory(path: Path, inv: Inventory) -> None:
     atomic_write(path, _INVENTORY_HEADER + body)
 
 
-def capture_inventory(hostname: str) -> Inventory:
-    uv_text = run_uv_tool_list()
-    npm_text = run_npm_global_list()
+def _capture_area(
+    area: str,
+    text: str | None,
+    parse: Callable[[str], list[PackageRef]],
+    previous: list[PackageRef] | None,
+) -> list[PackageRef]:
+    """A wrapper returning `None` means the tool is absent OR a run failed —
+    both must fall back to the previous inventory's entries for that area,
+    never to an empty list: an empty list is persisted and then reads as
+    "every installed package is an extra" on every mirror."""
+    if text is not None:
+        return parse(text)
+    if previous is not None:
+        logger.warning(
+            "mirror: %s unavailable while capturing — keeping the previous inventory's %d entries",
+            area,
+            len(previous),
+        )
+        return list(previous)
+    logger.warning("mirror: %s unavailable while capturing — no previous inventory, recording an empty list", area)
+    return []
+
+
+def capture_inventory(hostname: str, previous: Inventory | None = None) -> Inventory:
     return Inventory(
         captured_at=datetime.now().replace(microsecond=0).isoformat(),
         captured_on=normalize_host(hostname),
-        uv_tools=parse_uv_tool_list(uv_text or ""),
-        npm_globals=parse_npm_global_json(npm_text or ""),
+        uv_tools=_capture_area("uv", run_uv_tool_list(), parse_uv_tool_list, previous.uv_tools if previous else None),
+        npm_globals=_capture_area(
+            "npm", run_npm_global_list(), parse_npm_global_json, previous.npm_globals if previous else None
+        ),
     )
 
 
@@ -368,7 +392,7 @@ def parse_git_status_branch(text: str) -> tuple[bool, bool]:
 @dataclass
 class RepoStatus:
     spec: MirrorRepoSpec
-    # "ok" | "missing" | "behind" | "modified" | "not_a_repo" | "error"
+    # "ok" | "missing" | "behind" | "modified" | "not_a_repo"
     state: str
     detail: str = ""
     fetched: bool = False
@@ -468,7 +492,7 @@ class MirrorReport:
         for area in (self.uv, self.npm):
             if area is not None and (area.missing or area.version_differs):
                 return True
-        if any(r.state in {"missing", "behind", "modified", "not_a_repo"} for r in self.repos):
+        if any(r.state in {"missing", "behind"} for r in self.repos):
             return True
         return bool(self.fisher is not None and self.fisher.missing)
 
@@ -645,7 +669,8 @@ def mirror_update_actions(report: MirrorReport | None) -> list[DoctorAction]:
     def _capture() -> None:
         if not run_brew_bundle_dump(brewfile):
             logger.warning("brew bundle dump failed — Brewfile left as is")
-        write_inventory(inventory_path, capture_inventory(hostname))
+        previous = load_inventory(inventory_path)
+        write_inventory(inventory_path, capture_inventory(hostname, previous))
 
     return [
         DoctorAction(
