@@ -80,6 +80,8 @@ __all__ = [
     "RepoDetector",
     "FisherStatus",
     "FisherDetector",
+    "MirrorReport",
+    "collect_mirror_report",
 ]
 
 logger = get_logger("sccs.doctor.mirror")
@@ -425,3 +427,90 @@ class FisherDetector:
         if st.missing or st.extra:
             st.state = "drift"
         return st
+
+
+# --- report -----------------------------------------------------------------
+
+
+@dataclass
+class MirrorReport:
+    role: str  # MirrorRole
+    hostname: str
+    source_host: str | None
+    inventory: Inventory | None
+    inventory_path: str
+    brewfile: str
+    brew: BrewStatus | None
+    uv: PackageAreaStatus | None
+    npm: PackageAreaStatus | None
+    repos: list[RepoStatus]
+    fisher: FisherStatus | None
+    source_stale: bool
+    cleanup: bool
+
+    @property
+    def has_drift(self) -> bool:
+        """Something the mirror lacks or has at the wrong version. On the
+        source this is `source_stale`. Extras are NOT drift — they are
+        reported in yellow and offered under `optimize --strict` only."""
+        if self.role == "source":
+            return self.source_stale
+        if self.brew is not None and self.brew.missing_count:
+            return True
+        for area in (self.uv, self.npm):
+            if area is not None and area.state == "drift":
+                return True
+        if any(r.state in {"missing", "behind", "modified", "not_a_repo"} for r in self.repos):
+            return True
+        return bool(self.fisher is not None and self.fisher.state == "drift")
+
+    @property
+    def has_extras(self) -> bool:
+        if self.brew is not None and self.brew.extra_count:
+            return True
+        return any(area is not None and area.extra for area in (self.uv, self.npm))
+
+
+def collect_mirror_report(
+    cfg: MirrorConfig | None,
+    *,
+    hostname: str | None = None,
+    fetch: bool = False,
+) -> MirrorReport | None:
+    role = resolve_role(cfg, hostname)
+    if role == "off" or cfg is None:
+        return None
+    host = hostname if hostname is not None else current_hostname()
+    inventory_path = expand_path(cfg.inventory_path)
+    inventory = load_inventory(inventory_path)
+    brew = BrewDetector().get_status(expand_path(cfg.brewfile), cfg.ignore_brew)
+    uv = npm = None
+    if inventory is not None:
+        detector = PackageDetector()
+        uv = detector.get_status("uv", inventory.uv_tools, cfg.ignore_uv_tools)
+        npm = detector.get_status("npm", inventory.npm_globals, cfg.ignore_npm)
+    repos = RepoDetector().get_statuses(cfg.repos, fetch=fetch)
+    fisher = FisherDetector().get_status(expand_path(cfg.fish_plugins))
+
+    source_stale = False
+    if role == "source":
+        source_stale = (
+            inventory is None
+            or brew.state in {"drift", "no_brewfile"}
+            or any(area is not None and area.state == "drift" for area in (uv, npm))
+        )
+    return MirrorReport(
+        role=role,
+        hostname=normalize_host(host),
+        source_host=cfg.source_host,
+        inventory=inventory,
+        inventory_path=str(inventory_path),
+        brewfile=str(expand_path(cfg.brewfile)),
+        brew=brew,
+        uv=uv,
+        npm=npm,
+        repos=repos,
+        fisher=fisher,
+        source_stale=source_stale,
+        cleanup=cfg.cleanup,
+    )

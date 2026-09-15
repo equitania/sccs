@@ -437,3 +437,83 @@ class TestFisherDetector:
         assert FisherDetector().get_status(plugins).state == "ok"
         monkeypatch.setattr(mirror, "run_fisher_list", lambda: None)
         assert FisherDetector().get_status(plugins).state == "unavailable"
+
+
+def _stub_all(monkeypatch, *, brew_state="ok", uv_state="ok", npm_state="ok"):
+    """Stub every detector the report uses; states are set directly."""
+    from sccs.doctor import mirror
+    from sccs.doctor.mirror import BrewStatus, FisherStatus, PackageAreaStatus
+
+    monkeypatch.setattr(mirror.BrewDetector, "get_status", lambda self, brewfile, ignore: BrewStatus(state=brew_state))
+    monkeypatch.setattr(
+        mirror.PackageDetector,
+        "get_status",
+        lambda self, area, wanted, ignore: PackageAreaStatus(area=area, state=uv_state if area == "uv" else npm_state),
+    )
+    monkeypatch.setattr(mirror.RepoDetector, "get_statuses", lambda self, specs, fetch: [])
+    monkeypatch.setattr(mirror.FisherDetector, "get_status", lambda self, p: FisherStatus(state="ok"))
+
+
+class TestCollectMirrorReport:
+    def test_off_returns_none(self):
+        from sccs.doctor.mirror import MirrorConfig, collect_mirror_report
+
+        assert collect_mirror_report(None, hostname="x") is None
+        assert collect_mirror_report(MirrorConfig(), hostname="x") is None
+
+    def test_mirror_reads_inventory(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor.mirror import Inventory, MirrorConfig, PackageRef, collect_mirror_report, write_inventory
+
+        _stub_all(monkeypatch, uv_state="drift")
+        cfg = MirrorConfig(source_host="live-mac")
+        inv = Inventory(captured_at="t", captured_on="live-mac", uv_tools=[PackageRef(name="sccs", version="1")])
+        write_inventory(home / ".config/sccs/inventory.yaml", inv)
+        rep = collect_mirror_report(cfg, hostname="demo-mac")
+        assert rep is not None and rep.role == "mirror"
+        assert rep.inventory == inv
+        assert rep.has_drift is True
+        assert rep.source_stale is False
+
+    def test_mirror_without_inventory_has_no_package_rows(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor.mirror import MirrorConfig, collect_mirror_report
+
+        _stub_all(monkeypatch)
+        rep = collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="demo-mac")
+        assert rep is not None and rep.inventory is None
+        assert rep.uv is None and rep.npm is None
+        assert rep.has_drift is False
+
+    def test_source_is_stale_when_brew_or_inventory_drift(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor.mirror import MirrorConfig, collect_mirror_report
+
+        _stub_all(monkeypatch, brew_state="drift")
+        rep = collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="live-mac")
+        assert rep is not None and rep.role == "source"
+        assert rep.source_stale is True
+
+    def test_source_with_missing_inventory_is_stale(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor.mirror import MirrorConfig, collect_mirror_report
+
+        _stub_all(monkeypatch)
+        rep = collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="live-mac")
+        assert rep is not None and rep.source_stale is True
+
+    def test_source_current(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor.mirror import Inventory, MirrorConfig, collect_mirror_report, write_inventory
+
+        _stub_all(monkeypatch)
+        write_inventory(home / ".config/sccs/inventory.yaml", Inventory(captured_at="t", captured_on="live-mac"))
+        rep = collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="live-mac")
+        assert rep is not None and rep.source_stale is False and rep.has_drift is False
+
+    def test_has_extras(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import BrewStatus, Inventory, MirrorConfig, collect_mirror_report, write_inventory
+
+        _stub_all(monkeypatch)
+        monkeypatch.setattr(
+            mirror.BrewDetector, "get_status", lambda self, b, i: BrewStatus(state="drift", extra_formulae=["ffmpeg"])
+        )
+        write_inventory(home / ".config/sccs/inventory.yaml", Inventory(captured_at="t", captured_on="live-mac"))
+        rep = collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="demo-mac")
+        assert rep is not None and rep.has_extras is True and rep.has_drift is False
