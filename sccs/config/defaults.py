@@ -261,6 +261,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "include": [
                 "config.fish",
                 "README.md",
+                "fish_plugins",
                 "functions/*.fish",
                 # v2.67.2: the Python helpers the fish functions call. Without
                 # them a synced `uvclean`/`gclean` fails on every other host.
@@ -383,12 +384,33 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "sync_mode": "bidirectional",
             "item_type": "file",
         },
+        # Homebrew Bundle (macOS) — truth for the mirror area's Homebrew check.
+        # Refresh on the source with `sccs doctor update` (brew bundle dump).
+        "homebrew_bundle": {
+            "enabled": True,
+            "description": "Homebrew Bundle — formulae, casks and taps (Brewfile)",
+            "local_path": "~/.config/homebrew/Brewfile",
+            "repo_path": ".config/homebrew/Brewfile",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "platforms": ["macos"],
+        },
         # Git Config (disabled by default)
         "git_config": {
             "enabled": False,
             "description": "Git Configuration (without credentials)",
             "local_path": "~/.gitconfig",
             "repo_path": ".config/git/gitconfig",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+        },
+        # SCCS inventory (v2.68.0) — uv tools and npm globals captured on the
+        # source host by `sccs doctor update`; a mirror reads it, never writes it.
+        "sccs_inventory": {
+            "enabled": True,
+            "description": "SCCS software inventory for mirror parity (written by doctor update on the source)",
+            "local_path": "~/.config/sccs/inventory.yaml",
+            "repo_path": ".config/sccs/inventory.yaml",
             "sync_mode": "bidirectional",
             "item_type": "file",
         },

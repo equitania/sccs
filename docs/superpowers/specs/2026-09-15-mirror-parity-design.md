@@ -100,18 +100,26 @@ piece behind the drifted Brewfile.
 | uv tools | inventory | `uv tool install <name>==<version> --reinstall` | `uv tool uninstall <name>` |
 | npm globals | inventory | `npm install -g <name>@<version>` | `npm uninstall -g <name>` |
 | repos | policy | missing → `git clone <url> <path>`; behind and clean → `git -C <path> pull --ff-only` | never removed |
-| Fisher | `fish_plugins` | `fish -c 'fisher update'` when `fisher list` differs | via `fisher update` (it removes unlisted plugins itself) |
+| Fisher | `fish_plugins` | `fish -c 'fisher install <name>'` per missing plugin | `fish -c 'fisher remove <name>'` per extra — never `fisher update`, which removes unlisted plugins as a side effect |
 
 Rules the table does not show:
 
-- Homebrew cannot pin versions; parity there means "same packages, each current".
+- Homebrew cannot pin versions at all; the install path uses `--no-upgrade`, so
+  parity there means "same packages", not "each at its current version".
   uv and npm are pinned to the source's version.
 - Homebrew *extras* are computed against `brew leaves` (top-level formulae) and
   `brew list --cask`, never against the full dependency closure, so a dependency
   pulled in by a Brewfile entry is never offered for removal.
 - A repo with local modifications (`git status --porcelain` non-empty) is
   reported as `modified` and never touched, in either direction.
-- `npm`, `corepack` and `uv` itself are hard-excluded from removal.
+- `npm`, `corepack` and the uv tool `sccs` itself are hard-excluded from removal.
+- `fisher update` is never emitted: with no arguments it uninstalls every plugin
+  absent from `fish_plugins`, which would be a removal on the install path
+  (found in review, 15.09.2026). Missing plugins are installed one by one,
+  extras removed one by one under `optimize --strict`.
+- Long-running actions carry their own timeout (`DoctorAction.timeout`):
+  `brew bundle install` 1800 s, `git clone` 900 s; everything else keeps the
+  doctor's default of 300 s.
 - `cleanup: false` hides the removal actions even under `--strict`.
 
 ### Safety
@@ -122,8 +130,10 @@ Rules the table does not show:
 - Repo URLs are restricted to `git@host:path` and `https://` at validation time;
   target paths must resolve under `$HOME`.
 - Removals only under `optimize --strict`, each its own confirm (default No),
-  identical to foreign plugins/MCP servers today. `--yes` skips confirms for
-  installs only, never for removals (mirrors the existing `auto_confirm` split).
+  identical to foreign plugins/MCP servers today. `--yes` confirms every action
+  in the plan, removals included — exactly as it does for foreign plugins in
+  `optimize --strict` today; the protection is that removals never enter a plan
+  outside `--strict` with `cleanup: true`.
 - The source host never gets install or removal actions from this area.
 
 ### Reporting
@@ -131,9 +141,13 @@ Rules the table does not show:
 - The doctor table gets a **Mirror** block: one row per area with the counts
   (`3 missing · 1 extra · 2 version`), and on the source a single row
   `source · inventory current` / `source · inventory stale`.
+- The non-strict `optimize` run prints one advisory block when a mirror has
+  extras and `cleanup` is on; a source never gets it. `optimize` splices the
+  same actions as `update`, so on the source it still captures the inventory.
 - `doctor check --json` gains a `mirror` key: `role`, `source_host`, and per
   area the lists `missing`, `extra`, `version_differs`, plus `repos` with
-  `state` ∈ {`ok`, `missing`, `behind`, `modified`}. sccs-gui consumes this.
+  `state` ∈ {`ok`, `missing`, `behind`, `modified`, `not_a_repo`}. sccs-gui
+  consumes this.
 
 ### Code layout
 

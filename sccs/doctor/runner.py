@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess  # nosec B404 - subprocess is intentional, see HARD RULES above
+from pathlib import Path
 
 # Characters that cmd.exe treats specially. When we have to launch a Windows
 # batch wrapper (npm.cmd/npx.cmd) via `cmd.exe /c`, any argument containing
@@ -339,3 +340,90 @@ def parse_node_major(version: str | None) -> int | None:
         return int(head)
     except ValueError:
         return None
+
+
+# --- mirror parity (v2.68.0) -------------------------------------------------
+# Every wrapper degrades to None/False: a detector must be able to say "brew is
+# not installed here" without raising, and a missing tool is a status, not a crash.
+
+
+def _lines(proc: subprocess.CompletedProcess[str]) -> list[str]:
+    return [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+
+
+def run_brew_lines(*args: str) -> list[str] | None:
+    """`brew <args>` → stripped non-empty stdout lines, or None when brew is
+    missing or the command fails. Used for `leaves`, `list --formula --full-name`,
+    `list --cask`, `tap`."""
+    try:
+        proc = _run(["brew", *args], timeout=60, check=False)
+    except DoctorError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return _lines(proc)
+
+
+def run_brew_bundle_dump(brewfile: Path) -> bool:
+    """Rewrite the Brewfile from the installed set (source host only)."""
+    try:
+        proc = _run(
+            ["brew", "bundle", "dump", "--file", str(brewfile), "--force", "--describe"],
+            timeout=120,
+            check=False,
+        )
+    except DoctorError:
+        return False
+    return proc.returncode == 0
+
+
+def run_uv_tool_list() -> str | None:
+    try:
+        proc = _run(["uv", "tool", "list"], timeout=30, check=False)
+    except DoctorError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout or ""
+
+
+def run_npm_global_list() -> str | None:
+    """`npm ls -g --depth=0 --json`. npm exits 1 on peer/extraneous warnings
+    while still printing the JSON, so stdout wins over the exit code."""
+    try:
+        proc = _run(["npm", "ls", "-g", "--depth=0", "--json"], timeout=60, check=False)
+    except DoctorError:
+        return None
+    out = (proc.stdout or "").strip()
+    return out or None
+
+
+def run_git_status_branch(path: Path) -> str | None:
+    """`git -C <path> status --porcelain=v1 -b` — first line carries the
+    tracking info (`## main...origin/main [behind 2]`), the rest the dirt."""
+    try:
+        proc = _run(["git", "-C", str(path), "status", "--porcelain=v1", "-b"], timeout=30, check=False)
+    except DoctorError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout or ""
+
+
+def run_git_fetch(path: Path) -> bool:
+    try:
+        proc = _run(["git", "-C", str(path), "fetch", "--quiet"], timeout=30, check=False)
+    except DoctorError:
+        return False
+    return proc.returncode == 0
+
+
+def run_fisher_list() -> list[str] | None:
+    """Fisher is a fish function, so it only exists inside fish."""
+    try:
+        proc = _run(["fish", "-c", "fisher list"], timeout=30, check=False)
+    except DoctorError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return _lines(proc)

@@ -79,6 +79,9 @@ sccs doctor check --no-update-check  # Ohne Live-Versionsprüfung (offline/schne
 sccs doctor install              # Installiert fehlende Komponenten (Confirm pro Action)
 sccs doctor install --yes        # Skip Confirms (CI use only)
 sccs doctor update               # Plugins + npx-Tools aktualisieren
+sccs doctor check                # … zeigt auf einem Spiegel `mirror: …`-Zeilen (v2.68.0)
+sccs doctor update               # auf der Quelle: Brewfile + inventory.yaml neu schreiben
+sccs doctor optimize --strict    # auf einem Spiegel: Überzähliges einzeln zur Bestätigung
 
 # Profile (LOKALE Artefakt-Gruppen parken, um den System-Prompt zu verkleinern — ungleich den Deployment-Profilen oben, siehe profiles.md)
 sccs profile list                # Profile + Zustand anzeigen
@@ -201,6 +204,9 @@ sccs doctor check --no-update-check  # Skip the live version check (offline/fast
 sccs doctor install              # Install missing components (confirm per action)
 sccs doctor install --yes        # Skip confirms (CI use only)
 sccs doctor update               # Update plugins + refresh npx tools
+sccs doctor check                # … shows `mirror: …` rows on a mirror (v2.68.0)
+sccs doctor update               # on the source: rewrite Brewfile + inventory.yaml
+sccs doctor optimize --strict    # on a mirror: confirm each extra individually
 
 # Profiles (park LOCAL artefact groups to shrink the system prompt — unrelated to the deployment profiles above, see profiles.md)
 sccs profile list                # Show profiles + their state

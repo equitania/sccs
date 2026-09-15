@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
 
-# Categories that hold project memory from other engagements. A typo must
-# not carry one customer's context onto another customer's server, so this
-# raises rather than filtering silently.
-BLOCKED_CATEGORIES: frozenset[str] = frozenset({"claude_memories", "claude_plans", "claude_todos"})
+# Categories that hold project memory from other engagements, or that name
+# the source host and enumerate its tooling. A typo must not carry one
+# customer's context — or the live workstation's inventory — onto another
+# customer's server, so this raises rather than filtering silently.
+BLOCKED_CATEGORIES: frozenset[str] = frozenset({"claude_memories", "claude_plans", "claude_todos", "sccs_inventory"})
 
 VALID_PLATFORMS: frozenset[str] = frozenset({"linux", "macos", "windows"})
 

@@ -29,6 +29,17 @@ def test_all_blocked_categories_are_refused():
             DeploymentProfile(include={blocked: ["*"]})
 
 
+def test_sccs_inventory_is_blocked():
+    """v2.68.1 / finding M11: `sccs_inventory` names the source host and
+    enumerates its uv/npm tooling — it must never ship to a customer host."""
+    with pytest.raises(ValueError, match="sccs_inventory"):
+        DeploymentProfile(
+            description="bad",
+            target_platform="linux",
+            include={"sccs_inventory": ["*"]},
+        )
+
+
 def test_retain_must_name_an_included_category():
     """Retaining a category that is not shipped is a typo, not a no-op."""
     with pytest.raises(ValueError, match="fish_config"):

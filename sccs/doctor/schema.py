@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import ntpath
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+
+from sccs.utils.paths import expand_path
 
 # Plugin & tool names: strict allowlist. Mirrors the pattern used in
 # sccs/git/operations.py — no leading '-' (option-injection guard) and only
@@ -646,6 +648,80 @@ class CliToolSpec(BaseModel):
         return v
 
 
+# Mirror parity (sccs/doctor/mirror.py). Defined here, not there, because
+# mirror.py needs `_validate_safe_name` from this module — putting the mirror
+# schema in mirror.py and importing it back into schema.py would be a cycle.
+# mirror.py re-exports these names so `from sccs.doctor.mirror import ...`
+# keeps working.
+_VERSION_PATTERN = re.compile(r"^[0-9][A-Za-z0-9.+\-]*$")
+# git@host:path or https://host/path — nothing else. `-` at the start would
+# be read as an option by git, `file:`/`ssh:` would let a config reach any path.
+_REPO_URL_PATTERN = re.compile(
+    r"^(?:git@[A-Za-z0-9.\-]+:[A-Za-z0-9_][A-Za-z0-9_./\-]*"
+    r"|https://[A-Za-z0-9.\-]+/[A-Za-z0-9_][A-Za-z0-9_./\-]*)$"
+)
+
+
+def _validate_under_home(value: str, field: str) -> str:
+    target = expand_path(value).resolve()
+    home = Path.home().resolve()
+    if target != home and home not in target.parents:
+        raise ValueError(f"{field} must resolve under the home directory: {value!r}")
+    return value
+
+
+class MirrorRepoSpec(BaseModel):
+    """A git checkout the mirror must have (e.g. the Beam shell extension)."""
+
+    url: str = Field(description="git@host:path or https://host/path")
+    path: str = Field(description="Checkout path, must resolve under ~")
+    branch: str | None = Field(default=None, description="Branch to clone; default branch when unset")
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        if not _REPO_URL_PATTERN.match(v):
+            raise ValueError(f"url must be git@host:path or https://host/path: {v!r}")
+        return v
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, v: str) -> str:
+        return _validate_under_home(v, "path")
+
+    @field_validator("branch")
+    @classmethod
+    def _validate_branch(cls, v: str | None) -> str | None:
+        return _validate_safe_name(v, "branch") if v else v
+
+
+class MirrorConfig(BaseModel):
+    """Policy for the mirror area (hand-edited, travels with config.yaml)."""
+
+    source_host: str | None = Field(
+        default=None,
+        description="Hostname of the live workstation. Unset → the area is off.",
+    )
+    cleanup: bool = Field(default=True, description="Offer removals under `optimize --strict`.")
+    brewfile: str = Field(default="~/.config/homebrew/Brewfile")
+    inventory_path: str = Field(default="~/.config/sccs/inventory.yaml")
+    fish_plugins: str = Field(default="~/.config/fish/fish_plugins")
+    repos: list[MirrorRepoSpec] = Field(default_factory=list)
+    ignore_brew: list[str] = Field(default_factory=list)
+    ignore_uv_tools: list[str] = Field(default_factory=list)
+    ignore_npm: list[str] = Field(default_factory=list)
+
+    @field_validator("ignore_brew", "ignore_uv_tools", "ignore_npm")
+    @classmethod
+    def _validate_ignores(cls, v: list[str]) -> list[str]:
+        return [_validate_safe_name(name, "ignore entry") for name in v]
+
+    @field_validator("brewfile", "inventory_path", "fish_plugins")
+    @classmethod
+    def _validate_paths(cls, v: str) -> str:
+        return _validate_under_home(v, "path")
+
+
 def _validate_inside_package(v: str, label: str) -> str:
     """Reject anything that could escape the package directory it is joined to.
 
@@ -877,6 +953,14 @@ class DoctorConfig(BaseModel):
     extra_cao_providers: list[CaoProviderSpec] = Field(
         default_factory=list,
         description="Additional CAO providers appended to the resolved cao_providers.",
+    )
+    mirror: MirrorConfig | None = Field(
+        default=None,
+        description=(
+            "Mirror parity: source_host names the live workstation; every other host "
+            "reconciles Homebrew, uv tools, npm globals, git checkouts and Fisher plugins "
+            "against it. Unset → no rows. See sccs/doctor/mirror.py."
+        ),
     )
 
     def effective_plugins(self) -> list[PluginSpec]:

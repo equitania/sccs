@@ -14,6 +14,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import questionary
 
@@ -48,6 +49,9 @@ from sccs.doctor.state import DoctorStateManager
 from sccs.utils.logging import get_logger
 from sccs.utils.paths import atomic_write, expand_path
 from sccs.utils.platform import get_current_platform
+
+if TYPE_CHECKING:
+    from sccs.doctor.mirror import MirrorReport
 
 logger = get_logger("doctor.installer")
 
@@ -100,6 +104,10 @@ class DoctorAction:
     # keep auto_confirm=False — the global delete-safety rule still applies and
     # the user is asked every time. `--yes` remains the blanket override.
     auto_confirm: bool = False
+    # Per-action override of execute_plan's default subprocess timeout (300s).
+    # None keeps the default; set higher for actions known to run long, e.g.
+    # `brew bundle install` (many casks) or `git clone` (a big repo).
+    timeout: int | None = None
 
     def is_print_only(self) -> bool:
         return not self.runnable or (self.cmd is None and self.python_callable is None)
@@ -1609,6 +1617,7 @@ def build_install_plan(
     cao_providers: list | None = None,
     statusline_presets: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
+    mirror: MirrorReport | None = None,
 ) -> InstallPlan:
     """Plan the actions needed to bring a missing/outdated host up to spec."""
     actions: list[DoctorAction] = []
@@ -1648,6 +1657,10 @@ def build_install_plan(
     # install step are followed by our cleanup pass.
     if settings_hook_violations and settings_path is not None:
         actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
+
+    from sccs.doctor.mirror import mirror_install_actions
+
+    actions.extend(mirror_install_actions(mirror))
     return InstallPlan(actions=actions)
 
 
@@ -1670,6 +1683,7 @@ def build_update_plan(
     cli_tools: list[CliToolStatus] | None = None,
     cao_providers: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
+    mirror: MirrorReport | None = None,
 ) -> InstallPlan:
     """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones.
 
@@ -1704,6 +1718,10 @@ def build_update_plan(
     actions.extend(_cao_provider_actions(cao_providers))
     if settings_hook_violations and settings_path is not None:
         actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
+
+    from sccs.doctor.mirror import mirror_update_actions
+
+    actions.extend(mirror_update_actions(mirror))
     return InstallPlan(actions=actions)
 
 
@@ -1727,6 +1745,7 @@ def build_optimize_plan(
     cli_tools: list[CliToolStatus] | None = None,
     cao_providers: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
+    mirror: MirrorReport | None = None,
     strict: bool = False,
 ) -> InstallPlan:
     """Plan a one-shot optimize pass.
@@ -1769,6 +1788,10 @@ def build_optimize_plan(
     if strict:
         actions.extend(_foreign_plugin_remove_actions(foreign_plugins))
         actions.extend(_foreign_mcp_remove_actions(foreign_mcp_servers))
+
+        from sccs.doctor.mirror import mirror_remove_actions
+
+        actions.extend(mirror_remove_actions(mirror))
     else:
         # Non-strict: surface the foreign set as a single warning block per
         # category. This avoids spamming the action list with manual_blocks
@@ -1803,6 +1826,9 @@ def build_optimize_plan(
                     component="foreign-mcp:summary",
                 )
             )
+        from sccs.doctor.mirror import mirror_extras_summary_action
+
+        actions.extend(mirror_extras_summary_action(mirror))
 
     # Same install+update sequence as build_update_plan so optimize is a
     # superset of update: anything update would do, optimize also does.
@@ -1826,6 +1852,10 @@ def build_optimize_plan(
     # statusline auto-fix) happen before our cleanup pass.
     if settings_hook_violations and settings_path is not None:
         actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
+
+    from sccs.doctor.mirror import mirror_update_actions
+
+    actions.extend(mirror_update_actions(mirror))
     return InstallPlan(actions=actions)
 
 
@@ -1913,7 +1943,7 @@ def execute_plan(
 
             if action.cmd is None:
                 raise DoctorError(f"Action {action.label!r} is not print-only but has no command")
-            proc = _run(action.cmd, check=True, capture=True, timeout=300)
+            proc = _run(action.cmd, check=True, capture=True, timeout=action.timeout or 300)
             detail = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout else ""
             result.outcomes.append(ActionOutcome(label=action.label, status="executed", detail=detail))
             logger.info("doctor action ok: %s", action.label)

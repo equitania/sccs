@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from rich.table import Table
 
 from sccs.doctor.detectors import (
@@ -23,6 +25,9 @@ from sccs.doctor.detectors import (
 )
 from sccs.doctor.installer import ExecuteResult, _npm_global_fix_block
 from sccs.output.console import Console
+
+if TYPE_CHECKING:
+    from sccs.doctor.mirror import MirrorReport
 
 # Status icons reused across the reporter.
 _OK = "[green]OK[/green]"
@@ -172,6 +177,98 @@ def _cli_tool_row(status: CliToolStatus) -> tuple[str, str, str, str]:
     return (label, _INFO, "", "not installed (optional) — run `sccs doctor install`")
 
 
+def _counts(*pairs: tuple[int, str]) -> str:
+    return " · ".join(f"{n} {word}" for n, word in pairs if n)
+
+
+def _area_status(missing: int, version: int, extra: int, available: bool) -> str:
+    if not available:
+        return _INFO
+    if missing or version:
+        return _MISSING
+    if extra:
+        return _STALE
+    return _OK
+
+
+def _mirror_rows(report: MirrorReport | None) -> list[tuple[str, str, str, str]]:
+    """Mirror parity (v2.68.0). Missing/wrong version on a mirror is red;
+    extras are yellow (offered under `optimize --strict` only); a stale
+    source is yellow and never a problem."""
+    if report is None:
+        return []
+    rows: list[tuple[str, str, str, str]] = []
+    if report.role == "source":
+        if report.source_stale:
+            rows.append(("mirror: role", _STALE, "", "source · Brewfile/inventory stale — run `sccs doctor update`"))
+        else:
+            rows.append(("mirror: role", _OK, "", "source · inventory current"))
+    else:
+        rows.append(("mirror: role", _OK, "", f"mirror of {report.source_host}"))
+
+    brew = report.brew
+    if brew is None or brew.state in {"unavailable", "no_brewfile"}:
+        detail = "brew not installed" if brew is None or brew.state == "unavailable" else "no Brewfile synced yet"
+        rows.append(("mirror: brew", _INFO, "", detail))
+    else:
+        rows.append(
+            (
+                "mirror: brew",
+                _area_status(brew.missing_count, 0, brew.extra_count, True),
+                "",
+                _counts((brew.missing_count, "missing"), (brew.extra_count, "extra")) or "in sync with Brewfile",
+            )
+        )
+
+    for label, area in (("uv", report.uv), ("npm", report.npm)):
+        if area is None:
+            rows.append((f"mirror: {label}", _INFO, "", "inventory not synced yet"))
+            continue
+        if area.state == "unavailable":
+            rows.append((f"mirror: {label}", _INFO, "", f"{label} not installed"))
+            continue
+        rows.append(
+            (
+                f"mirror: {label}",
+                _area_status(len(area.missing), len(area.version_differs), len(area.extra), True),
+                "",
+                _counts(
+                    (len(area.missing), "missing"), (len(area.version_differs), "version"), (len(area.extra), "extra")
+                )
+                or "in sync with inventory",
+            )
+        )
+
+    for repo in report.repos:
+        status = {
+            "ok": _OK,
+            "behind": _OUTDATED,
+            "modified": _STALE,
+            "not_a_repo": _STALE,
+        }.get(repo.state, _MISSING)
+        detail = repo.detail or (repo.spec.url if repo.state != "ok" else str(repo.path))
+        rows.append((f"mirror: repo {repo.path.name}", status, "", f"{repo.state} — {detail}"))
+
+    fisher = report.fisher
+    if fisher is None or fisher.state in {"unavailable", "no_plugins_file"}:
+        detail = (
+            "fisher not installed"
+            if fisher is None or fisher.state == "unavailable"
+            else "no fish_plugins file synced yet"
+        )
+        rows.append(("mirror: fisher", _INFO, "", detail))
+    else:
+        rows.append(
+            (
+                "mirror: fisher",
+                _area_status(len(fisher.missing), 0, len(fisher.extra), True),
+                "",
+                _counts((len(fisher.missing), "missing"), (len(fisher.extra), "extra")) or "in sync with fish_plugins",
+            )
+        )
+    return rows
+
+
 def _skill_package_row(status) -> tuple[str, str, str, str]:
     """One row per opt-in skill package (e.g. HyperFrames).
 
@@ -254,6 +351,7 @@ def render_doctor_report(
     powershell: PowerShellStatus | None = None,
     min_pwsh_major: int = 7,
     skill_packages: list | None = None,
+    mirror: MirrorReport | None = None,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -295,6 +393,8 @@ def render_doctor_report(
     if cli_tools:
         for cli_st in cli_tools:
             table.add_row(*_cli_tool_row(cli_st))
+    for mirror_row in _mirror_rows(mirror):
+        table.add_row(*mirror_row)
     for cao_st in cao_providers or []:
         table.add_row(*_cao_provider_row(cao_st))
     for sl_preset in statusline_presets or []:
@@ -495,6 +595,7 @@ def has_problems(
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cao_providers: list | None = None,
     skill_packages: list | None = None,
+    mirror: MirrorReport | None = None,
 ) -> bool:
     """Return True if any component is missing/outdated or has a permission issue."""
     if not (node.installed and node.meets_minimum):
@@ -525,7 +626,11 @@ def has_problems(
     # that will not load is upstream's to fix — shown, but not a failure.
     if skill_packages and any(s.needs_install for s in skill_packages):
         return True
-    return bool(browser_bundles and any(not b.all_present for b in browser_bundles))
+    if browser_bundles and any(not b.all_present for b in browser_bundles):
+        return True
+    # Extras and a stale source are never a problem — only a mirror that
+    # lacks something (or has it at the wrong version) flips the exit code.
+    return bool(mirror is not None and mirror.role == "mirror" and mirror.has_drift)
 
 
 def has_updates(

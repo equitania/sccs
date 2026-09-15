@@ -130,7 +130,7 @@ Entfernen verlangt eine Bestätigung. `--json` impliziert non-interaktiv und ver
 
 ### Blockierte Kategorien
 
-`claude_memories`, `claude_plans` und `claude_todos` dürfen **nie** in einem Deployment-Profil auftauchen — der Schema-Validator wirft, sobald eine davon versucht wird aufzunehmen. Das ist Projektgedächtnis aus anderen Engagements und hat auf einem Kundenhost nichts zu suchen.
+`claude_memories`, `claude_plans` und `claude_todos` dürfen **nie** in einem Deployment-Profil auftauchen — der Schema-Validator wirft, sobald eine davon versucht wird aufzunehmen. Das ist Projektgedächtnis aus anderen Engagements und hat auf einem Kundenhost nichts zu suchen. Ebenso blockiert: `sccs_inventory` — das Mirror-Parity-Inventar (v2.68.0) nennt den Hostnamen der Quelle und listet ihre uv-Tools und npm-Globals; auch das gehört nie auf einen Kundenhost.
 
 ### Ablauf im Überblick
 
@@ -278,7 +278,7 @@ Removal requires confirmation. `--json` implies non-interactive and refuses with
 
 ### Blocked categories
 
-`claude_memories`, `claude_plans` and `claude_todos` may **never** appear in a deployment profile — the schema validator raises the moment one is attempted. That is project memory from other engagements and has no place on a customer host.
+`claude_memories`, `claude_plans` and `claude_todos` may **never** appear in a deployment profile — the schema validator raises the moment one is attempted. That is project memory from other engagements and has no place on a customer host. Also blocked: `sccs_inventory` — the mirror-parity inventory (v2.68.0) names the source host and lists its uv tools and npm globals; that has no place on a customer host either.
 
 ### End-to-end flow
 
