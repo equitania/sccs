@@ -64,6 +64,10 @@ __all__ = [
     "parse_brewfile",
     "BrewStatus",
     "BrewDetector",
+    "VersionDiff",
+    "PackageAreaStatus",
+    "compare_packages",
+    "PackageDetector",
 ]
 
 logger = get_logger("sccs.doctor.mirror")
@@ -263,3 +267,62 @@ class BrewDetector:
         if st.missing_count or st.extra_count:
             st.state = "drift"
         return st
+
+
+# --- packages (uv tools, npm globals) ----------------------------------------
+
+
+@dataclass
+class VersionDiff:
+    name: str
+    have: str
+    want: str
+
+
+@dataclass
+class PackageAreaStatus:
+    area: str  # "uv" | "npm"
+    state: str  # "ok" | "drift" | "unavailable"
+    missing: list[PackageRef] = field(default_factory=list)
+    extra: list[str] = field(default_factory=list)
+    version_differs: list[VersionDiff] = field(default_factory=list)
+
+
+def compare_packages(
+    area: str,
+    wanted: list[PackageRef],
+    installed: list[PackageRef],
+    ignore: list[str],
+) -> PackageAreaStatus:
+    skip = set(ignore)
+    want = {p.name: p for p in wanted if p.name not in skip}
+    have = {p.name: p for p in installed if p.name not in skip}
+    st = PackageAreaStatus(
+        area=area,
+        state="ok",
+        missing=[want[n] for n in sorted(set(want) - set(have))],
+        extra=sorted(set(have) - set(want)),
+        version_differs=[
+            VersionDiff(name=n, have=have[n].version, want=want[n].version)
+            for n in sorted(set(want) & set(have))
+            if have[n].version != want[n].version
+        ],
+    )
+    if st.missing or st.extra or st.version_differs:
+        st.state = "drift"
+    return st
+
+
+class PackageDetector:
+    def installed(self, area: str) -> list[PackageRef] | None:
+        if area == "uv":
+            text = run_uv_tool_list()
+            return None if text is None else parse_uv_tool_list(text)
+        text = run_npm_global_list()
+        return None if text is None else parse_npm_global_json(text)
+
+    def get_status(self, area: str, wanted: list[PackageRef], ignore: list[str]) -> PackageAreaStatus:
+        installed = self.installed(area)
+        if installed is None:
+            return PackageAreaStatus(area=area, state="unavailable")
+        return compare_packages(area, wanted, installed, ignore)

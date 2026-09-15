@@ -320,3 +320,41 @@ class TestBrewDetector:
         from sccs.doctor.mirror import BrewDetector
 
         assert BrewDetector().get_status(tmp_path / "Brewfile", ignore=[]).state == "no_brewfile"
+
+
+class TestPackageDetector:
+    def test_compare_reports_all_three_kinds(self):
+        from sccs.doctor.mirror import PackageRef, VersionDiff, compare_packages
+
+        wanted = [PackageRef(name="sccs", version="2.68.0"), PackageRef(name="odoodev-equitania", version="0.68.0")]
+        installed = [PackageRef(name="sccs", version="2.67.2"), PackageRef(name="build", version="1.6.1")]
+        st = compare_packages("uv", wanted, installed, ignore=[])
+        assert st.state == "drift"
+        assert st.missing == [PackageRef(name="odoodev-equitania", version="0.68.0")]
+        assert st.extra == ["build"]
+        assert st.version_differs == [VersionDiff(name="sccs", have="2.67.2", want="2.68.0")]
+
+    def test_ignore_hides_everywhere(self):
+        from sccs.doctor.mirror import PackageRef, compare_packages
+
+        wanted = [PackageRef(name="a", version="1")]
+        installed = [PackageRef(name="b", version="1")]
+        assert compare_packages("npm", wanted, installed, ignore=["a", "b"]).state == "ok"
+
+    def test_detector_uv_unavailable(self, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import PackageDetector, PackageRef
+
+        monkeypatch.setattr(mirror, "run_uv_tool_list", lambda: None)
+        st = PackageDetector().get_status("uv", [PackageRef(name="sccs", version="1")], ignore=[])
+        assert st.state == "unavailable"
+
+    def test_detector_npm_reads_json(self, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import PackageDetector, PackageRef
+
+        monkeypatch.setattr(mirror, "run_npm_global_list", lambda: NPM_JSON)
+        st = PackageDetector().get_status("npm", [PackageRef(name="less", version="4.6.4")], ignore=[])
+        assert st.state == "drift"
+        assert st.extra == ["@playwright/cli"]
+        assert st.missing == [] and st.version_differs == []
