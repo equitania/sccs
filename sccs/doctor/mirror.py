@@ -27,12 +27,13 @@ import socket
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
 from sccs.doctor.runner import (
+    run_brew_bundle_dump,
     run_brew_lines,
     run_fisher_list,
     run_git_fetch,
@@ -49,6 +50,9 @@ from sccs.doctor.schema import (  # noqa: F401 — re-exported
 )
 from sccs.utils.logging import get_logger
 from sccs.utils.paths import atomic_write, expand_path
+
+if TYPE_CHECKING:
+    from sccs.doctor.installer import DoctorAction
 
 __all__ = [
     "MirrorConfig",
@@ -82,6 +86,9 @@ __all__ = [
     "FisherDetector",
     "MirrorReport",
     "collect_mirror_report",
+    "mirror_install_actions",
+    "mirror_update_actions",
+    "mirror_remove_actions",
 ]
 
 logger = get_logger("sccs.doctor.mirror")
@@ -514,3 +521,161 @@ def collect_mirror_report(
         source_stale=source_stale,
         cleanup=cfg.cleanup,
     )
+
+
+# --- actions ----------------------------------------------------------------
+#
+# Two rules, both enforced here and pinned by tests:
+#   - the source never receives install/remove actions (it IS the truth);
+#   - a mirror never writes the inventory (only the source captures).
+
+
+def _safe(name: str, field: str) -> str | None:
+    try:
+        return _validate_safe_name(name, field)
+    except ValueError as exc:
+        logger.warning("mirror: skipping %s — %s", field, exc)
+        return None
+
+
+def mirror_install_actions(report: MirrorReport | None) -> list[DoctorAction]:
+    from sccs.doctor.installer import DoctorAction
+
+    if report is None or report.role != "mirror":
+        return []
+    actions: list[DoctorAction] = []
+
+    if report.brew is not None and report.brew.missing_count:
+        actions.append(
+            DoctorAction(
+                label=f"brew bundle install — {report.brew.missing_count} missing from Brewfile",
+                cmd=["brew", "bundle", "install", "--file", report.brewfile, "--no-upgrade"],
+                component="mirror:brew",
+            )
+        )
+
+    for area in (report.uv, report.npm):
+        if area is None:
+            continue
+        wanted = list(area.missing) + [PackageRef(name=d.name, version=d.want) for d in area.version_differs]
+        for pkg in wanted:
+            name = _safe(pkg.name, f"{area.area} package")
+            if name is None or not _VERSION_PATTERN.match(pkg.version):
+                continue
+            if area.area == "uv":
+                cmd = ["uv", "tool", "install", f"{name}=={pkg.version}", "--reinstall"]
+            else:
+                cmd = ["npm", "install", "-g", f"{name}@{pkg.version}"]
+            actions.append(
+                DoctorAction(
+                    label=f"install {area.area} {name} {pkg.version}",
+                    cmd=cmd,
+                    component=f"mirror:{area.area}:{name}",
+                )
+            )
+
+    for repo in report.repos:
+        path = repo.path
+        component = f"mirror:repo:{path.name}"
+        if repo.state == "missing":
+            cmd = ["git", "clone"]
+            if repo.spec.branch:
+                cmd += ["--branch", repo.spec.branch]
+            cmd += [repo.spec.url, str(path)]
+            actions.append(DoctorAction(label=f"clone {repo.spec.url} → {path}", cmd=cmd, component=component))
+        elif repo.state == "behind":
+            actions.append(
+                DoctorAction(
+                    label=f"pull --ff-only {path}",
+                    cmd=["git", "-C", str(path), "pull", "--ff-only"],
+                    component=component,
+                    auto_confirm=True,
+                )
+            )
+        elif repo.state in {"modified", "not_a_repo"}:
+            actions.append(
+                DoctorAction(
+                    label=f"{path}: {repo.state} — left untouched",
+                    cmd=None,
+                    runnable=False,
+                    manual_block=(
+                        f"# {path} is {repo.state}; SCCS never touches a checkout with local changes.\n"
+                        f"# Commit or stash there, then re-run `sccs doctor install`."
+                    ),
+                    component=component,
+                )
+            )
+
+    if report.fisher is not None and report.fisher.state == "drift":
+        actions.append(
+            DoctorAction(
+                label=f"fisher update — {len(report.fisher.missing)} missing, {len(report.fisher.extra)} extra",
+                cmd=["fish", "-c", "fisher update"],
+                component="mirror:fisher",
+            )
+        )
+    return actions
+
+
+def mirror_update_actions(report: MirrorReport | None) -> list[DoctorAction]:
+    from sccs.doctor.installer import DoctorAction
+
+    if report is None:
+        return []
+    if report.role == "mirror":
+        return mirror_install_actions(report)
+
+    brewfile = Path(report.brewfile)
+    inventory_path = Path(report.inventory_path)
+    hostname = report.hostname
+
+    def _capture() -> None:
+        if not run_brew_bundle_dump(brewfile):
+            logger.warning("brew bundle dump failed — Brewfile left as is")
+        write_inventory(inventory_path, capture_inventory(hostname))
+
+    return [
+        DoctorAction(
+            label="capture source inventory (Brewfile + inventory.yaml)",
+            python_callable=_capture,
+            component="mirror:capture",
+            auto_confirm=True,
+        )
+    ]
+
+
+def mirror_remove_actions(report: MirrorReport | None) -> list[DoctorAction]:
+    """One confirm-gated action per extra. Only `build_optimize_plan(strict=True)`
+    calls this; `cleanup: false` turns it off entirely."""
+    from sccs.doctor.installer import DoctorAction
+
+    if report is None or report.role != "mirror" or not report.cleanup:
+        return []
+    actions: list[DoctorAction] = []
+
+    def add(label: str, cmd: list[str], component: str) -> None:
+        actions.append(DoctorAction(label=f"REMOVE {label}", cmd=cmd, component=component))
+
+    if report.brew is not None:
+        for name in report.brew.extra_formulae:
+            if (n := _safe(name, "formula")) is not None:
+                add(f"brew formula {n}", ["brew", "uninstall", n], f"mirror:brew:{n}")
+        for name in report.brew.extra_casks:
+            if (n := _safe(name, "cask")) is not None:
+                add(f"brew cask {n}", ["brew", "uninstall", "--cask", n], f"mirror:brew:{n}")
+        for name in report.brew.extra_taps:
+            if (n := _safe(name, "tap")) is not None:
+                add(f"brew tap {n}", ["brew", "untap", n], f"mirror:brew:{n}")
+    if report.uv is not None:
+        for name in report.uv.extra:
+            if name in UV_NEVER_REMOVED:
+                continue
+            if (n := _safe(name, "uv tool")) is not None:
+                add(f"uv tool {n}", ["uv", "tool", "uninstall", n], f"mirror:uv:{n}")
+    if report.npm is not None:
+        for name in report.npm.extra:
+            if name in NPM_ALWAYS_IGNORED:
+                continue
+            if (n := _safe(name, "npm package")) is not None:
+                add(f"npm global {n}", ["npm", "uninstall", "-g", n], f"mirror:npm:{n}")
+    return actions

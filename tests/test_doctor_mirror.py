@@ -551,3 +551,231 @@ class TestCollectMirrorReport:
         write_inventory(home / ".config/sccs/inventory.yaml", Inventory(captured_at="t", captured_on="live-mac"))
         rep = collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="demo-mac")
         assert rep is not None and rep.has_drift is False and rep.has_extras is True
+
+
+def _report(**kw):
+    from sccs.doctor.mirror import MirrorReport
+
+    base = dict(
+        role="mirror",
+        hostname="demo-mac",
+        source_host="live-mac",
+        inventory=None,
+        inventory_path="/x/inventory.yaml",
+        brewfile="/x/Brewfile",
+        brew=None,
+        uv=None,
+        npm=None,
+        repos=[],
+        fisher=None,
+        source_stale=False,
+        cleanup=True,
+    )
+    base.update(kw)
+    return MirrorReport(**base)
+
+
+class TestMirrorActions:
+    def test_install_actions_cover_every_area(self, home: Path):
+        from sccs.doctor.mirror import (
+            BrewStatus,
+            FisherStatus,
+            MirrorRepoSpec,
+            PackageAreaStatus,
+            PackageRef,
+            RepoStatus,
+            VersionDiff,
+            mirror_install_actions,
+        )
+
+        spec_missing = MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path="~/gitbase/example/beam")
+        spec_behind = MirrorRepoSpec(
+            url="https://gitlab.example/org/two.git", path="~/gitbase/example/two", branch="main"
+        )
+        rep = _report(
+            brew=BrewStatus(state="drift", missing_formulae=["bat"], extra_formulae=["ffmpeg"]),
+            uv=PackageAreaStatus(
+                area="uv",
+                state="drift",
+                missing=[PackageRef(name="odoodev-equitania", version="0.68.0")],
+                version_differs=[VersionDiff(name="sccs", have="2.67.2", want="2.68.0")],
+                extra=["build"],
+            ),
+            npm=PackageAreaStatus(
+                area="npm", state="drift", missing=[PackageRef(name="@playwright/cli", version="0.1.18")]
+            ),
+            repos=[RepoStatus(spec=spec_missing, state="missing"), RepoStatus(spec=spec_behind, state="behind")],
+            fisher=FisherStatus(state="drift", missing=["jethrokuan/z"]),
+        )
+        cmds = [a.cmd for a in mirror_install_actions(rep)]
+        assert ["brew", "bundle", "install", "--file", "/x/Brewfile", "--no-upgrade"] in cmds
+        assert ["uv", "tool", "install", "odoodev-equitania==0.68.0", "--reinstall"] in cmds
+        assert ["uv", "tool", "install", "sccs==2.68.0", "--reinstall"] in cmds
+        assert ["npm", "install", "-g", "@playwright/cli@0.1.18"] in cmds
+        assert ["git", "clone", "git@gitlab.example:org/beam.git", str(home / "gitbase/example/beam")] in cmds
+        assert ["git", "-C", str(home / "gitbase/example/two"), "pull", "--ff-only"] in cmds
+        assert ["fish", "-c", "fisher update"] in cmds
+        # extras never appear in install actions
+        assert not any(a.cmd and "uninstall" in a.cmd for a in mirror_install_actions(rep))
+
+    def test_clone_with_branch(self, home: Path):
+        from sccs.doctor.mirror import MirrorRepoSpec, RepoStatus, mirror_install_actions
+
+        spec = MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path="~/gitbase/example/beam", branch="dev")
+        (a,) = mirror_install_actions(_report(repos=[RepoStatus(spec=spec, state="missing")]))
+        assert a.cmd == [
+            "git",
+            "clone",
+            "--branch",
+            "dev",
+            "git@gitlab.example:org/beam.git",
+            str(home / "gitbase/example/beam"),
+        ]
+
+    def test_modified_repo_is_print_only(self, home: Path):
+        from sccs.doctor.mirror import MirrorRepoSpec, RepoStatus, mirror_install_actions
+
+        spec = MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path="~/gitbase/example/beam")
+        (a,) = mirror_install_actions(_report(repos=[RepoStatus(spec=spec, state="modified")]))
+        assert a.runnable is False and a.cmd is None and "modified" in (a.manual_block or "")
+
+    def test_pull_is_auto_confirmed_but_installs_are_not(self, home: Path):
+        from sccs.doctor.mirror import MirrorRepoSpec, PackageAreaStatus, PackageRef, RepoStatus, mirror_install_actions
+
+        spec = MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path="~/gitbase/example/beam")
+        rep = _report(
+            repos=[RepoStatus(spec=spec, state="behind")],
+            uv=PackageAreaStatus(area="uv", state="drift", missing=[PackageRef(name="x", version="1")]),
+        )
+        by_component = {a.component: a for a in mirror_install_actions(rep)}
+        assert by_component["mirror:repo:beam"].auto_confirm is True
+        assert by_component["mirror:uv:x"].auto_confirm is False
+
+    # --- the two hard rules ---------------------------------------------
+
+    def test_source_never_receives_install_or_remove_actions(self):
+        from sccs.doctor.mirror import (
+            BrewStatus,
+            PackageAreaStatus,
+            PackageRef,
+            mirror_install_actions,
+            mirror_remove_actions,
+        )
+
+        rep = _report(
+            role="source",
+            source_stale=True,
+            brew=BrewStatus(state="drift", missing_formulae=["bat"], extra_formulae=["ffmpeg"]),
+            uv=PackageAreaStatus(area="uv", state="drift", missing=[PackageRef(name="x", version="1")], extra=["y"]),
+        )
+        assert mirror_install_actions(rep) == []
+        assert mirror_remove_actions(rep) == []
+
+    def test_mirror_never_writes_inventory(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import mirror_update_actions
+
+        writes: list[Path] = []
+        monkeypatch.setattr(mirror, "write_inventory", lambda p, inv: writes.append(p))
+        monkeypatch.setattr(mirror, "run_brew_bundle_dump", lambda p: True)
+        for a in mirror_update_actions(_report(role="mirror")):
+            if a.python_callable:
+                a.python_callable()
+        assert writes == []
+        assert all(a.component != "mirror:capture" for a in mirror_update_actions(_report(role="mirror")))
+
+    def test_source_update_captures_both_files(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import Inventory, mirror_update_actions
+
+        dumped: list[Path] = []
+        written: list[tuple[Path, Inventory]] = []
+        monkeypatch.setattr(mirror, "run_brew_bundle_dump", lambda p: (dumped.append(p), True)[1])
+        monkeypatch.setattr(mirror, "capture_inventory", lambda host: Inventory(captured_at="t", captured_on=host))
+        monkeypatch.setattr(mirror, "write_inventory", lambda p, inv: written.append((p, inv)))
+        (a,) = mirror_update_actions(_report(role="source", source_stale=True))
+        assert a.component == "mirror:capture" and a.auto_confirm is True and a.python_callable
+        a.python_callable()
+        assert dumped == [Path("/x/Brewfile")]
+        assert written[0][0] == Path("/x/inventory.yaml") and written[0][1].captured_on == "demo-mac"
+
+    def test_source_update_runs_even_when_current(self):
+        """`doctor update` on the source always refreshes — that is what keeps
+        the files current; staleness only decides the check row."""
+        from sccs.doctor.mirror import mirror_update_actions
+
+        assert len(mirror_update_actions(_report(role="source", source_stale=False))) == 1
+
+    def test_remove_actions_one_per_extra_never_protected(self):
+        from sccs.doctor.mirror import BrewStatus, PackageAreaStatus, mirror_remove_actions
+
+        rep = _report(
+            brew=BrewStatus(state="drift", extra_formulae=["ffmpeg"], extra_casks=["davit"], extra_taps=["a/b"]),
+            uv=PackageAreaStatus(area="uv", state="drift", extra=["build", "sccs"]),
+            npm=PackageAreaStatus(area="npm", state="drift", extra=["pnpm", "npm", "corepack"]),
+        )
+        actions = mirror_remove_actions(rep)
+        cmds = [a.cmd for a in actions]
+        assert ["brew", "uninstall", "ffmpeg"] in cmds
+        assert ["brew", "uninstall", "--cask", "davit"] in cmds
+        assert ["brew", "untap", "a/b"] in cmds
+        assert ["uv", "tool", "uninstall", "build"] in cmds
+        assert ["npm", "uninstall", "-g", "pnpm"] in cmds
+        assert not any("sccs" in (a.cmd or []) for a in actions)
+        assert not any(c[-1] in {"npm", "corepack"} for c in cmds if c)
+        assert all(a.auto_confirm is False and a.label.startswith("REMOVE ") for a in actions)
+        assert len(actions) == 5
+
+    def test_remove_actions_respect_cleanup_false(self):
+        from sccs.doctor.mirror import BrewStatus, mirror_remove_actions
+
+        rep = _report(cleanup=False, brew=BrewStatus(state="drift", extra_formulae=["ffmpeg"]))
+        assert mirror_remove_actions(rep) == []
+
+    def test_none_report_yields_nothing(self):
+        from sccs.doctor.mirror import mirror_install_actions, mirror_remove_actions, mirror_update_actions
+
+        assert mirror_install_actions(None) == mirror_update_actions(None) == mirror_remove_actions(None) == []
+
+
+class TestPlanWiring:
+    def _base(self):
+        from sccs.doctor.defaults import get_node_install_spec
+        from sccs.doctor.detectors import ClaudeCliStatus, NodeStatus
+        from sccs.doctor.schema import DoctorConfig
+
+        return dict(
+            config=DoctorConfig(),
+            node=NodeStatus(
+                installed=True,
+                version="22.0.0",
+                major=22,
+                meets_minimum=True,
+                install_hint=get_node_install_spec("macos"),
+                platform="macos",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            plugins=[],
+            npx_tools=[],
+        )
+
+    def test_install_plan_contains_mirror_actions(self, home: Path):
+        from sccs.doctor.installer import build_install_plan
+        from sccs.doctor.mirror import PackageAreaStatus, PackageRef
+
+        rep = _report(uv=PackageAreaStatus(area="uv", state="drift", missing=[PackageRef(name="x", version="1")]))
+        plan = build_install_plan(**self._base(), mirror=rep)
+        assert any(a.component == "mirror:uv:x" for a in plan.actions)
+
+    def test_removals_only_in_strict_optimize(self, home: Path):
+        from sccs.doctor.installer import build_install_plan, build_optimize_plan, build_update_plan
+        from sccs.doctor.mirror import BrewStatus
+
+        rep = _report(brew=BrewStatus(state="drift", extra_formulae=["ffmpeg"]))
+        base = self._base()
+        opt = dict(foreign_plugins=[], mcp_servers=[], foreign_mcp_servers=[])
+        has_remove = lambda plan: any(a.label.startswith("REMOVE ") and "ffmpeg" in a.label for a in plan.actions)  # noqa: E731
+        assert not has_remove(build_install_plan(**base, mirror=rep))
+        assert not has_remove(build_update_plan(**base, mirror=rep))
+        assert not has_remove(build_optimize_plan(**base, **opt, mirror=rep, strict=False))
+        assert has_remove(build_optimize_plan(**base, **opt, mirror=rep, strict=True))
