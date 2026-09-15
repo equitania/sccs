@@ -440,16 +440,26 @@ class TestFisherDetector:
 
 
 def _stub_all(monkeypatch, *, brew_state="ok", uv_state="ok", npm_state="ok"):
-    """Stub every detector the report uses; states are set directly."""
-    from sccs.doctor import mirror
-    from sccs.doctor.mirror import BrewStatus, FisherStatus, PackageAreaStatus
+    """Stub every detector the report uses; states are set directly.
 
-    monkeypatch.setattr(mirror.BrewDetector, "get_status", lambda self, brewfile, ignore: BrewStatus(state=brew_state))
-    monkeypatch.setattr(
-        mirror.PackageDetector,
-        "get_status",
-        lambda self, area, wanted, ignore: PackageAreaStatus(area=area, state=uv_state if area == "uv" else npm_state),
-    )
+    A "drift" state carries a real gap (a missing entry), so it matches what
+    the real detectors produce — `has_drift` reads the gap, not the coarse
+    state string.
+    """
+    from sccs.doctor import mirror
+    from sccs.doctor.mirror import BrewStatus, FisherStatus, PackageAreaStatus, PackageRef
+
+    def brew_status(self, brewfile, ignore):
+        missing = ["x"] if brew_state == "drift" else []
+        return BrewStatus(state=brew_state, missing_formulae=missing)
+
+    def package_status(self, area, wanted, ignore):
+        state = uv_state if area == "uv" else npm_state
+        missing = [PackageRef(name="x", version="1")] if state == "drift" else []
+        return PackageAreaStatus(area=area, state=state, missing=missing)
+
+    monkeypatch.setattr(mirror.BrewDetector, "get_status", brew_status)
+    monkeypatch.setattr(mirror.PackageDetector, "get_status", package_status)
     monkeypatch.setattr(mirror.RepoDetector, "get_statuses", lambda self, specs, fetch: [])
     monkeypatch.setattr(mirror.FisherDetector, "get_status", lambda self, p: FisherStatus(state="ok"))
 
@@ -517,3 +527,27 @@ class TestCollectMirrorReport:
         write_inventory(home / ".config/sccs/inventory.yaml", Inventory(captured_at="t", captured_on="live-mac"))
         rep = collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="demo-mac")
         assert rep is not None and rep.has_extras is True and rep.has_drift is False
+
+    def test_uv_extras_only_is_not_drift(self, home: Path, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import (
+            Inventory,
+            MirrorConfig,
+            PackageAreaStatus,
+            collect_mirror_report,
+            write_inventory,
+        )
+
+        _stub_all(monkeypatch)
+        monkeypatch.setattr(
+            mirror.PackageDetector,
+            "get_status",
+            lambda self, area, wanted, ignore: (
+                PackageAreaStatus(area="uv", state="drift", extra=["build"])
+                if area == "uv"
+                else PackageAreaStatus(area=area, state="ok")
+            ),
+        )
+        write_inventory(home / ".config/sccs/inventory.yaml", Inventory(captured_at="t", captured_on="live-mac"))
+        rep = collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="demo-mac")
+        assert rep is not None and rep.has_drift is False and rep.has_extras is True

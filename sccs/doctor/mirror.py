@@ -458,7 +458,7 @@ class MirrorReport:
         if self.brew is not None and self.brew.missing_count:
             return True
         for area in (self.uv, self.npm):
-            if area is not None and area.state == "drift":
+            if area is not None and (area.missing or area.version_differs):
                 return True
         if any(r.state in {"missing", "behind", "modified", "not_a_repo"} for r in self.repos):
             return True
