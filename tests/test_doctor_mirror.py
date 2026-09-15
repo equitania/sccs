@@ -614,7 +614,7 @@ class TestMirrorActions:
         assert ["npm", "install", "-g", "@playwright/cli@0.1.18"] in cmds
         assert ["git", "clone", "git@gitlab.example:org/beam.git", str(home / "gitbase/example/beam")] in cmds
         assert ["git", "-C", str(home / "gitbase/example/two"), "pull", "--ff-only"] in cmds
-        assert ["fish", "-c", "fisher update"] in cmds
+        assert ["fish", "-c", "fisher install jethrokuan/z"] in cmds
         # extras never appear in install actions
         assert not any(a.cmd and "uninstall" in a.cmd for a in mirror_install_actions(rep))
 
@@ -651,6 +651,44 @@ class TestMirrorActions:
         assert by_component["mirror:repo:beam"].auto_confirm is True
         assert by_component["mirror:uv:x"].auto_confirm is False
 
+    def test_long_running_actions_carry_a_timeout_override(self, home: Path):
+        from sccs.doctor.mirror import (
+            BrewStatus,
+            MirrorRepoSpec,
+            PackageAreaStatus,
+            PackageRef,
+            RepoStatus,
+            mirror_install_actions,
+        )
+
+        spec = MirrorRepoSpec(url="git@gitlab.example:org/beam.git", path="~/gitbase/example/beam")
+        rep = _report(
+            brew=BrewStatus(state="drift", missing_formulae=["bat"]),
+            uv=PackageAreaStatus(area="uv", state="drift", missing=[PackageRef(name="x", version="1")]),
+            repos=[RepoStatus(spec=spec, state="missing")],
+        )
+        by_component = {a.component: a for a in mirror_install_actions(rep)}
+        assert by_component["mirror:brew"].timeout == 1800
+        assert by_component["mirror:repo:beam"].timeout == 900
+        assert by_component["mirror:uv:x"].timeout is None
+
+    def test_invalid_version_is_logged_and_skipped(self, home: Path, caplog: pytest.LogCaptureFixture):
+        import logging
+
+        from sccs.doctor.mirror import PackageAreaStatus, PackageRef, mirror_install_actions
+
+        # PackageRef itself validates `version` against `_VERSION_PATTERN` on
+        # construction, so a normal PackageRef(...) call can never carry an
+        # invalid version into mirror_install_actions — `model_construct`
+        # bypasses that validator, the way a value loaded from an untrusted
+        # source (e.g. a future non-pydantic path) could.
+        bad = PackageRef.model_construct(name="x", version="1; rm -rf /")
+        rep = _report(uv=PackageAreaStatus(area="uv", state="drift", missing=[bad]))
+        with caplog.at_level(logging.WARNING, logger="sccs.doctor.mirror"):
+            actions = mirror_install_actions(rep)
+        assert actions == []
+        assert any("invalid version" in r.message for r in caplog.records)
+
     # --- the two hard rules ---------------------------------------------
 
     def test_source_never_receives_install_or_remove_actions(self):
@@ -673,11 +711,12 @@ class TestMirrorActions:
 
     def test_mirror_never_writes_inventory(self, home: Path, monkeypatch: pytest.MonkeyPatch):
         from sccs.doctor import mirror
-        from sccs.doctor.mirror import mirror_update_actions
+        from sccs.doctor.mirror import Inventory, mirror_update_actions
 
         writes: list[Path] = []
         monkeypatch.setattr(mirror, "write_inventory", lambda p, inv: writes.append(p))
         monkeypatch.setattr(mirror, "run_brew_bundle_dump", lambda p: True)
+        monkeypatch.setattr(mirror, "capture_inventory", lambda host: Inventory(captured_at="t", captured_on=host))
         for a in mirror_update_actions(_report(role="mirror")):
             if a.python_callable:
                 a.python_callable()
@@ -707,12 +746,13 @@ class TestMirrorActions:
         assert len(mirror_update_actions(_report(role="source", source_stale=False))) == 1
 
     def test_remove_actions_one_per_extra_never_protected(self):
-        from sccs.doctor.mirror import BrewStatus, PackageAreaStatus, mirror_remove_actions
+        from sccs.doctor.mirror import BrewStatus, FisherStatus, PackageAreaStatus, mirror_remove_actions
 
         rep = _report(
             brew=BrewStatus(state="drift", extra_formulae=["ffmpeg"], extra_casks=["davit"], extra_taps=["a/b"]),
             uv=PackageAreaStatus(area="uv", state="drift", extra=["build", "sccs"]),
             npm=PackageAreaStatus(area="npm", state="drift", extra=["pnpm", "npm", "corepack"]),
+            fisher=FisherStatus(state="drift", extra=["old/plugin"]),
         )
         actions = mirror_remove_actions(rep)
         cmds = [a.cmd for a in actions]
@@ -721,16 +761,45 @@ class TestMirrorActions:
         assert ["brew", "untap", "a/b"] in cmds
         assert ["uv", "tool", "uninstall", "build"] in cmds
         assert ["npm", "uninstall", "-g", "pnpm"] in cmds
+        assert ["fish", "-c", "fisher remove old/plugin"] in cmds
         assert not any("sccs" in (a.cmd or []) for a in actions)
         assert not any(c[-1] in {"npm", "corepack"} for c in cmds if c)
         assert all(a.auto_confirm is False and a.label.startswith("REMOVE ") for a in actions)
-        assert len(actions) == 5
+        assert len(actions) == 6
 
     def test_remove_actions_respect_cleanup_false(self):
         from sccs.doctor.mirror import BrewStatus, mirror_remove_actions
 
         rep = _report(cleanup=False, brew=BrewStatus(state="drift", extra_formulae=["ffmpeg"]))
         assert mirror_remove_actions(rep) == []
+
+    def test_extras_summary_source_yields_nothing(self):
+        from sccs.doctor.mirror import BrewStatus, mirror_extras_summary_action
+
+        rep = _report(role="source", brew=BrewStatus(state="drift", extra_formulae=["ffmpeg"]))
+        assert mirror_extras_summary_action(rep) == []
+
+    def test_extras_summary_respects_cleanup_false(self):
+        from sccs.doctor.mirror import BrewStatus, mirror_extras_summary_action
+
+        rep = _report(cleanup=False, brew=BrewStatus(state="drift", extra_formulae=["ffmpeg"]))
+        assert mirror_extras_summary_action(rep) == []
+
+    def test_extras_summary_mirror_with_extras(self):
+        from sccs.doctor.mirror import BrewStatus, mirror_extras_summary_action
+
+        rep = _report(brew=BrewStatus(state="drift", extra_formulae=["ffmpeg"]))
+        (a,) = mirror_extras_summary_action(rep)
+        assert a.runnable is False and a.cmd == [] and "review needed" in a.label
+        assert a.component == "mirror:extras:summary"
+
+    def test_fisher_extras_only_is_not_drift_but_is_extra(self):
+        from sccs.doctor.mirror import FisherStatus, mirror_install_actions
+
+        rep = _report(fisher=FisherStatus(state="drift", extra=["x"]))
+        assert rep.has_drift is False
+        assert rep.has_extras is True
+        assert mirror_install_actions(rep) == []
 
     def test_none_report_yields_nothing(self):
         from sccs.doctor.mirror import mirror_install_actions, mirror_remove_actions, mirror_update_actions
@@ -779,3 +848,22 @@ class TestPlanWiring:
         assert not has_remove(build_update_plan(**base, mirror=rep))
         assert not has_remove(build_optimize_plan(**base, **opt, mirror=rep, strict=False))
         assert has_remove(build_optimize_plan(**base, **opt, mirror=rep, strict=True))
+
+    def test_optimize_plan_captures_on_a_source(self, home: Path):
+        from sccs.doctor.installer import build_optimize_plan
+
+        base = self._base()
+        opt = dict(foreign_plugins=[], mcp_servers=[], foreign_mcp_servers=[])
+        rep = _report(role="source", source_stale=True)
+        plan = build_optimize_plan(**base, **opt, mirror=rep, strict=False)
+        assert any(a.component == "mirror:capture" for a in plan.actions)
+
+    def test_optimize_plan_does_not_duplicate_mirror_install_actions(self, home: Path):
+        from sccs.doctor.installer import build_optimize_plan
+        from sccs.doctor.mirror import PackageAreaStatus, PackageRef
+
+        base = self._base()
+        opt = dict(foreign_plugins=[], mcp_servers=[], foreign_mcp_servers=[])
+        rep = _report(uv=PackageAreaStatus(area="uv", state="drift", missing=[PackageRef(name="x", version="1")]))
+        plan = build_optimize_plan(**base, **opt, mirror=rep, strict=False)
+        assert sum(1 for a in plan.actions if a.component == "mirror:uv:x") == 1

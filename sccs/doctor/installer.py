@@ -104,6 +104,10 @@ class DoctorAction:
     # keep auto_confirm=False — the global delete-safety rule still applies and
     # the user is asked every time. `--yes` remains the blanket override.
     auto_confirm: bool = False
+    # Per-action override of execute_plan's default subprocess timeout (300s).
+    # None keeps the default; set higher for actions known to run long, e.g.
+    # `brew bundle install` (many casks) or `git clone` (a big repo).
+    timeout: int | None = None
 
     def is_print_only(self) -> bool:
         return not self.runnable or (self.cmd is None and self.python_callable is None)
@@ -1822,16 +1826,9 @@ def build_optimize_plan(
                     component="foreign-mcp:summary",
                 )
             )
-        if mirror is not None and mirror.has_extras:
-            actions.append(
-                DoctorAction(
-                    label="mirror has software the source does not — review needed",
-                    cmd=[],
-                    runnable=False,
-                    manual_block="# Re-run with `--strict` to queue one confirm-gated removal per extra.",
-                    component="mirror:extras:summary",
-                )
-            )
+        from sccs.doctor.mirror import mirror_extras_summary_action
+
+        actions.extend(mirror_extras_summary_action(mirror))
 
     # Same install+update sequence as build_update_plan so optimize is a
     # superset of update: anything update would do, optimize also does.
@@ -1856,9 +1853,9 @@ def build_optimize_plan(
     if settings_hook_violations and settings_path is not None:
         actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
 
-    from sccs.doctor.mirror import mirror_install_actions
+    from sccs.doctor.mirror import mirror_update_actions
 
-    actions.extend(mirror_install_actions(mirror))
+    actions.extend(mirror_update_actions(mirror))
     return InstallPlan(actions=actions)
 
 
@@ -1946,7 +1943,7 @@ def execute_plan(
 
             if action.cmd is None:
                 raise DoctorError(f"Action {action.label!r} is not print-only but has no command")
-            proc = _run(action.cmd, check=True, capture=True, timeout=300)
+            proc = _run(action.cmd, check=True, capture=True, timeout=action.timeout or 300)
             detail = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout else ""
             result.outcomes.append(ActionOutcome(label=action.label, status="executed", detail=detail))
             logger.info("doctor action ok: %s", action.label)

@@ -89,6 +89,7 @@ __all__ = [
     "mirror_install_actions",
     "mirror_update_actions",
     "mirror_remove_actions",
+    "mirror_extras_summary_action",
 ]
 
 logger = get_logger("sccs.doctor.mirror")
@@ -469,13 +470,15 @@ class MirrorReport:
                 return True
         if any(r.state in {"missing", "behind", "modified", "not_a_repo"} for r in self.repos):
             return True
-        return bool(self.fisher is not None and self.fisher.state == "drift")
+        return bool(self.fisher is not None and self.fisher.missing)
 
     @property
     def has_extras(self) -> bool:
         if self.brew is not None and self.brew.extra_count:
             return True
-        return any(area is not None and area.extra for area in (self.uv, self.npm))
+        if any(area is not None and area.extra for area in (self.uv, self.npm)):
+            return True
+        return bool(self.fisher is not None and self.fisher.extra)
 
 
 def collect_mirror_report(
@@ -530,11 +533,11 @@ def collect_mirror_report(
 #   - a mirror never writes the inventory (only the source captures).
 
 
-def _safe(name: str, field: str) -> str | None:
+def _safe(name: str, field_name: str) -> str | None:
     try:
-        return _validate_safe_name(name, field)
+        return _validate_safe_name(name, field_name)
     except ValueError as exc:
-        logger.warning("mirror: skipping %s — %s", field, exc)
+        logger.warning("mirror: skipping %s — %s", field_name, exc)
         return None
 
 
@@ -551,6 +554,7 @@ def mirror_install_actions(report: MirrorReport | None) -> list[DoctorAction]:
                 label=f"brew bundle install — {report.brew.missing_count} missing from Brewfile",
                 cmd=["brew", "bundle", "install", "--file", report.brewfile, "--no-upgrade"],
                 component="mirror:brew",
+                timeout=1800,
             )
         )
 
@@ -560,7 +564,10 @@ def mirror_install_actions(report: MirrorReport | None) -> list[DoctorAction]:
         wanted = list(area.missing) + [PackageRef(name=d.name, version=d.want) for d in area.version_differs]
         for pkg in wanted:
             name = _safe(pkg.name, f"{area.area} package")
-            if name is None or not _VERSION_PATTERN.match(pkg.version):
+            if name is None:
+                continue
+            if not _VERSION_PATTERN.match(pkg.version):
+                logger.warning("mirror: skipping %s %s — invalid version %r", area.area, name, pkg.version)
                 continue
             if area.area == "uv":
                 cmd = ["uv", "tool", "install", f"{name}=={pkg.version}", "--reinstall"]
@@ -582,7 +589,9 @@ def mirror_install_actions(report: MirrorReport | None) -> list[DoctorAction]:
             if repo.spec.branch:
                 cmd += ["--branch", repo.spec.branch]
             cmd += [repo.spec.url, str(path)]
-            actions.append(DoctorAction(label=f"clone {repo.spec.url} → {path}", cmd=cmd, component=component))
+            actions.append(
+                DoctorAction(label=f"clone {repo.spec.url} → {path}", cmd=cmd, component=component, timeout=900)
+            )
         elif repo.state == "behind":
             actions.append(
                 DoctorAction(
@@ -606,14 +615,18 @@ def mirror_install_actions(report: MirrorReport | None) -> list[DoctorAction]:
                 )
             )
 
-    if report.fisher is not None and report.fisher.state == "drift":
-        actions.append(
-            DoctorAction(
-                label=f"fisher update — {len(report.fisher.missing)} missing, {len(report.fisher.extra)} extra",
-                cmd=["fish", "-c", "fisher update"],
-                component="mirror:fisher",
+    if report.fisher is not None:
+        for name in report.fisher.missing:
+            n = _safe(name, "fisher plugin")
+            if n is None:
+                continue
+            actions.append(
+                DoctorAction(
+                    label=f"fisher install {n}",
+                    cmd=["fish", "-c", f"fisher install {n}"],
+                    component=f"mirror:fisher:{n}",
+                )
             )
-        )
     return actions
 
 
@@ -659,13 +672,13 @@ def mirror_remove_actions(report: MirrorReport | None) -> list[DoctorAction]:
     if report.brew is not None:
         for name in report.brew.extra_formulae:
             if (n := _safe(name, "formula")) is not None:
-                add(f"brew formula {n}", ["brew", "uninstall", n], f"mirror:brew:{n}")
+                add(f"brew formula {n}", ["brew", "uninstall", n], f"mirror:brew:formula:{n}")
         for name in report.brew.extra_casks:
             if (n := _safe(name, "cask")) is not None:
-                add(f"brew cask {n}", ["brew", "uninstall", "--cask", n], f"mirror:brew:{n}")
+                add(f"brew cask {n}", ["brew", "uninstall", "--cask", n], f"mirror:brew:cask:{n}")
         for name in report.brew.extra_taps:
             if (n := _safe(name, "tap")) is not None:
-                add(f"brew tap {n}", ["brew", "untap", n], f"mirror:brew:{n}")
+                add(f"brew tap {n}", ["brew", "untap", n], f"mirror:brew:tap:{n}")
     if report.uv is not None:
         for name in report.uv.extra:
             if name in UV_NEVER_REMOVED:
@@ -678,4 +691,28 @@ def mirror_remove_actions(report: MirrorReport | None) -> list[DoctorAction]:
                 continue
             if (n := _safe(name, "npm package")) is not None:
                 add(f"npm global {n}", ["npm", "uninstall", "-g", n], f"mirror:npm:{n}")
+    if report.fisher is not None:
+        for name in report.fisher.extra:
+            if (n := _safe(name, "fisher plugin")) is not None:
+                add(f"fisher plugin {n}", ["fish", "-c", f"fisher remove {n}"], f"mirror:fisher:{n}")
     return actions
+
+
+def mirror_extras_summary_action(report: MirrorReport | None) -> list[DoctorAction]:
+    """Non-strict `optimize` warning: one print-only action naming the extras,
+    gated the same way `mirror_remove_actions` is (mirror role, cleanup on) so
+    the summary never appears for a report that could not act on the extras
+    anyway."""
+    from sccs.doctor.installer import DoctorAction
+
+    if report is None or report.role != "mirror" or not report.cleanup or not report.has_extras:
+        return []
+    return [
+        DoctorAction(
+            label="mirror has software the source does not — review needed",
+            cmd=[],
+            runnable=False,
+            manual_block="# Re-run with `--strict` to queue one confirm-gated removal per extra.",
+            component="mirror:extras:summary",
+        )
+    ]
