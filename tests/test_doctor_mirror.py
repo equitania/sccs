@@ -165,3 +165,83 @@ class TestRunnerWrappers:
         )
         assert runner.run_fisher_list() == ["jorgebucaran/fisher", "edc/bass"]
         assert seen == [["fish", "-c", "fisher list"]]
+
+
+UV_LIST = """agentmgr v0.2.2
+- agentmgr
+sccs v2.67.2
+- sccs
+odoodev-equitania v0.68.0
+- odoodev
+- odoodev-x
+"""
+
+NPM_JSON = """{
+  "name": "lib",
+  "dependencies": {
+    "@playwright/cli": {"version": "0.1.18", "overridden": false},
+    "less": {"version": "4.6.4"},
+    "npm": {"version": "11.19.1"},
+    "corepack": {"version": "0.34.0"}
+  }
+}"""
+
+
+class TestInventory:
+    def test_parse_uv_tool_list(self):
+        from sccs.doctor.mirror import PackageRef, parse_uv_tool_list
+
+        assert parse_uv_tool_list(UV_LIST) == [
+            PackageRef(name="agentmgr", version="0.2.2"),
+            PackageRef(name="sccs", version="2.67.2"),
+            PackageRef(name="odoodev-equitania", version="0.68.0"),
+        ]
+
+    def test_parse_npm_drops_npm_and_corepack(self):
+        from sccs.doctor.mirror import PackageRef, parse_npm_global_json
+
+        assert parse_npm_global_json(NPM_JSON) == [
+            PackageRef(name="@playwright/cli", version="0.1.18"),
+            PackageRef(name="less", version="4.6.4"),
+        ]
+
+    def test_parse_npm_garbage_is_empty(self):
+        from sccs.doctor.mirror import parse_npm_global_json
+
+        assert parse_npm_global_json("not json") == []
+        assert parse_npm_global_json('{"dependencies": {"x": {}}}') == []
+
+    def test_roundtrip(self, tmp_path: Path):
+        from sccs.doctor.mirror import Inventory, PackageRef, load_inventory, write_inventory
+
+        inv = Inventory(
+            captured_at="2026-09-15T10:00:00",
+            captured_on="live-mac",
+            uv_tools=[PackageRef(name="sccs", version="2.67.2")],
+            npm_globals=[PackageRef(name="@playwright/cli", version="0.1.18")],
+        )
+        path = tmp_path / "inventory.yaml"
+        write_inventory(path, inv)
+        assert load_inventory(path) == inv
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("# Written by `sccs doctor update` on the source host")
+
+    def test_load_missing_or_broken_is_none(self, tmp_path: Path):
+        from sccs.doctor.mirror import load_inventory
+
+        assert load_inventory(tmp_path / "nope.yaml") is None
+        (tmp_path / "bad.yaml").write_text("uv_tools: [", encoding="utf-8")
+        assert load_inventory(tmp_path / "bad.yaml") is None
+        (tmp_path / "wrong.yaml").write_text("version: 1\nuv_tools: 3\n", encoding="utf-8")
+        assert load_inventory(tmp_path / "wrong.yaml") is None
+
+    def test_capture_uses_wrappers_and_tolerates_missing_tools(self, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+
+        monkeypatch.setattr(mirror, "run_uv_tool_list", lambda: UV_LIST)
+        monkeypatch.setattr(mirror, "run_npm_global_list", lambda: None)
+        inv = mirror.capture_inventory("live-mac")
+        assert [p.name for p in inv.uv_tools] == ["agentmgr", "sccs", "odoodev-equitania"]
+        assert inv.npm_globals == []
+        assert inv.captured_on == "live-mac"
+        assert inv.version == 1

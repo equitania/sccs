@@ -21,15 +21,26 @@ from here without a cycle. The names are re-exported below so
 
 from __future__ import annotations
 
+import json
+import re
 import socket
+from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
+import yaml
+from pydantic import BaseModel, Field, field_validator
+
+from sccs.doctor.runner import run_npm_global_list, run_uv_tool_list
 from sccs.doctor.schema import (  # noqa: F401 — re-exported
     _REPO_URL_PATTERN,
     _VERSION_PATTERN,
     MirrorConfig,
     MirrorRepoSpec,
+    _validate_safe_name,
 )
+from sccs.utils.logging import get_logger
+from sccs.utils.paths import atomic_write
 
 __all__ = [
     "MirrorConfig",
@@ -39,7 +50,18 @@ __all__ = [
     "normalize_host",
     "current_hostname",
     "resolve_role",
+    "PackageRef",
+    "Inventory",
+    "parse_uv_tool_list",
+    "parse_npm_global_json",
+    "load_inventory",
+    "write_inventory",
+    "capture_inventory",
+    "NPM_ALWAYS_IGNORED",
+    "UV_NEVER_REMOVED",
 ]
+
+logger = get_logger("sccs.doctor.mirror")
 
 # --- roles ------------------------------------------------------------------
 
@@ -60,3 +82,103 @@ def resolve_role(cfg: MirrorConfig | None, hostname: str | None = None) -> Mirro
         return "off"
     host = hostname if hostname is not None else current_hostname()
     return "source" if normalize_host(host) == normalize_host(cfg.source_host) else "mirror"
+
+
+# --- inventory ---------------------------------------------------------------
+
+NPM_ALWAYS_IGNORED = frozenset({"npm", "corepack"})
+UV_NEVER_REMOVED = frozenset({"sccs"})
+
+_INVENTORY_HEADER = "# Written by `sccs doctor update` on the source host — do not edit by hand.\n"
+_UV_LINE = re.compile(r"^(?P<name>[A-Za-z0-9_.\-]+) v(?P<version>\S+)$")
+
+
+class PackageRef(BaseModel):
+    name: str
+    version: str
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        return _validate_safe_name(v, "package name")
+
+    @field_validator("version")
+    @classmethod
+    def _validate_version(cls, v: str) -> str:
+        if not _VERSION_PATTERN.match(v):
+            raise ValueError(f"version has invalid characters: {v!r}")
+        return v
+
+
+class Inventory(BaseModel):
+    version: int = 1
+    captured_at: str
+    captured_on: str
+    uv_tools: list[PackageRef] = Field(default_factory=list)
+    npm_globals: list[PackageRef] = Field(default_factory=list)
+
+
+def parse_uv_tool_list(text: str) -> list[PackageRef]:
+    """`uv tool list` prints `name vX.Y.Z` followed by `- entrypoint` lines."""
+    out: list[PackageRef] = []
+    for line in text.splitlines():
+        m = _UV_LINE.match(line.strip())
+        if not m:
+            continue
+        try:
+            out.append(PackageRef(name=m.group("name"), version=m.group("version")))
+        except ValueError:
+            logger.warning("uv tool list: skipping unparsable entry %r", line)
+    return out
+
+
+def parse_npm_global_json(text: str) -> list[PackageRef]:
+    """`npm ls -g --depth=0 --json` → dependencies with a version; npm itself
+    and corepack are on every host and never part of the comparison."""
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return []
+    deps = data.get("dependencies") if isinstance(data, dict) else None
+    if not isinstance(deps, dict):
+        return []
+    out: list[PackageRef] = []
+    for name, info in deps.items():
+        if name in NPM_ALWAYS_IGNORED or not isinstance(info, dict):
+            continue
+        version = info.get("version")
+        if not isinstance(version, str):
+            continue
+        try:
+            out.append(PackageRef(name=name, version=version))
+        except ValueError:
+            logger.warning("npm ls -g: skipping unparsable entry %r", name)
+    return out
+
+
+def load_inventory(path: Path) -> Inventory | None:
+    if not path.is_file():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return Inventory.model_validate(data)
+    except (yaml.YAMLError, ValueError, TypeError) as exc:
+        logger.warning("inventory %s is unreadable: %s", path, exc)
+        return None
+
+
+def write_inventory(path: Path, inv: Inventory) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = yaml.safe_dump(inv.model_dump(), sort_keys=False, allow_unicode=True)
+    atomic_write(path, _INVENTORY_HEADER + body)
+
+
+def capture_inventory(hostname: str) -> Inventory:
+    uv_text = run_uv_tool_list()
+    npm_text = run_npm_global_list()
+    return Inventory(
+        captured_at=datetime.now().replace(microsecond=0).isoformat(),
+        captured_on=normalize_host(hostname),
+        uv_tools=parse_uv_tool_list(uv_text or ""),
+        npm_globals=parse_npm_global_json(npm_text or ""),
+    )
