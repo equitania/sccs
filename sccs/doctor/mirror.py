@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 import socket
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -31,7 +32,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
-from sccs.doctor.runner import run_npm_global_list, run_uv_tool_list
+from sccs.doctor.runner import run_brew_lines, run_npm_global_list, run_uv_tool_list
 from sccs.doctor.schema import (  # noqa: F401 — re-exported
     _REPO_URL_PATTERN,
     _VERSION_PATTERN,
@@ -59,6 +60,10 @@ __all__ = [
     "capture_inventory",
     "NPM_ALWAYS_IGNORED",
     "UV_NEVER_REMOVED",
+    "BrewSet",
+    "parse_brewfile",
+    "BrewStatus",
+    "BrewDetector",
 ]
 
 logger = get_logger("sccs.doctor.mirror")
@@ -182,3 +187,79 @@ def capture_inventory(hostname: str) -> Inventory:
         uv_tools=parse_uv_tool_list(uv_text or ""),
         npm_globals=parse_npm_global_json(npm_text or ""),
     )
+
+
+# --- homebrew ---------------------------------------------------------------
+
+_BREWFILE_LINE = re.compile(r'^(?P<kind>tap|brew|cask)\s+"(?P<name>[^"]+)"')
+
+
+@dataclass
+class BrewSet:
+    taps: set[str] = field(default_factory=set)
+    formulae: set[str] = field(default_factory=set)
+    casks: set[str] = field(default_factory=set)
+
+
+def parse_brewfile(text: str) -> BrewSet:
+    """Brewfile → sets. Options after the name (`restart_service:`,
+    `trusted:`) are ignored; `vscode`/`mas` lines are not ours."""
+    out = BrewSet()
+    for line in text.splitlines():
+        m = _BREWFILE_LINE.match(line.strip())
+        if not m:
+            continue
+        getattr(out, {"tap": "taps", "brew": "formulae", "cask": "casks"}[m.group("kind")]).add(m.group("name"))
+    return out
+
+
+@dataclass
+class BrewStatus:
+    # "ok" | "drift" | "unavailable" (brew not installed) | "no_brewfile"
+    state: str
+    missing_taps: list[str] = field(default_factory=list)
+    missing_formulae: list[str] = field(default_factory=list)
+    missing_casks: list[str] = field(default_factory=list)
+    extra_taps: list[str] = field(default_factory=list)
+    extra_formulae: list[str] = field(default_factory=list)
+    extra_casks: list[str] = field(default_factory=list)
+
+    @property
+    def missing_count(self) -> int:
+        return len(self.missing_taps) + len(self.missing_formulae) + len(self.missing_casks)
+
+    @property
+    def extra_count(self) -> int:
+        return len(self.extra_taps) + len(self.extra_formulae) + len(self.extra_casks)
+
+
+class BrewDetector:
+    """Missing = in the Brewfile but not installed (checked against the FULL
+    installed formula list, so a Brewfile entry that arrived as a dependency
+    counts as present). Extra = a *leaf* (`brew leaves`) not in the Brewfile —
+    never a dependency, so nothing pulled in by a wanted package is ever
+    offered for removal."""
+
+    def get_status(self, brewfile: Path, ignore: list[str]) -> BrewStatus:
+        if not brewfile.is_file():
+            return BrewStatus(state="no_brewfile")
+        wanted = parse_brewfile(brewfile.read_text(encoding="utf-8"))
+        leaves = run_brew_lines("leaves")
+        formulae = run_brew_lines("list", "--formula", "--full-name")
+        casks = run_brew_lines("list", "--cask")
+        taps = run_brew_lines("tap")
+        if leaves is None or formulae is None or casks is None or taps is None:
+            return BrewStatus(state="unavailable")
+        skip = set(ignore)
+        st = BrewStatus(
+            state="ok",
+            missing_taps=sorted(wanted.taps - set(taps) - skip),
+            missing_formulae=sorted(wanted.formulae - set(formulae) - skip),
+            missing_casks=sorted(wanted.casks - set(casks) - skip),
+            extra_taps=sorted(set(taps) - wanted.taps - skip),
+            extra_formulae=sorted(set(leaves) - wanted.formulae - skip),
+            extra_casks=sorted(set(casks) - wanted.casks - skip),
+        )
+        if st.missing_count or st.extra_count:
+            st.state = "drift"
+        return st

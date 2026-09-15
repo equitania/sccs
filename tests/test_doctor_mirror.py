@@ -245,3 +245,78 @@ class TestInventory:
         assert inv.npm_globals == []
         assert inv.captured_on == "live-mac"
         assert inv.version == 1
+
+
+BREWFILE = """tap "anomalyco/tap"
+tap "eqms/claude-workbench", trusted: true
+brew "bat"
+brew "sleepwatcher", restart_service: :changed
+brew "anomalyco/tap/opencode", trusted: true
+cask "iterm2"
+# comment
+vscode "ms-python.python"
+"""
+
+
+class TestBrewfile:
+    def test_parse_takes_first_quoted_token(self):
+        from sccs.doctor.mirror import parse_brewfile
+
+        s = parse_brewfile(BREWFILE)
+        assert s.taps == {"anomalyco/tap", "eqms/claude-workbench"}
+        assert s.formulae == {"bat", "sleepwatcher", "anomalyco/tap/opencode"}
+        assert s.casks == {"iterm2"}
+
+
+class TestBrewDetector:
+    def _stub(self, monkeypatch, *, leaves, formulae, casks, taps):
+        from sccs.doctor import mirror
+
+        table = {
+            ("leaves",): leaves,
+            ("list", "--formula", "--full-name"): formulae,
+            ("list", "--cask"): casks,
+            ("tap",): taps,
+        }
+        monkeypatch.setattr(mirror, "run_brew_lines", lambda *args: table[args])
+
+    def test_drift_missing_and_extra(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        from sccs.doctor.mirror import BrewDetector
+
+        (tmp_path / "Brewfile").write_text(BREWFILE, encoding="utf-8")
+        self._stub(
+            monkeypatch,
+            leaves=["bat", "ffmpeg"],
+            formulae=["bat", "ffmpeg", "sleepwatcher", "python@3.13"],  # sleepwatcher is a dependency → present
+            casks=["iterm2", "davit"],
+            taps=["anomalyco/tap", "leoafarias/fvm"],
+        )
+        st = BrewDetector().get_status(tmp_path / "Brewfile", ignore=[])
+        assert st.state == "drift"
+        assert st.missing_formulae == ["anomalyco/tap/opencode"]
+        assert st.missing_taps == ["eqms/claude-workbench"]
+        assert st.missing_casks == []
+        assert st.extra_formulae == ["ffmpeg"]  # python@3.13 is not a leaf → never an extra
+        assert st.extra_casks == ["davit"]
+        assert st.extra_taps == ["leoafarias/fvm"]
+
+    def test_ignore_list_hides_both_directions(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        from sccs.doctor.mirror import BrewDetector
+
+        (tmp_path / "Brewfile").write_text('brew "bat"\nbrew "poppler"\n', encoding="utf-8")
+        self._stub(monkeypatch, leaves=["bat", "ffmpeg"], formulae=["bat", "ffmpeg"], casks=[], taps=[])
+        st = BrewDetector().get_status(tmp_path / "Brewfile", ignore=["ffmpeg", "poppler"])
+        assert st.state == "ok"
+
+    def test_unavailable_without_brew(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import BrewDetector
+
+        (tmp_path / "Brewfile").write_text('brew "bat"\n', encoding="utf-8")
+        monkeypatch.setattr(mirror, "run_brew_lines", lambda *args: None)
+        assert BrewDetector().get_status(tmp_path / "Brewfile", ignore=[]).state == "unavailable"
+
+    def test_no_brewfile(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        from sccs.doctor.mirror import BrewDetector
+
+        assert BrewDetector().get_status(tmp_path / "Brewfile", ignore=[]).state == "no_brewfile"
