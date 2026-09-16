@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 2.68.2 (16.09.2026)
+
+### Fixed (`doctor install` skipped every plugin on a fresh host)
+
+- **A missing marketplace with a known source is now registered, and its plugins install in the same run.** Since 2.68.0 all default plugins carry a `marketplace_source`, but the planner still emitted a print-only "register marketplace" block for every missing marketplace, and that block fenced off the installs. The runnable `claude plugin marketplace add` sat on each plugin step under a different component, so it succeeded — the marketplaces were registered afterwards — while all six plugins were reported as "depends on plugin-marketplace:<name>:exists". Found on a fresh second Mac. The add now runs once per marketplace under the component the installs wait on: a successful add lets them run, a failed one skips only that marketplace's plugins. A missing marketplace without a configured source still gets the manual block.
+
 ## Version 2.68.1 (15.09.2026)
 
 ### Fixed (the source's Brewfile was never rewritten)

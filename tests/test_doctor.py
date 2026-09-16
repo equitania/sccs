@@ -2923,7 +2923,7 @@ class TestPluginInstallSkipsWhenMarketplaceMissing:
         # Marketplace update IS queued (registered marketplace, stale-cache safety).
         assert any(a.label.startswith("sync plugin marketplace") for a in actions)
 
-    def test_marketplace_missing_actions_emits_manual_block_with_source_hint(self):
+    def test_marketplace_missing_actions_adds_marketplace_when_source_known(self):
         from sccs.doctor.detectors import MarketplaceStatus
         from sccs.doctor.installer import _marketplace_missing_actions
 
@@ -2937,10 +2937,11 @@ class TestPluginInstallSkipsWhenMarketplaceMissing:
         actions = _marketplace_missing_actions(statuses)
         assert len(actions) == 1
         action = actions[0]
-        assert action.runnable is False
-        assert action.blocks_downstream is True
+        # v2.68.2: runnable, not a print-only block — a block would fence off
+        # the installs even after the add succeeded.
+        assert action.runnable is True
+        assert action.cmd == ["claude", "plugin", "marketplace", "add", "anthropics/claude-plugins-official"]
         assert action.component == "plugin-marketplace:claude-plugins-official:exists"
-        assert "claude plugin marketplace add anthropics/claude-plugins-official" in (action.manual_block or "")
 
     def test_marketplace_missing_block_without_source_hints_at_config(self):
         from sccs.doctor.detectors import MarketplaceStatus
@@ -5583,17 +5584,111 @@ class TestOfficialMarketplaceSource:
             assert spec.marketplace_source == "anthropics/claude-plugins-official", spec.name
 
     def test_install_plan_registers_the_official_marketplace(self):
-        from sccs.doctor.detectors import MarketplaceStatus
-        from sccs.doctor.installer import _plugin_install_actions
+        from sccs.doctor.detectors import ClaudeMarketplaceDetector
+        from sccs.doctor.installer import _marketplace_missing_actions
 
-        spec = next(p for p in DEFAULT_CLAUDE_PLUGINS if p.name == "superpowers")
-        plugin = PluginStatus(spec=spec, installed=False, update_available=None, detection_source="missing")
-        market = MarketplaceStatus(name="claude-plugins-official", registered=False)
-        actions = _plugin_install_actions([plugin], marketplaces=[market])
+        # The detector carries the defaults' source into the status, and the
+        # missing-marketplace step turns it into a runnable add (v2.68.2 —
+        # before, the add sat on the plugin step; see the class below).
+        (market,) = ClaudeMarketplaceDetector(raw_output="").get_statuses(
+            [p for p in DEFAULT_CLAUDE_PLUGINS if p.name == "superpowers"]
+        )
+        actions = _marketplace_missing_actions([market])
         assert any(
             a.runnable and a.cmd == ["claude", "plugin", "marketplace", "add", "anthropics/claude-plugins-official"]
             for a in actions
         )
+
+
+class TestMissingMarketplaceWithSourceInstalls:
+    """v2.68.2: a missing marketplace whose source is known is REGISTERED by
+    the plan, and the plugin installs run after it.
+
+    Found on a fresh second Mac after 2.68.1: all six default plugins were
+    skipped with "depends on plugin-marketplace:<name>:exists" although the
+    same run registered both marketplaces. The planner emitted a print-only
+    block for every missing marketplace — source or not — and that block
+    fenced off the installs, while the runnable `marketplace add` carried a
+    different component. The 2.68.0 test only looked at the plan; these run it.
+    """
+
+    @staticmethod
+    def _plan(marketplace_ok: bool = False):
+        from sccs.doctor.detectors import ClaudeCliStatus, MarketplaceStatus, NodeStatus
+        from sccs.doctor.installer import build_install_plan
+        from sccs.doctor.schema import DoctorConfig, NodeInstallSpec
+
+        specs = [p for p in DEFAULT_CLAUDE_PLUGINS if not p.allowlist_only and p.marketplace_source]
+        names = sorted({p.marketplace for p in specs})
+        plugins = [PluginStatus(spec=s, installed=False, update_available=None) for s in specs]
+        markets = [
+            MarketplaceStatus(
+                name=n,
+                registered=marketplace_ok,
+                suggested_source=next(p.marketplace_source for p in specs if p.marketplace == n),
+            )
+            for n in names
+        ]
+        plan = build_install_plan(
+            DoctorConfig(),
+            node=NodeStatus(
+                installed=True,
+                version="20.10.0",
+                major=20,
+                meets_minimum=True,
+                install_hint=NodeInstallSpec(runnable=False, label="x"),
+                platform="darwin",
+            ),
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/usr/bin/claude"),
+            plugins=plugins,
+            npx_tools=[],
+            marketplaces=markets,
+        )
+        return plan, specs, markets
+
+    def test_installs_run_after_the_marketplace_is_added(self):
+        from sccs.doctor.installer import execute_plan
+
+        plan, specs, markets = self._plan()
+        with patch("sccs.doctor.installer._run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            result = execute_plan(plan, assume_yes=False, print_fn=lambda _: None)
+        cmds = [c.args[0] for c in run_mock.call_args_list]
+        assert not result.skipped, [(o.label, o.detail) for o in result.skipped]
+        assert not result.printed
+        assert not result.failed
+        for m in markets:
+            add = ["claude", "plugin", "marketplace", "add", m.suggested_source]
+            # Registered exactly once, and before any install that needs it.
+            assert cmds.count(add) == 1, m.name
+            first_install = next(
+                i
+                for i, c in enumerate(cmds)
+                if c[:3] == ["claude", "plugin", "install"] and c[3].endswith(f"@{m.name}")
+            )
+            assert cmds.index(add) < first_install
+        installs = [c for c in cmds if c[:3] == ["claude", "plugin", "install"]]
+        assert len(installs) == len(specs)
+
+    def test_failed_add_skips_only_that_marketplaces_installs(self):
+        from sccs.doctor.installer import execute_plan
+        from sccs.doctor.runner import DoctorError
+
+        plan, specs, _ = self._plan()
+
+        def fake_run(cmd, **_kw):
+            if cmd[:4] == ["claude", "plugin", "marketplace", "add"] and cmd[4] == "mksglu/context-mode":
+                raise DoctorError("add failed", stderr="network down")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("sccs.doctor.installer._run", side_effect=fake_run) as run_mock:
+            result = execute_plan(plan, assume_yes=False, print_fn=lambda _: None)
+        cmds = [c.args[0] for c in run_mock.call_args_list]
+        assert ["claude", "plugin", "install", "context-mode@context-mode"] not in cmds
+        assert [o.label for o in result.skipped] == ["install plugin context-mode@context-mode"]
+        assert "plugin-marketplace:context-mode:exists" in result.skipped[0].detail
+        official = [s for s in specs if s.marketplace == "claude-plugins-official"]
+        assert sum(1 for c in cmds if c[:3] == ["claude", "plugin", "install"]) == len(official)
 
 
 class TestOptionalNpxTools:

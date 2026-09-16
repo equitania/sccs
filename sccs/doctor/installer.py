@@ -368,10 +368,27 @@ def _marketplace_missing_actions(statuses: list[MarketplaceStatus]) -> list[Doct
     a marketplace that does not exist; you must ADD it. This action prints
     a copy-paste `claude plugin marketplace add …` snippet and fences off
     every install for the same marketplace via `blocks_downstream=True`.
+
+    v2.68.2: when the source IS known, the marketplace is added by a runnable
+    action carrying the same `:exists` component — a failed add fences off
+    the installs through `failed_components`, a successful one lets them run.
+    Printing the block regardless of the source skipped every install on a
+    fresh host while the per-plugin `marketplace add` registered it anyway.
     """
     actions: list[DoctorAction] = []
     for st in statuses:
         if st.ok:
+            continue
+        if st.suggested_source:
+            actions.append(
+                DoctorAction(
+                    label=f"register marketplace {st.suggested_source}",
+                    cmd=["claude", "plugin", "marketplace", "add", st.suggested_source],
+                    runnable=True,
+                    component=f"plugin-marketplace:{st.name}:exists",
+                    auto_confirm=True,  # prerequisite for unattended install
+                )
+            )
             continue
         block_lines: list[str] = []
         block_lines.append(f"# Marketplace '{st.name}' is not registered locally.")
@@ -880,7 +897,10 @@ def _plugin_install_actions(
                     auto_confirm=True,  # prerequisite for unattended install
                 )
             )
-        if spec.marketplace_source:
+        # A marketplace known to be missing is added once by
+        # `_marketplace_missing_actions`; a second per-plugin add would not
+        # carry the `:exists` component the install waits on.
+        if spec.marketplace_source and not extra_deps:
             actions.append(
                 DoctorAction(
                     label=f"register marketplace {spec.marketplace_source}",
