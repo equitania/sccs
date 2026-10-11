@@ -11,6 +11,13 @@ import pytest
 from pydantic import ValidationError
 
 
+@pytest.fixture(autouse=True)
+def _on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The mirror is macOS-only; CI runs on Linux. Tests that need another
+    # platform pass `platform=` explicitly.
+    monkeypatch.setattr("sccs.doctor.mirror.get_current_platform", lambda: "macos")
+
+
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -93,6 +100,23 @@ class TestRoleResolution:
 
         monkeypatch.setattr(mirror, "current_hostname", lambda: "live-mac.local")
         assert resolve_role(MirrorConfig(source_host="live-mac")) == "source"
+
+    @pytest.mark.parametrize("platform", ["linux", "windows"])
+    def test_off_on_non_macos_even_with_a_source_host(self, platform):
+        # config.yaml syncs to every host; a Linux box must not turn into a
+        # mirror of the Mac and fail on its Brewfile and uv tools.
+        from sccs.doctor.mirror import MirrorConfig, resolve_role
+
+        cfg = MirrorConfig(source_host="live-mac")
+        assert resolve_role(cfg, hostname="dev-box", platform=platform) == "off"
+        assert resolve_role(cfg, hostname="live-mac", platform=platform) == "off"
+
+    def test_non_macos_host_gets_no_mirror_report(self, monkeypatch: pytest.MonkeyPatch):
+        from sccs.doctor import mirror
+        from sccs.doctor.mirror import MirrorConfig, collect_mirror_report
+
+        monkeypatch.setattr(mirror, "get_current_platform", lambda: "linux")
+        assert collect_mirror_report(MirrorConfig(source_host="live-mac"), hostname="dev-box") is None
 
 
 class TestVersionPattern:

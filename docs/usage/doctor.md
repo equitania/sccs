@@ -99,6 +99,8 @@ doctor:
 
 Der Rechner, dessen Hostname passt, ist die **Quelle**; jeder andere ist
 **Spiegel**. Ohne `source_host` zeigt der Doctor keine Spiegelzeilen.
+Der Abgleich läuft nur auf macOS: Ein Linux- oder Windows-Rechner, der dieselbe
+`config.yaml` synchronisiert, ist weder Quelle noch Spiegel (seit 2.69.1).
 
 - **Quelle**: `sccs doctor update` schreibt Brewfile (`brew bundle dump`) und
   `~/.config/sccs/inventory.yaml` neu; beide werden über die Kategorien
@@ -443,6 +445,8 @@ doctor:
 
 The host whose hostname matches is the **source**; every other host is a
 **mirror**. Without `source_host` the doctor shows no mirror rows.
+The reconciliation runs on macOS only: a Linux or Windows host that syncs the
+same `config.yaml` is neither source nor mirror (since 2.69.1).
 
 - **Source**: `sccs doctor update` rewrites the Brewfile (`brew bundle dump`)
   and `~/.config/sccs/inventory.yaml`; both travel through the `homebrew_bundle`

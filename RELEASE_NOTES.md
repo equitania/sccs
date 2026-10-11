@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 2.69.1 (11.10.2026)
+
+### Fixed (a Linux host turned into a mirror of the Mac)
+
+- **The mirror reconciliation runs on macOS only.** `doctor.mirror.source_host` lives in `config.yaml`, and that file syncs to every host — so every host whose name did not match became a "mirror", Linux included. There `doctor check` would have compared the machine against the Mac's Brewfile, uv tools and npm globals, failed on every one of them, and `doctor install` would have tried to install them. Found while bringing a Linux host onto the shared config: it had never received it (its own config lacks the `sccs_config` category), and adding it would have triggered exactly this. Any platform other than macOS now resolves to `off` — no mirror rows, no mirror actions.
+
 ## Version 2.69.0 (11.10.2026)
 
 ### Security (two trust gaps found by a project audit)

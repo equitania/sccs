@@ -51,6 +51,7 @@ from sccs.doctor.schema import (  # noqa: F401 — re-exported
 )
 from sccs.utils.logging import get_logger
 from sccs.utils.paths import atomic_write, expand_path
+from sccs.utils.platform import get_current_platform
 
 if TYPE_CHECKING:
     from sccs.doctor.installer import DoctorAction
@@ -109,8 +110,22 @@ def current_hostname() -> str:
     return socket.gethostname()
 
 
-def resolve_role(cfg: MirrorConfig | None, hostname: str | None = None) -> MirrorRole:
+def resolve_role(
+    cfg: MirrorConfig | None,
+    hostname: str | None = None,
+    *,
+    platform: str | None = None,
+) -> MirrorRole:
+    """Which side of the mirror this host is on — or `off`.
+
+    Off everywhere but macOS. The inventory describes a Mac (Brewfile, the
+    Mac's uv tools and npm globals), and `config.yaml` carrying `source_host`
+    syncs to every host — a Linux box that pulled it became a "mirror", failed
+    `doctor check` on every Mac package and was offered installs for them.
+    """
     if cfg is None or not cfg.source_host:
+        return "off"
+    if (platform or get_current_platform()) != "macos":
         return "off"
     host = hostname if hostname is not None else current_hostname()
     return "source" if normalize_host(host) == normalize_host(cfg.source_host) else "mirror"
