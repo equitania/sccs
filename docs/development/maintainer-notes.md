@@ -37,6 +37,10 @@ The release history — what each version added — lives in `RELEASE_NOTES.md`.
 
 `sccs statusline list|use|install|show`. Two rules: `install_preset()` downloads the installer and runs `bash <file>` — **never `curl | bash`** — and install URLs are https + host-allowlisted at validation time; and every preset's `managed_paths` flow into `get_doctor_managed_excludes()`, so a multi-MB binary never reaches the repo. `StatusLineDetector` expands `~` and `$VAR` before testing a command token — without it both bundled presets report `missing_binary` forever and `doctor check` exits 1 permanently.
 
+### Shared config adoption (v2.70.0)
+
+`sccs/doctor/shared_config.py`. `config.yaml` travels only through a category whose `local_path` is `~/.config/sccs` — and a host bootstrapped with `config init` had none, so it never received the shared config and nothing said so (a Linux host on 11.10.2026 showed only the bundled plugins). `sccs_config` is a bundled default now; `doctor check` reports `config: shared · ADOPT` (yellow, never exit 1) when the local config has no such category **matched by `local_path`, not by name** while `<repo>/.config/sccs/config.yaml` exists; `install`/`optimize` append one adoption action. Three rules: the action carries **`always_confirm=True`** — `--yes` is for unattended maintenance and this replaces a whole user file — and without a terminal it is **skipped**, never assumed; adoption **pulls first**, backs up to `~/.config/sccs/backups/`, then validates with `load_config` and **restores the original on failure**; no merge of local and shared config, because merging would keep the very stale definitions (statusline `statusline.*`) the shared one corrects. Deploy: `~/.config/sccs` is excluded from `_managed_roots`, or a bundle could write — and forge — the receipt `revoke` trusts.
+
 ## Sync categories
 
 ### Fish coverage (v2.67.2)

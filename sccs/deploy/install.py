@@ -70,9 +70,13 @@ def _managed_roots() -> list[Path]:
     """
     from sccs.config.defaults import DEFAULT_CONFIG
 
-    return [
+    # ~/.config/sccs is never a root: it holds the receipt `revoke` trusts,
+    # and a bundle allowed to write there could forge it.
+    state_dir = _lexical(Path("~/.config/sccs"))
+    roots = [
         _lexical(Path(cat["local_path"])) for cat in DEFAULT_CONFIG["sync_categories"].values() if cat.get("local_path")
     ]
+    return [root for root in roots if root != state_dir]
 
 
 def _lexical(path: Path) -> Path:

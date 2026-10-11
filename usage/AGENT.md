@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.69.1  ·  **Python:** ≥3.11
+- **Version:** 2.70.0  ·  **Python:** ≥3.11
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -187,6 +187,8 @@ sccs doctor install --with-optional  # also install absent optional npx tools (@
 sccs doctor update             # update plugins + refresh npx tools (safe maintenance, no prompts)
 sccs doctor optimize --strict  # install + remove foreign plugins/MCP servers (destructive: still confirms)
 sccs doctor check              # … shows `mirror: …` rows on a mirror (v2.68.0)
+sccs doctor check              # … `config: shared · ADOPT` = host never got the synced config.yaml (v2.70.0)
+sccs doctor install            # … then adopts it: backup + pull + validate; always asks, even with --yes
 sccs doctor update             # on the source: rewrite Brewfile + inventory.yaml
 sccs doctor optimize --strict  # on a mirror: confirm each extra individually
 # Opt-in optional CLI tools (informational, never exit 1): set in config.yaml →

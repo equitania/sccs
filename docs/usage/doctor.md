@@ -78,6 +78,28 @@ doctor:
 - **Sync-Ausschluss:** Alle Skills, die der Lock dem Paket zuschreibt, sind von `sccs sync`, Export und den Agent-Exporten ausgeschlossen — auch ohne Opt-in, denn jeder Rechner holt sie ohnehin von upstream. Die mitgelieferte Namensliste wirkt nur bei eingeschaltetem Paket, damit ein eigener Skill namens `figma` auf einem Rechner ohne HyperFrames weiter synchronisiert.
 - **Abschalten:** `sccs profile off hyperframes` parkt die Skills, und der Doctor installiert sie dann nicht erneut (siehe [Profiles](profiles.md)).
 
+### Gemeinsame Config übernehmen — ab v2.70.0
+
+Die `config.yaml` erreicht einen Rechner nur über die Kategorie `sccs_config`.
+Ein Rechner, der mit `sccs config init` angefangen hat, hatte diese Kategorie
+bis 2.69 nicht — er bekam die gemeinsame Config nie: keine zusätzlichen
+Plugins, keine Skill-Pakete, keine korrigierten Kategorien.
+
+- `sccs_config` ist jetzt eine eingebaute Kategorie (nur `config.yaml`, nie
+  Zustandsdateien, Logs oder Backups). Ältere Configs bekommen sie über
+  `sccs config upgrade` angeboten.
+- `sccs doctor check` zeigt auf einem Rechner, dessen Config die Kategorie
+  nicht hat, während im Sync-Repo eine gemeinsame `config.yaml` liegt, die
+  gelbe Zeile `config: shared · ADOPT` mit einem Hinweis darunter. Gelb heißt:
+  Der Rechner funktioniert, er läuft nur mit eigener Config. Kein Exit 1.
+- `sccs doctor install` und `optimize` bieten die Übernahme an: Repo holen
+  (`git pull`), lokale Config nach `~/.config/sccs/backups/config.yaml.<Zeit>`
+  sichern, gemeinsame Config einsetzen, probeweise laden — bei einem Fehler
+  wird die alte sofort wiederhergestellt. Die Aktion **fragt immer**, auch mit
+  `--yes`; ohne Terminal (`--json`, GUI) wird sie übersprungen.
+- Danach `sccs doctor install` noch einmal: Der erste Lauf hat noch mit der
+  alten Config geplant.
+
 ### Spiegel-Abgleich (zweiter Mac) — ab v2.68.0
 
 Ein zweiter Mac soll dieselbe Software tragen wie der Live-Rechner. Der Doctor
@@ -423,6 +445,26 @@ doctor:
 - **`doctor update` / `optimize`** always run the same command. It replaces every skill directory wholesale and refreshes the lock; local edits to those skills are lost.
 - **Sync exclusion:** every skill the lock attributes to the package is excluded from `sccs sync`, export and the agent exports — even without opt-in, since each machine fetches them from upstream anyway. The bundled name list only applies to an enabled package, so a private skill called `figma` keeps syncing on a machine without HyperFrames.
 - **Switching off:** `sccs profile off hyperframes` parks the skills, and the doctor then does not reinstall them (see [Profiles](profiles.md)).
+
+### Adopting the shared config — since v2.70.0
+
+`config.yaml` reaches a host only through the `sccs_config` category. A host
+bootstrapped with `sccs config init` did not have it before 2.70 and never
+received the shared config: no extra plugins, no skill packages, no corrected
+category definitions.
+
+- `sccs_config` is now a bundled category (only `config.yaml`, never state
+  files, logs or backups). Older configs are offered it by `sccs config upgrade`.
+- `sccs doctor check` shows the yellow row `config: shared · ADOPT` plus a hint
+  on a host whose config lacks the category while the sync repo holds a shared
+  `config.yaml`. Yellow: the host works, it runs its own config. No exit 1.
+- `sccs doctor install` and `optimize` offer the adoption: pull the repo, back
+  the local config up to `~/.config/sccs/backups/config.yaml.<time>`, put the
+  shared one in place, load it as a test — on failure the old one is restored
+  at once. The action **always asks**, `--yes` included; without a terminal
+  (`--json`, a GUI) it is skipped.
+- Then run `sccs doctor install` once more: the first run planned from the
+  previous config.
 
 ### Mirror parity (second Mac) — since v2.68.0
 

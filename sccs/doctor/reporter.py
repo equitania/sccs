@@ -28,6 +28,7 @@ from sccs.output.console import Console
 
 if TYPE_CHECKING:
     from sccs.doctor.mirror import MirrorReport
+    from sccs.doctor.shared_config import SharedConfigStatus
 
 # Status icons reused across the reporter.
 _OK = "[green]OK[/green]"
@@ -37,6 +38,7 @@ _MANUAL = "[blue]MANUAL[/blue]"
 _STALE = "[yellow]STALE[/yellow]"
 _INFO = "[blue]INFO[/blue]"
 _UNKNOWN = "[dim]?[/dim]"
+_ADOPT = "[yellow]ADOPT[/yellow]"
 
 
 # Each row function returns (Component, Status, Version, Detail). The Version
@@ -191,6 +193,27 @@ def _area_status(missing: int, version: int, extra: int, available: bool, manual
     if extra or manual:
         return _STALE
     return _OK
+
+
+def _shared_config_row(status: SharedConfigStatus | None) -> tuple[str, str, str, str] | None:
+    """Only a host that has NOT adopted the shared config gets a row (v2.70.0).
+
+    Yellow, not red: the host works, it runs its own config. Adopted hosts and
+    repos without a shared copy have nothing to report.
+    """
+    if status is None or status.state != "not_adopted":
+        return None
+    return ("config: shared", _ADOPT, "", status.detail)
+
+
+def _print_shared_config_hint(console: Console, status: SharedConfigStatus | None) -> None:
+    if status is None or status.state != "not_adopted":
+        return
+    console.print(
+        "\n[yellow]This host runs its own config.yaml[/yellow] — plugins, skill packages and category "
+        "settings from the other hosts never reach it. `sccs doctor install` adopts the shared one "
+        "(asks first, keeps a backup)."
+    )
 
 
 def _mirror_rows(report: MirrorReport | None) -> list[tuple[str, str, str, str]]:
@@ -357,6 +380,7 @@ def render_doctor_report(
     min_pwsh_major: int = 7,
     skill_packages: list | None = None,
     mirror: MirrorReport | None = None,
+    shared_config: SharedConfigStatus | None = None,
 ) -> None:
     """Print the full doctor status table."""
     table = Table(title="SCCS Doctor — System & Plugin Status", show_lines=False)
@@ -371,6 +395,9 @@ def render_doctor_report(
     if powershell is not None and powershell.platform == "windows":
         table.add_row(*_powershell_row(powershell, min_pwsh_major))
     table.add_row(*_claude_cli_row(claude_cli))
+    shared_row = _shared_config_row(shared_config)
+    if shared_row is not None:
+        table.add_row(*shared_row)
     if marketplaces:
         for market_st in marketplaces:
             table.add_row(*_marketplace_row(market_st))
@@ -416,6 +443,7 @@ def render_doctor_report(
     _print_orphan_remediation(console, gsd_orphans)
     _print_winget_path_remediation(console, cli_tools)
     _print_mirror_details(console, mirror)
+    _print_shared_config_hint(console, shared_config)
 
 
 def _statusline_preset_row(st) -> tuple[str, str, str, str] | None:

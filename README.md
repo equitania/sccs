@@ -4,7 +4,7 @@
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
-**Version:** 2.69.1 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.11
+**Version:** 2.70.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.11
 
 ---
 

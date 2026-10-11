@@ -11,6 +11,7 @@ import datetime as _dt
 import json
 import re
 import shutil
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -104,6 +105,10 @@ class DoctorAction:
     # keep auto_confirm=False — the global delete-safety rule still applies and
     # the user is asked every time. `--yes` remains the blanket override.
     auto_confirm: bool = False
+    # Asked every time, `--yes` included. For an action that replaces a whole
+    # file the user owns (adopting the shared config.yaml): `--yes` exists for
+    # unattended maintenance, and this is not maintenance.
+    always_confirm: bool = False
     # Per-action override of execute_plan's default subprocess timeout (300s).
     # None keeps the default; set higher for actions known to run long, e.g.
     # `brew bundle install` (many casks) or `git clone` (a big repo).
@@ -1910,6 +1915,11 @@ def build_optimize_plan(
     return InstallPlan(actions=actions)
 
 
+def _interactive() -> bool:
+    """True when a confirm prompt can actually reach a person."""
+    return sys.stdin.isatty()
+
+
 def _confirm(label: str, *, assume_yes: bool) -> bool:
     if assume_yes:
         return True
@@ -1979,7 +1989,18 @@ def execute_plan(
                 blocked_components.add(action.component)
             continue
 
-        if not _confirm(action.label, assume_yes=assume_yes or action.auto_confirm):
+        if action.always_confirm and not _interactive():
+            # No terminal (--json, a GUI, CI): the prompt cannot be shown, and
+            # `--yes` must not stand in for it.
+            result.outcomes.append(
+                ActionOutcome(
+                    label=action.label,
+                    status="skipped",
+                    detail="needs a confirmation in an interactive terminal",
+                )
+            )
+            continue
+        if not _confirm(action.label, assume_yes=(assume_yes or action.auto_confirm) and not action.always_confirm):
             result.outcomes.append(ActionOutcome(label=action.label, status="skipped", detail="user declined"))
             continue
 

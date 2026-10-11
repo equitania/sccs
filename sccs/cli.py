@@ -3068,6 +3068,7 @@ def _collect_doctor_statuses(
         StatusLineDetector,
     )
     from sccs.doctor.mirror import collect_mirror_report
+    from sccs.doctor.shared_config import detect_shared_config
     from sccs.doctor.skill_packages import SkillPackageDetector
     from sccs.doctor.state import DoctorStateManager
 
@@ -3124,6 +3125,9 @@ def _collect_doctor_statuses(
         "cao_providers": CaoDetector().get_statuses(cao_provider_specs),
         "statusline_presets": _collect_statusline_preset_statuses(),
         "mirror": mirror,
+        # A host whose config lacks the category that syncs config.yaml never
+        # receives the shared one (v2.70.0).
+        "shared_config": detect_shared_config(get_config_path()),
     }
 
     if include_foreign:
@@ -3260,6 +3264,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
                 "skill_packages": statuses.get("skill_packages"),
                 "cao_providers": statuses.get("cao_providers"),
                 "mirror": statuses.get("mirror"),
+                "shared_config": statuses.get("shared_config"),
             }
         )
         sys.exit(1 if problems else 0)
@@ -3284,6 +3289,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         powershell=statuses.get("powershell"),
         skill_packages=statuses.get("skill_packages"),
         mirror=statuses.get("mirror"),
+        shared_config=statuses.get("shared_config"),
     )
 
     if has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"]):
@@ -3313,6 +3319,16 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         sys.exit(1)
 
 
+def _print_shared_config_followup(console, result) -> None:
+    """The plan was built from the config that was just replaced — say so."""
+    if any(o.status == "executed" and o.label.startswith("Adopt the shared config.yaml") for o in result.outcomes):
+        console.print()
+        console.print_info(
+            "Shared config adopted. Run `sccs doctor install` again — this run planned from the previous "
+            "config, so the plugins and skill packages it adds are still missing."
+        )
+
+
 @doctor_group.command("install")
 @click.option("--yes", is_flag=True, default=False, help="Skip confirm prompts (CI use only).")
 @click.option(
@@ -3328,6 +3344,7 @@ def doctor_install(ctx: click.Context, yes: bool, include_optional: bool, output
     """Install missing system components after a confirm prompt per action."""
     from sccs.doctor.installer import build_install_plan, execute_plan
     from sccs.doctor.reporter import render_execute_result
+    from sccs.doctor.shared_config import shared_config_actions
     from sccs.doctor.state import DoctorStateManager
 
     console = ctx.obj["console"]
@@ -3357,6 +3374,7 @@ def doctor_install(ctx: click.Context, yes: bool, include_optional: bool, output
         mirror=statuses.get("mirror"),
         include_optional=include_optional,
     )
+    plan.actions.extend(shared_config_actions(statuses.get("shared_config")))
 
     if plan.is_empty():
         if output_json:
@@ -3383,6 +3401,7 @@ def doctor_install(ctx: click.Context, yes: bool, include_optional: bool, output
         return
 
     render_execute_result(console, result)
+    _print_shared_config_followup(console, result)
     if result.failed:
         sys.exit(1)
 
@@ -3482,6 +3501,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool, include_optiona
     """
     from sccs.doctor.installer import build_optimize_plan, execute_plan
     from sccs.doctor.reporter import render_execute_result
+    from sccs.doctor.shared_config import shared_config_actions
     from sccs.doctor.state import DoctorStateManager
 
     console = ctx.obj["console"]
@@ -3512,6 +3532,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool, include_optiona
         strict=strict,
         include_optional=include_optional,
     )
+    plan.actions.extend(shared_config_actions(statuses.get("shared_config")))
 
     if plan.is_empty():
         console.print_success("Already optimal — no actions queued.")
@@ -3529,6 +3550,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool, include_optiona
 
     result = execute_plan(plan, assume_yes=yes, print_fn=console.print, state_manager=state)
     render_execute_result(console, result)
+    _print_shared_config_followup(console, result)
     if result.failed:
         sys.exit(1)
 

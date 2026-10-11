@@ -1,5 +1,14 @@
 # Release Notes
 
+## Version 2.70.0 (11.10.2026)
+
+### Added (a host that never received the shared config adopts it through `doctor install`)
+
+- **`sccs_config` is a bundled category.** `config.yaml` reaches another host only through a category that syncs `~/.config/sccs`, and until now that category existed only where someone had written it by hand. A host bootstrapped with `sccs config init` therefore never received the shared config — no extra plugins, no skill packages, no corrected category definitions — and nothing said so. Found on a Linux host whose `doctor check` showed only the bundled plugins. New configs get the category; older ones are offered it by `sccs config upgrade`. Only `config.yaml` travels; state files, logs, receipts and backups stay on each host.
+- **`sccs doctor check` reports it**: on a host whose config has no category for `~/.config/sccs` while the sync repo holds a shared `config.yaml`, a yellow `config: shared · ADOPT` row and a hint appear. Yellow, not red — the host works, it runs its own config.
+- **`sccs doctor install` and `optimize` adopt it** in one confirmed step: pull the sync repo, back the local config up to `~/.config/sccs/backups/`, put the shared one in place and load it as a test — an invalid shared config is rolled back at once. The step asks every time, `--yes` included, because it replaces a whole file; without a terminal (`--json`, a GUI) it is skipped rather than assumed. A second `doctor install` then installs what the shared config adds.
+- Deploy: `~/.config/sccs` is never a target for `sccs deploy install`, now that a bundled category points there — a bundle could otherwise write the receipt `deploy revoke` relies on.
+
 ## Version 2.69.1 (11.10.2026)
 
 ### Fixed (a Linux host turned into a mirror of the Mac)

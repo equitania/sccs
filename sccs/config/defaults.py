@@ -404,6 +404,34 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "sync_mode": "bidirectional",
             "item_type": "file",
         },
+        # SCCS's own config (v2.70.0) — how doctor settings, extra plugins and
+        # category overrides reach every host. Bundled because a host without
+        # it never receives the shared config and nothing says so; `sccs doctor
+        # install` adopts the shared copy on such a host. Only config.yaml
+        # travels: state, logs and backups are per host.
+        "sccs_config": {
+            "enabled": True,
+            "description": "SCCS own configuration (doctor settings, extra plugins, category overrides)",
+            "local_path": "~/.config/sccs",
+            "repo_path": ".config/sccs",
+            "sync_mode": "bidirectional",
+            "item_type": "file",
+            "include": ["config.yaml"],
+            "exclude": [
+                ".sync_state.yaml",
+                ".doctor_state.yaml",
+                ".migration_state.yaml",
+                ".profile_state.yaml",
+                ".deploy_receipt.yaml",
+                ".codex_hooks_state.yaml",
+                "sync.log",
+                "history.yaml",
+                "backups/*",
+                "profiles/*",
+                "config.json",
+                "TASK_*.md",
+            ],
+        },
         # SCCS inventory (v2.68.0) — uv tools and npm globals captured on the
         # source host by `sccs doctor update`; a mirror reads it, never writes it.
         "sccs_inventory": {
