@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 from sccs.convert.frontmatter import (
@@ -22,11 +23,6 @@ from sccs.convert.frontmatter import (
     parse_frontmatter_ex,
     render_frontmatter,
 )
-
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib  # type: ignore[no-redef]
 
 # The exact shape that triggered the bug: `argument-hint` uses Claude Code's
 # documented bracket syntax, which is not valid YAML (two flow sequences on one

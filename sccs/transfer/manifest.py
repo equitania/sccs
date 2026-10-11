@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import platform
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -126,7 +126,7 @@ def create_manifest(categories: dict[str, ManifestCategory]) -> ExportManifest:
 
     return ExportManifest(
         sccs_version=__version__,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
         created_on=platform_name,
         categories=categories,
     )

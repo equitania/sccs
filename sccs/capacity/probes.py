@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sccs.capacity.schema import ProviderCapacity, QuotaScope, QuotaWindow
@@ -29,12 +29,12 @@ _AGY_TIMEOUT_SECONDS = 60
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _iso(moment: datetime) -> str:
     """Render a UTC timestamp as ISO-8601 with a literal Z (not '+00:00')."""
-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _window_name(minutes: int | None) -> str:
@@ -105,9 +105,7 @@ def parse_codex_rate_limits(payload: dict, *, now: datetime | None = None) -> Qu
         used = entry.get("used_percent")
         used = float(used) if isinstance(used, (int, float)) else None
         raw_reset = entry.get("resets_at")
-        reset_dt = (
-            datetime.fromtimestamp(float(raw_reset), tz=timezone.utc) if isinstance(raw_reset, (int, float)) else None
-        )
+        reset_dt = datetime.fromtimestamp(float(raw_reset), tz=UTC) if isinstance(raw_reset, (int, float)) else None
         iso, minutes_until, expired = _reset_fields(reset_dt, now)
         scope.windows.append(
             QuotaWindow(
@@ -202,7 +200,7 @@ def probe_codex(
             continue
         payload, stamp = found
         result.source = "session-cache"
-        result.observed_at = stamp or _iso(datetime.fromtimestamp(rollout.stat().st_mtime, tz=timezone.utc))
+        result.observed_at = stamp or _iso(datetime.fromtimestamp(rollout.stat().st_mtime, tz=UTC))
         result.scopes = [parse_codex_rate_limits(payload, now=now)]
         result.exhausted = is_codex_exhausted(payload)
         if result.exhausted:

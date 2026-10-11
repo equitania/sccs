@@ -37,11 +37,16 @@ jobs:
       - name: Bandit security scan
         run: uv run bandit -r sccs/ -ll
 
+      - name: Dependency vulnerability audit
+        # Audits the locked dependency set, not whatever resolves today.
+        # The project itself is not on PyPI under this lock, so it is skipped.
+        run: uv export --frozen --no-hashes --no-emit-project --all-extras | uvx pip-audit --disable-pip --no-deps -r /dev/stdin
+
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 

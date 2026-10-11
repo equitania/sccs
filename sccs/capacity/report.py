@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sccs.capacity.probes import (
@@ -101,7 +101,7 @@ def _stale_minutes(observed_at: str | None, now: datetime) -> int | None:
     except ValueError:
         return None
     if seen.tzinfo is None:
-        seen = seen.replace(tzinfo=timezone.utc)
+        seen = seen.replace(tzinfo=UTC)
     return int((now - seen).total_seconds() // 60)
 
 

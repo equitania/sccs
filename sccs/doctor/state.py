@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +101,7 @@ class DoctorStateManager:
     def mark_npx_tool(self, name: str, invocation: list[str]) -> None:
         state = self.load()
         state.npx_tools[name] = NpxToolMark(
-            last_run=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            last_run=datetime.now(UTC).isoformat(timespec="seconds"),
             invocation_hash=_hash_invocation(invocation),
         )
         self.save(state)

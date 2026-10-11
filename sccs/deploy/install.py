@@ -3,12 +3,14 @@
 # On a customer host there is no config.yaml of ours, so the Importer runs
 # in legacy mode (config=None) and accepts the manifest's local_path. That
 # path is attacker-controlled, so we add the guard the legacy branch lacks:
-# every target base must live under HOME.
+# every target base must live under HOME, and every item must land inside a
+# location some bundled default category manages.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sccs import __version__
@@ -55,6 +57,51 @@ def _category_base(cat_data: ManifestCategory) -> Path:
     if resolves_to_parent(cat_data, base):
         return base.parent
     return base
+
+
+def _managed_roots() -> list[Path]:
+    """Every location a bundled default category writes to.
+
+    The ceiling for a host without a config of ours. "Somewhere under HOME"
+    is not one: it includes `~/.ssh/authorized_keys`, `~/.bashrc` and
+    `~/Library/LaunchAgents`, and the manifest naming the path came out of a
+    file. A relocated category (`~/.claude/skills-alt`) stays inside these
+    roots, so it keeps working.
+    """
+    from sccs.config.defaults import DEFAULT_CONFIG
+
+    return [
+        _lexical(Path(cat["local_path"])) for cat in DEFAULT_CONFIG["sync_categories"].values() if cat.get("local_path")
+    ]
+
+
+def _lexical(path: Path) -> Path:
+    """Expand `~` and fold `..` without following symlinks.
+
+    Lexical on purpose: a symlink the host user set up (`~/.claude/skills`
+    pointing into a checkout) is their choice, and resolving it would refuse
+    a legitimate target. The bundle itself cannot plant one — the importer
+    rejects symlinks in the ZIP.
+    """
+    return Path(os.path.normpath(path.expanduser()))
+
+
+def _unmanaged_targets(categories: dict[str, ManifestCategory]) -> list[tuple[str, Path]]:
+    """`(category/name, target)` for every item that lands outside the managed roots.
+
+    Checked per ITEM, not per category: item names may be nested
+    (`foo/bar.md`), so a category based at `~` would otherwise reach any path
+    under home through its item names.
+    """
+    roots = _managed_roots()
+    outside: list[tuple[str, Path]] = []
+    for cat_name, cat_data in categories.items():
+        base = _category_base(cat_data)
+        for item in cat_data.items:
+            target = _lexical(_target_path(base, item))
+            if not any(target.is_relative_to(root) for root in roots):
+                outside.append((f"{cat_name}/{item.name}", target))
+    return outside
 
 
 def _hash_target(path: Path, item_type: str) -> str | None:
@@ -171,6 +218,19 @@ def install_bundle(
                 ],
             )
 
+    if config is None:
+        unmanaged = _unmanaged_targets(manifest.categories)
+        if unmanaged:
+            return InstallOutcome(
+                success=False,
+                profile=section.profile,
+                errors=[
+                    f"Item '{label}' would be written to '{target}', which is not a location "
+                    f"any SCCS category manages — refusing to install"
+                    for label, target in unmanaged
+                ],
+            )
+
     selections = importer.build_selections_all()
 
     # Decide ownership BEFORE the import writes anything.
@@ -242,7 +302,7 @@ def install_bundle(
 
     record = InstallRecord(
         profile=section.profile,
-        installed_at=datetime.now(timezone.utc).isoformat(),
+        installed_at=datetime.now(UTC).isoformat(),
         sccs_version=__version__,
         retain=list(section.retain),
         sweep_globs={k: list(v) for k, v in section.sweep_globs.items()},

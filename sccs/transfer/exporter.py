@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sccs.config.schema import ItemType, SccsConfig, SyncCategory
@@ -357,5 +357,5 @@ class Exporter:
 
 def generate_export_filename() -> str:
     """Generate default export filename with timestamp."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return f"sccs-export-{timestamp}.zip"

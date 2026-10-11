@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 
 import pytest
 
@@ -21,11 +22,6 @@ from sccs.convert.toml_write import (
     toml_multiline_string,
 )
 from sccs.integrations.codex import validate_model_map_against_cache
-
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib  # type: ignore[no-redef]
 
 
 def _parse(document: str) -> dict:

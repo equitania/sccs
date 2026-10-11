@@ -29,7 +29,7 @@ import json
 import re
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -763,7 +763,7 @@ class ProfileManager:
             self._move(path, self._park_dir(name, "agents"))
 
         rec.enabled = False
-        rec.changed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        rec.changed_at = datetime.now(UTC).isoformat(timespec="seconds")
         rec.parked_skills = [p.name for p in skills]
         rec.parked_agents = [p.name for p in agents]
         rec.removed_hooks = removed_hooks
@@ -816,7 +816,7 @@ class ProfileManager:
                 park.rmdir()
 
         rec.enabled = True
-        rec.changed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        rec.changed_at = datetime.now(UTC).isoformat(timespec="seconds")
         rec.parked_skills = []
         rec.parked_agents = []
         rec.removed_hooks = []

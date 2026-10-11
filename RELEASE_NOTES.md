@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 2.69.0 (11.10.2026)
+
+### Security (two trust gaps found by a project audit)
+
+- **`sccs deploy install` on a host without an SCCS config only writes where a bundled category writes.** The bundle's manifest names each category's `local_path`, and on a customer host — the case deploy exists for — the only check was "somewhere under HOME". A tampered bundle could therefore declare `~/.ssh` and ship `authorized_keys`, or reach `~/.bashrc` or `~/Library/LaunchAgents`, and the foreign-target skip protected nothing on a host where the file did not exist yet. Every item's target must now lie inside a location a bundled default category manages (`~/.claude`, `~/.config/fish`, `~/.config/starship.toml`, …), checked per item because item names may be nested. A relocated category such as `~/.claude/skills-alt` keeps working; a category moved outside those roots is refused with the offending path. Hosts with a config are unchanged — there the importer already pins every category to the configured path.
+- **`post_install` may only call the tool's own binary, and a step from `config.yaml` asks before it runs.** The validator checked the characters of the command head only, so `sh`, `bash` and `curl` passed, and every step ran unattended. `config.yaml` reaches every host through the sync repo, which made push access to that repo code execution on all of them at the next `doctor install` or `update`. The head must now be the tool's `name` or `detect_command`; a config naming anything else fails validation with a message saying why. Steps SCCS ships (`playwright-cli install-browser …`) still run unattended, steps added in `config.yaml` are confirmed per action. `--yes` confirms them as it does every other action.
+
+### Changed (Python 3.11–3.14)
+
+- **Python 3.10 is no longer supported** (end of life October 2026); `requires-python` is `>=3.11`, and 3.14 is tested and listed. The `tomli` test dependency is gone — `tomllib` is in the standard library from 3.11.
+- **CI audits the locked dependency set** with `pip-audit`. Its first run found three advisories in `virtualenv` 21.7.1, a development dependency pulled in by `pre-commit`; the lock now carries 21.14.6.
+- Dependencies refreshed within their bounds (click 8.5, pydantic 2.14, ruff 0.17); pre-commit hooks follow the lock. mypy stays on 1.x — the 2.x upgrade is a separate step.
+
 ## Version 2.68.2 (16.09.2026)
 
 ### Fixed (`doctor install` skipped every plugin on a fresh host)

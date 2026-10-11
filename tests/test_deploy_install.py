@@ -158,6 +158,78 @@ def test_target_outside_home_is_refused(bundle, tmp_path, monkeypatch):
     assert not Path("/etc/sccs-evil").exists()
 
 
+def _tamper_manifest(bundle: Path, out: Path, edit) -> Path:
+    """Copy `bundle` to `out` with `edit(doc)` applied to its manifest."""
+    import zipfile
+
+    import yaml
+
+    from sccs.transfer.manifest import MANIFEST_FILENAME
+
+    with zipfile.ZipFile(bundle) as src, zipfile.ZipFile(out, "w") as dst:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename == MANIFEST_FILENAME:
+                doc = yaml.safe_load(data.decode("utf-8"))
+                edit(doc)
+                data = yaml.dump(doc).encode("utf-8")
+            dst.writestr(info, data)
+    return out
+
+
+@pytest.mark.parametrize("local_path", ["~/.ssh", "~/Library/LaunchAgents", "~/.local/bin", "~/.claude/../.ssh"])
+def test_target_under_home_but_unmanaged_is_refused(bundle, tmp_path, monkeypatch, local_path):
+    """Under HOME is not enough without a config: `~/.ssh` is under HOME too."""
+
+    def edit(doc):
+        doc["categories"]["claude_skills"]["local_path"] = local_path
+
+    tampered = _tamper_manifest(bundle, tmp_path / "unmanaged.zip", edit)
+    target = tmp_path / "target-unmanaged"
+    _switch_home(monkeypatch, target)
+    manager = ReceiptManager(target / ".config" / "sccs" / ".deploy_receipt.yaml")
+
+    outcome = install_bundle(tampered, config=None, receipt_manager=manager)
+
+    assert not outcome.success
+    assert any("not a location any SCCS category manages" in e for e in outcome.errors)
+    assert not (target / ".ssh").exists()
+    assert not manager.path.exists()
+
+
+def test_nested_item_name_cannot_reach_past_the_managed_roots(bundle, tmp_path, monkeypatch):
+    """A category based at `~` reaches anything under HOME through nested item names."""
+
+    def edit(doc):
+        cat = doc["categories"]["claude_skills"]
+        cat["local_path"] = "~"
+        cat["items"][0]["name"] = ".ssh/authorized_keys"
+
+    tampered = _tamper_manifest(bundle, tmp_path / "nested.zip", edit)
+    target = tmp_path / "target-nested"
+    _switch_home(monkeypatch, target)
+    manager = ReceiptManager(target / ".config" / "sccs" / ".deploy_receipt.yaml")
+
+    outcome = install_bundle(tampered, config=None, receipt_manager=manager)
+
+    assert not outcome.success
+    assert any(".ssh/authorized_keys" in e for e in outcome.errors)
+    assert not (target / ".ssh").exists()
+
+
+def test_managed_roots_still_accept_every_bundled_profile_category():
+    """The guard must not refuse what the shipped profiles export."""
+    from sccs.config.defaults import DEFAULT_CONFIG
+    from sccs.deploy.defaults import DEFAULT_DEPLOYMENT_PROFILES
+    from sccs.deploy.install import _lexical, _managed_roots
+
+    roots = _managed_roots()
+    for profile in DEFAULT_DEPLOYMENT_PROFILES.values():
+        for cat_name in profile.include:
+            local = _lexical(Path(DEFAULT_CONFIG["sync_categories"][cat_name]["local_path"]))
+            assert any(local.is_relative_to(root) for root in roots), cat_name
+
+
 def test_reinstall_updates_the_record(bundle, tmp_path, monkeypatch):
     target = tmp_path / "target4"
     _switch_home(monkeypatch, target)

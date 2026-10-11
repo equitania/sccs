@@ -980,15 +980,18 @@ def _post_install_actions(
 ) -> list[DoctorAction]:
     """Action list for `spec.post_install` (e.g. `playwright-cli install-browser …`).
 
-    These run after the main invocation succeeds. They are intentionally
-    treated as regular runnable actions so the user sees the confirm prompt
-    and the result lands in `ExecuteResult` like every other step.
+    These run after the main invocation succeeds and land in `ExecuteResult`
+    like every other step. A step the bundled defaults ship runs unattended;
+    one that came out of config.yaml asks first — that file reaches every
+    host through the sync repo, so whoever can push to it would otherwise
+    decide what runs on all of them without anyone seeing it.
 
     `extra_deps` carries cross-cutting prerequisites (e.g. the install
     component itself, plus `path:npm-prefix-bin` so a "wrong PATH" detector
     block fences these off rather than letting them die with "command not
     found" on the freshly-installed binary).
     """
+    bundled = _bundled_post_install(spec.name)
     return [
         DoctorAction(
             label=f"{spec.name}: {' '.join(cmd)}",
@@ -996,10 +999,20 @@ def _post_install_actions(
             runnable=True,
             component=f"npx:{spec.name}:post:{i}",
             depends_on_components=extra_deps,
-            auto_confirm=True,  # follow-up of an auto-confirmed npx maintenance step
+            auto_confirm=list(cmd) in bundled,
         )
         for i, cmd in enumerate(spec.post_install)
     ]
+
+
+def _bundled_post_install(tool_name: str) -> list[list[str]]:
+    """The `post_install` steps SCCS itself ships for `tool_name`, else []."""
+    from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
+
+    for default in DEFAULT_NPX_TOOLS:
+        if default.name == tool_name:
+            return [list(cmd) for cmd in default.post_install]
+    return []
 
 
 def _bundled_skill_action(

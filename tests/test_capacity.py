@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -25,7 +25,7 @@ from sccs.capacity.report import build_report, derive_routing
 from sccs.capacity.schema import ProviderCapacity, QuotaScope, QuotaWindow
 from sccs.doctor.runner import DoctorError
 
-NOW = datetime(2026, 8, 30, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC)
 
 
 def _epoch(moment: datetime) -> int:

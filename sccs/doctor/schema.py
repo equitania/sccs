@@ -10,7 +10,7 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from sccs.utils.paths import expand_path
 
@@ -301,6 +301,22 @@ class NpxToolSpec(BaseModel):
             if not _SAFE_NAME_PATTERN.match(head):
                 raise ValueError(f"post_install head contains invalid characters: {head!r}")
         return v
+
+    @model_validator(mode="after")
+    def _post_install_runs_own_binary(self) -> NpxToolSpec:
+        # A follow-up step drives the tool it belongs to (`playwright-cli
+        # install-browser …`), nothing else. The character check above lets
+        # `sh`, `bash` and `curl` through, and config.yaml travels between
+        # hosts through the sync repo — so without this, write access to that
+        # repo is code execution on every host at the next `doctor install`.
+        own = {self.name, self.detect_command or self.name}
+        for cmd in self.post_install:
+            if cmd[0] not in own:
+                raise ValueError(
+                    f"post_install head {cmd[0]!r} is not the tool's own binary "
+                    f"({' or '.join(sorted(own))}) — post_install may only drive the tool it belongs to"
+                )
+        return self
 
     @field_validator("browser_bundles")
     @classmethod
