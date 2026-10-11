@@ -51,10 +51,10 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=6.0.0",
     "ruff>=0.11.0",
-    # Capped below 2: mypy 2.0 (May 2026) changed defaults (--local-partial-types,
-    # --strict-bytes, PEP 688) — the 2.x upgrade must be a deliberate, tested step,
-    # not a silent `uv lock --upgrade` side effect. Bump cap + fix findings together.
-    "mypy>=1.14.0,<2.0.0",
+    # mypy 2 (new defaults --local-partial-types, --strict-bytes) adopted in
+    # October 2026 with zero findings. Capped below 3 so the next major is again a
+    # deliberate, tested step rather than a `uv lock --upgrade` side effect.
+    "mypy>=2.4.0,<3.0.0",
     "types-PyYAML>=6.0.0",
     "pre-commit>=4.0.0",
     "bandit>=1.9.0",
