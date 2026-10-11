@@ -11,7 +11,8 @@
 
 - **Python 3.10 is no longer supported** (end of life October 2026); `requires-python` is `>=3.11`, and 3.14 is tested and listed. The `tomli` test dependency is gone — `tomllib` is in the standard library from 3.11.
 - **CI audits the locked dependency set** with `pip-audit`. Its first run found three advisories in `virtualenv` 21.7.1, a development dependency pulled in by `pre-commit`; the lock now carries 21.14.6.
-- Dependencies refreshed within their bounds (click 8.5, pydantic 2.14, ruff 0.17); pre-commit hooks follow the lock. mypy stays on 1.x — the 2.x upgrade is a separate step.
+- Dependencies refreshed within their bounds (click 8.5, pydantic 2.14, ruff 0.17); pre-commit hooks follow the lock.
+- **mypy 2.4** for development: the cap moves from `<2` to `<3`. mypy 2's new defaults (`--local-partial-types`, `--strict-bytes`) report nothing in the 87 source files.
 
 ## Version 2.68.2 (16.09.2026)
 
