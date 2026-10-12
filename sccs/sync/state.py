@@ -51,6 +51,10 @@ class SyncState:
     version: str = "2.0"
     last_sync: str | None = None  # ISO format datetime
     items: dict[str, ItemState] = field(default_factory=dict)
+    # Local directory each category last synced against. Item hashes say
+    # "in sync", not "in sync WHERE" — a moved local_path would otherwise
+    # read every tracked item as deleted locally (2.71.2).
+    category_roots: dict[str, str] = field(default_factory=dict)
 
     def get_item(self, category: str, name: str) -> ItemState | None:
         """Get state for an item."""
@@ -95,11 +99,14 @@ class SyncState:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        data: dict[str, Any] = {
             "version": self.version,
             "last_sync": self.last_sync,
             "items": {key: item.to_dict() for key, item in self.items.items()},
         }
+        if self.category_roots:
+            data["category_roots"] = dict(self.category_roots)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SyncState":
@@ -108,10 +115,12 @@ class SyncState:
         for key, item_data in data.get("items", {}).items():
             items[key] = ItemState.from_dict(item_data)
 
+        roots = data.get("category_roots")
         return cls(
             version=data.get("version", "2.0"),
             last_sync=data.get("last_sync"),
             items=items,
+            category_roots={str(k): str(v) for k, v in roots.items()} if isinstance(roots, dict) else {},
         )
 
 
@@ -207,6 +216,17 @@ class StateManager:
         """Get last known hash for an item."""
         item = self.state.get_item(category, name)
         return item.content_hash if item else None
+
+    def get_category_root(self, category: str) -> str | None:
+        """Local directory the category last synced against, if recorded."""
+        return self.state.category_roots.get(category)
+
+    def set_category_root(self, category: str, root: str) -> None:
+        """Record the category's local directory and save (no-op when unchanged)."""
+        if self.state.category_roots.get(category) == root:
+            return
+        self.state.category_roots[category] = root
+        self.save()
 
     def reset(self) -> None:
         """Reset state to empty."""

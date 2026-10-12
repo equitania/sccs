@@ -1,5 +1,12 @@
 # Release Notes
 
+## Version 2.71.2 (12.10.2026)
+
+### Fixed (two ways a Windows host could damage the shared state)
+
+- **`sccs categories enable/disable` changes one entry instead of rewriting the config.** It saved the loaded configuration back to disk — every default category, and every path already expanded (`C:\Users\<user>\.claude\skills`). Through `sccs_config` that file reaches every other host. Now only the category's `enabled` key changes; a default category the file does not name yet is added with its unexpanded default, as `sccs config upgrade` does. A backup is written first.
+- **A category whose local folder moved no longer deletes its files in the repo.** The sync state knew that a file was in sync, not where. When 2.71.1 followed OneDrive's Documents folder, `powershell_profile` pointed at a new folder in which all tracked files were missing — the next sync would have read that as "deleted locally" and removed them from the repo. The state now records each category's local folder; when it changes, the category is synced fresh: repo files are copied into the new folder, files only there go to the repo, differing pairs become conflicts, and nothing is deleted. For state written before this version, which has no folder recorded, the same applies when every tracked file of a category is missing locally at once. `sync` names the reason in a yellow line, `--json` as `state_reset`.
+
 ## Version 2.71.1 (12.10.2026)
 
 ### Fixed (the PowerShell profile went to a folder PowerShell never reads)

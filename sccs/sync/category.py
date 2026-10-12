@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,6 +138,9 @@ class CategorySyncResult:
     results: list[ActionResult] = field(default_factory=list)
     error_message: str | None = None
     settings_result: SettingsEnsureResult | None = None
+    # Set when the stored item hashes were ignored because they cannot
+    # describe the current local directory (see CategoryHandler._stale_state_reason).
+    state_reset: str | None = None
 
 
 class CategoryHandler:
@@ -171,6 +175,7 @@ class CategoryHandler:
         self.global_exclude = global_exclude or []
         self._items: list[SyncItem] | None = None
         self._actions: list[SyncAction] | None = None
+        self.state_reset: str | None = None
 
     @property
     def local_path(self) -> Path:
@@ -201,10 +206,13 @@ class CategoryHandler:
 
         items = self.scan_items()
         actions: list[SyncAction] = []
+        self.state_reset = self._stale_state_reason(items)
 
         for item in items:
-            # Get last known hash
-            last_hash = self.state_manager.get_item_hash(self.name, item.name)
+            # Get last known hash — none when the stored state describes
+            # another directory: nothing is then "deleted locally", repo
+            # items are copied in and differing pairs become conflicts.
+            last_hash = None if self.state_reset else self.state_manager.get_item_hash(self.name, item.name)
 
             # Determine action
             action = determine_action(
@@ -216,6 +224,33 @@ class CategoryHandler:
 
         self._actions = actions
         return actions
+
+    def _root_key(self) -> str:
+        return os.path.normcase(os.path.normpath(str(self.local_path)))
+
+    def _stale_state_reason(self, items: list[SyncItem]) -> str | None:
+        """Why the stored item state cannot be trusted for this category, or None.
+
+        Two cases, both of which would otherwise delete repo items:
+        - the category's local directory changed since the last sync
+          (OneDrive moved Documents; 2.71.1 then followed it);
+        - no directory was recorded yet (state from before 2.71.2) and every
+          tracked item is missing locally at once. A real cleanup deletes
+          some items, not the whole category; misjudging it costs a re-copy,
+          never data.
+        """
+        recorded = self.state_manager.get_category_root(self.name)
+        if recorded is not None:
+            if recorded != self._root_key():
+                return f"local path changed ({recorded} → {self.local_path}); syncing it fresh, nothing is deleted"
+            return None
+        tracked = [item for item in items if self.state_manager.get_item_hash(self.name, item.name) is not None]
+        if tracked and not any(item.exists_local for item in tracked):
+            return (
+                f"none of the {len(tracked)} previously synced items exist in {self.local_path}; "
+                "restoring them from the repo instead of deleting them there"
+            )
+        return None
 
     def get_status(self) -> CategoryStatus:
         """Get current status for this category."""
@@ -272,6 +307,7 @@ class CategoryHandler:
             name=self.name,
             success=True,
             total=len(actions),
+            state_reset=self.state_reset,
         )
 
         for action in actions:
@@ -322,6 +358,9 @@ class CategoryHandler:
             else:
                 result.errors += 1
                 result.success = False
+
+        if not dry_run and not result.aborted:
+            self.state_manager.set_category_root(self.name, self._root_key())
 
         # Run settings ensure hook if configured. The effective config is
         # the user's block augmented with bundled defaults — this lets

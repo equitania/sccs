@@ -514,12 +514,39 @@ def update_category_enabled(category_name: str, enabled: bool, config_path: Path
 
     Raises:
         KeyError: If category doesn't exist.
-    """
-    config = load_config(config_path)
 
+    Edits the raw YAML, never a dump of the loaded model: the model carries
+    every default category and paths the validators already expanded, so
+    saving it wrote `C:\\Users\\<user>\\.claude\\skills` into a config.yaml
+    that `sccs_config` then carried to every other host (2.71.2).
+    """
+    if config_path is None:
+        config_path = get_config_path()
+
+    config = load_config(config_path)
     if category_name not in config.sync_categories:
         raise KeyError(f"Category '{category_name}' not found in configuration")
 
-    config.sync_categories[category_name].enabled = enabled
-    save_config(config, config_path)
-    return config
+    raw = load_raw_user_data(config_path)
+    categories = raw.get("sync_categories")
+    if not isinstance(categories, dict):
+        categories = {}
+        raw["sync_categories"] = categories
+    entry = categories.get(category_name)
+    if not isinstance(entry, dict):
+        # A default category the file does not name yet: add its unexpanded
+        # default, as `adopt_new_categories` does.
+        entry = copy.deepcopy(DEFAULT_CONFIG["sync_categories"].get(category_name, {}))
+        categories[category_name] = entry
+    entry["enabled"] = enabled
+
+    if config_path.is_file():
+        create_backup(config_path, category="config")
+    try:
+        yaml_text = yaml.dump(raw, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        atomic_write(config_path, yaml_text)
+    except (OSError, yaml.YAMLError) as exc:
+        logger.error("Could not persist category state to %s: %s", config_path, exc)
+        raise ConfigWriteError(f"Cannot persist category state to {config_path}: {exc}") from exc
+
+    return load_config(config_path)

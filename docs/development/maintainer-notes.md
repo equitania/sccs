@@ -49,6 +49,10 @@ The release history — what each version added — lives in `RELEASE_NOTES.md`.
 
 `sccs/utils/paths.py` (`windows_documents_dir`, `expand_user_path`). OneDrive's folder backup moves Documents, and PowerShell loads `$PROFILE` from the moved folder — `powershell_profile` wrote into a plain `~/Documents/PowerShell` nobody read. `SyncCategory.local_path` maps a leading `~/Documents` (either slash, any case, whole segment only) to `SHGetKnownFolderPath(FOLDERID_Documents)` via `ctypes`; off Windows or on failure it is plain `expanduser`. **The deploy ceiling (`_lexical`) uses the same function** — roots and targets must expand identically, or every PowerShell item lands "outside the managed roots". Tests patch `windows_documents_dir`, so they run on Linux CI.
 
+### Category toggle and moved local roots (v2.71.2)
+
+**`update_category_enabled` edits the raw YAML** (one `enabled` key; a missing default category is added unexpanded, like `adopt_new_categories`) — never `save_config(load_config())`, which dumps every default category with validator-expanded absolute paths into a file `sccs_config` carries to every host. **`SyncState.category_roots`** records the normalised local directory per category after each non-dry-run sync (`CategoryHandler._root_key`). `_stale_state_reason` ignores stored hashes when the recorded root differs, or — for pre-2.71.2 state with no root — when every tracked item is missing locally at once; without either, a moved `local_path` turns every tracked item into `DELETED_LOCAL`, which deletes in the repo. Ignoring hashes is the safe direction: repo-only items become `NEW_REPO`, differing pairs `CONFLICT`. A partial local deletion still deletes in the repo — the rule must not swallow a real cleanup. A dry run never moves the recorded root.
+
 ## Sync categories
 
 ### Fish coverage (v2.67.2)

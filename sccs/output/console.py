@@ -206,6 +206,9 @@ class Console:
         """Print result for a single category."""
         sync_verb = "would sync" if dry_run else "synced"
 
+        if result.state_reset:
+            self._console.print(f"[yellow]![/yellow] [bold]{name}[/bold] - {result.state_reset}")
+
         if result.success and result.synced == 0 and result.conflicts == 0:
             self._console.print(f"[green]✓[/green] [bold]{name}[/bold] - no changes")
             return
