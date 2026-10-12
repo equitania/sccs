@@ -12,6 +12,7 @@ from sccs.deploy.schema import DeploymentProfile
 from sccs.doctor.profiles import ProfileSpec
 from sccs.doctor.schema import DoctorConfig
 from sccs.doctor.statusline import StatusLineConfig
+from sccs.utils.paths import expand_user_path
 
 # Git remote name: alphanumeric start, then alphanumerics/underscore/dot/hyphen.
 # Leading hyphen is forbidden to block option-injection (e.g. "--upload-pack=evil").
@@ -154,7 +155,13 @@ class SyncCategory(BaseModel):
         description="Optional JSON settings entries to ensure after sync.",
     )
 
-    @field_validator("local_path", "repo_path")
+    @field_validator("local_path")
+    @classmethod
+    def expand_local_path(cls, v: str) -> str:
+        """Expand ~; on Windows ~/Documents is the real (possibly OneDrive) Documents folder."""
+        return expand_user_path(v)
+
+    @field_validator("repo_path")
     @classmethod
     def expand_paths(cls, v: str) -> str:
         """Expand ~ in paths."""

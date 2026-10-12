@@ -21,6 +21,7 @@ from sccs.transfer.importer import Importer
 from sccs.transfer.manifest import ManifestCategory, ManifestItem, resolves_to_parent
 from sccs.utils.hashing import directory_hash, file_hash
 from sccs.utils.logging import get_logger
+from sccs.utils.paths import expand_user_path
 
 logger = get_logger("sccs.deploy")
 
@@ -53,7 +54,7 @@ def _category_base(cat_data: ManifestCategory) -> Path:
     (`starship_config` -> `~/.config/starship.toml`), so its items sit in the
     file's parent directory, not underneath the file.
     """
-    base = Path(cat_data.local_path).expanduser()
+    base = Path(expand_user_path(cat_data.local_path))
     if resolves_to_parent(cat_data, base):
         return base.parent
     return base
@@ -87,7 +88,7 @@ def _lexical(path: Path) -> Path:
     a legitimate target. The bundle itself cannot plant one — the importer
     rejects symlinks in the ZIP.
     """
-    return Path(os.path.normpath(path.expanduser()))
+    return Path(os.path.normpath(expand_user_path(path)))
 
 
 def _unmanaged_targets(categories: dict[str, ManifestCategory]) -> list[tuple[str, Path]]:

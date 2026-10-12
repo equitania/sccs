@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 2.71.1 (12.10.2026)
+
+### Fixed (the PowerShell profile went to a folder PowerShell never reads)
+
+- **On Windows, `~/Documents` is the Documents folder Windows reports.** When OneDrive backs up the Documents folder, Windows moves it (for example to `C:\Users\<user>\OneDrive - <Company>\Documents`), and PowerShell loads `$PROFILE` from there. `powershell_profile` still wrote to `~/Documents/PowerShell`, so a converted profile never took effect — the old aliases kept running. SCCS now asks Windows for the folder's real location; nothing has to be configured. Elsewhere, and if Windows cannot answer, `~/Documents` keeps its plain meaning. `sccs deploy install` uses the same mapping, so its path ceiling and its targets name the same folder.
+
 ## Version 2.71.0 (12.10.2026)
 
 ### Added (each host decides where its sync repo lives)

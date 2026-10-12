@@ -128,9 +128,10 @@ sccs categories enable powershell_profile
 sccs sync --category powershell_profile
 ```
 
-The profile is installed under `~/Documents/PowerShell/`. With OneDrive sync
-enabled, this may resolve to `~/OneDrive/Documents/PowerShell/` — override
-`local_path` for the `powershell_profile` category in your config if needed.
+The profile is installed under `~/Documents/PowerShell/`. SCCS asks Windows
+for the real Documents folder, so a Documents folder redirected by OneDrive
+(`~/OneDrive - Company/Documents/PowerShell/`) is found without any setting.
+`$PROFILE` in PowerShell shows the path it loads.
 
 ## Editing
 

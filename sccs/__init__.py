@@ -4,7 +4,7 @@
 # Version: 2.70.0
 # Date: 11.10.2026
 
-__version__ = "2.71.0"
+__version__ = "2.71.1"
 __author__ = "Equitania Software GmbH"
 
 

@@ -2,11 +2,74 @@
 # Safe file operations with atomic writes and pattern matching
 
 import fnmatch
+import functools
+import logging
 import os
+import re
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Windows: the Documents folder is often not ~/Documents. OneDrive's
+# "back up Documents" redirects it (C:\Users\x\OneDrive - Company\Dokumente),
+# and PowerShell loads $PROFILE from wherever it really is. SCCS wrote the
+# powershell_profile category into ~/Documents/PowerShell regardless — a
+# directory PowerShell never reads (2.71.1). The shell knows the real
+# location as a Known Folder; ask it instead of guessing.
+_FOLDERID_DOCUMENTS = "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}"
+_DOCUMENTS_PREFIX = re.compile(r"^~[\\/]+Documents(?=$|[\\/])", re.IGNORECASE)
+
+
+@functools.cache
+def windows_documents_dir() -> Path | None:
+    """The real Documents folder on Windows, or None elsewhere or on failure."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        try:
+            guid = _GUID()
+            ctypes.oledll.ole32.CLSIDFromString(_FOLDERID_DOCUMENTS, ctypes.byref(guid))
+            buffer = ctypes.c_wchar_p()
+            hresult = ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(buffer))
+            try:
+                if hresult != 0 or not buffer.value:
+                    logger.debug("SHGetKnownFolderPath(Documents) failed: HRESULT %s", hresult)
+                    return None
+                return Path(buffer.value)
+            finally:
+                ctypes.windll.ole32.CoTaskMemFree(buffer)
+        except OSError as exc:
+            logger.debug("Cannot resolve the Documents folder: %s", exc)
+            return None
+    return None
+
+
+def expand_user_path(path: str | Path) -> str:
+    """Expand `~`, mapping `~/Documents` to the real Documents folder on Windows.
+
+    Elsewhere, and when Windows cannot answer, this is plain `expanduser`.
+    """
+    path_str = str(path)
+    match = _DOCUMENTS_PREFIX.match(path_str)
+    if match:
+        documents = windows_documents_dir()
+        if documents is not None:
+            rest = path_str[match.end() :].lstrip("\\/")
+            return str(documents / rest) if rest else str(documents)
+    return str(Path(path_str).expanduser())
 
 
 def expand_path(path: str | Path) -> Path:
