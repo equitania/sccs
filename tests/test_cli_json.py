@@ -6,8 +6,10 @@
 # carries no ESC byte.
 
 import json
+import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from sccs.cli import cli
@@ -22,6 +24,19 @@ def _parse_clean(output: str) -> dict:
     lines = [line for line in output.splitlines() if line.strip()]
     assert len(lines) == 1, f"expected exactly one JSON line, got {len(lines)}: {lines!r}"
     return json.loads(lines[0])
+
+
+# `sccs sync` stops when the repo directory is missing (2.71.0), so the mocked
+# configs need a directory that exists — "/tmp/repo" only did by accident on
+# machines where an earlier run had left it behind, never in CI.
+_REPO = ""
+
+
+@pytest.fixture(autouse=True)
+def _repo_dir(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(sys.modules[__name__], "_REPO", str(repo))
 
 
 class TestStatusJson:
@@ -178,7 +193,7 @@ class TestSyncJson:
     @patch("sccs.cli.load_config")
     def test_sync_dry_run_json_single_line(self, mock_load, mock_engine_cls):
         cfg = MagicMock()
-        cfg.repository.path = "/tmp/repo"
+        cfg.repository.path = _REPO
         cfg.repository.auto_commit = False
         cfg.repository.auto_push = False
         mock_load.return_value = cfg

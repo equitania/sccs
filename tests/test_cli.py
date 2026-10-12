@@ -1,6 +1,7 @@
 # Tests for sccs.cli
 # CLI commands using Click testing
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,6 +11,18 @@ from click.testing import CliRunner
 import sccs.cli as cli_module
 from sccs.cli import _print_platform_hint, cli
 from sccs.config.schema import SccsConfig
+
+# `sccs sync` stops when the repo directory is missing (2.71.0), so the mocked
+# configs need a directory that exists — "/tmp/repo" only did by accident on
+# machines where an earlier run had left it behind, never in CI.
+_REPO = ""
+
+
+@pytest.fixture(autouse=True)
+def _repo_dir(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(sys.modules[__name__], "_REPO", str(repo))
 
 
 class TestCliGroup:
@@ -54,7 +67,7 @@ class TestSyncCommand:
     @patch("sccs.cli.SyncEngine")
     def test_dry_run(self, mock_engine_cls, mock_remote, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_load.return_value = mock_config
 
         mock_result = MagicMock()
@@ -82,7 +95,7 @@ class TestSyncCommand:
     @patch("sccs.cli.SyncEngine")
     def test_sync_with_conflicts(self, mock_engine_cls, mock_remote, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_config.repository.auto_commit = False
         mock_config.repository.auto_push = False
         mock_load.return_value = mock_config
@@ -112,7 +125,7 @@ class TestSyncCommand:
     @patch("sccs.cli.SyncEngine")
     def test_sync_behind_no_pull(self, mock_engine_cls, mock_remote, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_config.repository.auto_pull = False
         mock_load.return_value = mock_config
 
@@ -126,7 +139,7 @@ class TestSyncCommand:
     @patch("sccs.cli.SyncEngine")
     def test_sync_behind_with_auto_pull(self, mock_engine_cls, mock_pull, mock_remote, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_config.repository.auto_pull = True
         mock_config.repository.auto_commit = False
         mock_config.repository.auto_push = False
@@ -154,7 +167,7 @@ class TestSyncCommand:
     @patch("sccs.cli.SyncEngine")
     def test_sync_remote_error_continues(self, mock_engine_cls, mock_remote, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_config.repository.auto_commit = False
         mock_config.repository.auto_push = False
         mock_load.return_value = mock_config
@@ -187,7 +200,7 @@ class TestSyncCommand:
         self, mock_push, mock_commit, mock_stage, mock_uncommitted, mock_engine_cls, mock_remote, mock_load
     ):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_config.repository.auto_commit = True
         mock_config.repository.auto_push = True
         mock_config.repository.remote = "origin"
@@ -217,7 +230,7 @@ class TestSyncCommand:
     @patch("sccs.cli.SyncEngine")
     def test_sync_aborted(self, mock_engine_cls, mock_remote, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_load.return_value = mock_config
 
         mock_result = MagicMock()
@@ -412,7 +425,7 @@ class TestConfigCommands:
         mock_path.exists.return_value = True
 
         mock_cfg = MagicMock()
-        mock_cfg.repository.path = "/tmp/repo"
+        mock_cfg.repository.path = _REPO
         mock_cfg.repository.auto_commit = False
         mock_cfg.repository.auto_push = False
         mock_cfg.get_enabled_categories.return_value = {"skills": MagicMock(description="Skills")}
@@ -759,7 +772,7 @@ class TestDocsCommand:
     @patch("sccs.cli.load_config")
     def test_docs_generate_success(self, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_config.repository.commit_prefix = "[SYNC]"
         mock_load.return_value = mock_config
 
@@ -1044,12 +1057,12 @@ class TestIntegrationsCommand:
     @patch("sccs.cli.load_config")
     def test_integrations_trust_repo_already_trusted(self, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_load.return_value = mock_config
 
         mock_result = MagicMock()
         mock_result.already_trusted = True
-        mock_result.repo_path = "/tmp/repo"
+        mock_result.repo_path = _REPO
 
         runner = CliRunner()
         with patch("sccs.integrations.detectors.ClaudeDesktopDetector") as mock_cd_cls:
@@ -1369,7 +1382,7 @@ class TestMigrationCheck:
         self, mock_mgr, mock_offer, mock_raw, mock_engine_cls, mock_remote, mock_load
     ):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_load.return_value = mock_config
 
         mock_result = MagicMock()
@@ -1402,7 +1415,7 @@ class TestMigrationCheck:
     ):
         """In non-TTY mode, new categories emit a notice without interaction."""
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_load.return_value = mock_config
 
         mock_result = MagicMock()
@@ -1436,7 +1449,7 @@ class TestMigrationCheck:
     ):
         """Without --migrate, sync never touches the migration check (opt-in)."""
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_load.return_value = mock_config
 
         mock_result = MagicMock()
@@ -1514,7 +1527,7 @@ class TestIntegrationsStatusWithData:
             mock_cd_cls.return_value = mock_cd
 
             mock_config = MagicMock()
-            mock_config.repository.path = "/tmp/repo"
+            mock_config.repository.path = _REPO
             mock_load.return_value = mock_config
             result = runner.invoke(cli, ["integrations", "status"])
 
@@ -1606,13 +1619,13 @@ class TestIntegrationsMigrateSkillsWithData:
     @patch("sccs.cli.load_config")
     def test_integrations_trust_repo_success(self, mock_load):
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
         mock_load.return_value = mock_config
 
         mock_result = MagicMock()
         mock_result.already_trusted = False
         mock_result.success = True
-        mock_result.repo_path = "/tmp/repo"
+        mock_result.repo_path = _REPO
         mock_result.error = None
 
         runner = CliRunner()
@@ -1717,7 +1730,7 @@ class TestHelperFunctions:
 
         mock_console = MagicMock()
         mock_config = MagicMock()
-        mock_config.repository.path = "/tmp/repo"
+        mock_config.repository.path = _REPO
 
         with (
             patch("sccs.integrations.detectors.AntigravityDetector") as mock_ag_cls,
