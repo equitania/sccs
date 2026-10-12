@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.70.0  ·  **Python:** ≥3.11
+- **Version:** 2.71.0  ·  **Python:** ≥3.11
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -53,7 +53,8 @@
 | `sccs categories list` | List all categories. | --all, --json |
 | `sccs config edit` | Open configuration in editor. | — |
 | `sccs config init` | Initialize configuration file. | --force, --repo-path PATH (non-interactive) |
-| `sccs config show` | Show current configuration. | --json |
+| `sccs config show` | Show current configuration. | --json (incl. `repository_path_source`: shared/local) |
+| `sccs config repo-path [PATH]` | Show or set THIS host's sync-repo path (`~/.config/sccs/local.yaml`, never synced, overrides `repository.path`). | — |
 | `sccs config upgrade` | Check for new default categories and add them to config. | — |
 | `sccs config validate` | Validate configuration file. | --json |
 | `sccs convert fish-to-pwsh` | Generate a PowerShell profile from Fish shell configuration. | --src PATH, --dst PATH, --force, -n/--dry-run, --conveniences/--no-conveniences |

@@ -41,6 +41,75 @@ def ensure_config_dir() -> Path:
     return config_dir
 
 
+# Host-local overrides (v2.71.0).
+#
+# config.yaml travels between hosts through the `sccs_config` category, so
+# everything in it is shared — including `repository.path`. Where the sync
+# repo lives is a per-host decision, though: adopting the shared config on a
+# Windows host whose clone sat in C:\Projects pointed it at the Mac's
+# ~/gitbase/sccs-sync, and every `sync` crashed. local.yaml sits next to
+# config.yaml, is never synced (`sccs_config` includes config.yaml only) and
+# carries the one key that must not travel. Only `repository.path` is read;
+# anything else in the file is ignored with a warning, so the file cannot
+# become a second, unsynced config.
+
+LOCAL_CONFIG_NAME = "local.yaml"
+
+
+def get_local_config_path(config_path: Path | None = None) -> Path:
+    """Path of the host-local override file next to the given config."""
+    if config_path is None:
+        config_path = get_config_path()
+    return config_path.parent / LOCAL_CONFIG_NAME
+
+
+def read_local_repo_path(config_path: Path | None = None) -> str | None:
+    """`repository.path` from local.yaml, or None when the host has no override.
+
+    A malformed file is reported and ignored rather than raised: the shared
+    path is still a usable fallback, and a broken override must not lock the
+    user out of `sccs config repo-path`, the command that fixes it.
+    """
+    local_path = get_local_config_path(config_path)
+    if not local_path.is_file():
+        return None
+    try:
+        data = yaml.safe_load(local_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("Ignoring %s: %s", local_path, exc)
+        return None
+    if not isinstance(data, dict):
+        logger.warning("Ignoring %s: expected a mapping", local_path)
+        return None
+    unknown = sorted(set(data) - {"repository"})
+    repository = data.get("repository")
+    if isinstance(repository, dict):
+        unknown += [f"repository.{key}" for key in sorted(set(repository) - {"path"})]
+    if unknown:
+        logger.warning("%s: only repository.path is read; ignoring %s", local_path, ", ".join(unknown))
+    path = repository.get("path") if isinstance(repository, dict) else None
+    if not isinstance(path, str) or not path.strip():
+        return None
+    return path.strip()
+
+
+def write_local_repo_path(repo_path: str, config_path: Path | None = None) -> Path:
+    """Write (or replace) this host's repository path into local.yaml."""
+    local_path = get_local_config_path(config_path)
+    text = (
+        "# Host-local SCCS settings - never synced (sccs_config carries config.yaml only).\n"
+        "# Overrides repository.path from config.yaml on this host. Set it with\n"
+        "# `sccs config repo-path PATH`.\n"
+        + yaml.dump({"repository": {"path": repo_path}}, default_flow_style=False, allow_unicode=True)
+    )
+    try:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(local_path, text, mode=0o600)
+    except OSError as exc:
+        raise ConfigWriteError(f"Cannot write {local_path}: {exc}") from exc
+    return local_path
+
+
 def load_config(config_path: Path | None = None) -> SccsConfig:
     """
     Load configuration from YAML file.
@@ -69,6 +138,10 @@ def load_config(config_path: Path | None = None) -> SccsConfig:
 
     # Merge with defaults for missing values
     merged = _merge_with_defaults(data)
+
+    local_repo_path = read_local_repo_path(config_path)
+    if local_repo_path is not None:
+        merged["repository"] = {**merged["repository"], "path": local_repo_path}
 
     return SccsConfig.model_validate(merged)
 
@@ -100,6 +173,15 @@ def save_config(config: SccsConfig, config_path: Path | None = None) -> Path:
     # Convert to dict and write as YAML
     # Use mode='json' to serialize Enums as their string values
     data = config.model_dump(exclude_none=True, mode="json")
+
+    # A config loaded on a host with local.yaml carries that host's repo
+    # path. Writing it back would push it into the shared config.yaml and,
+    # with the next sync, onto every other host — keep the shared value.
+    if read_local_repo_path(config_path) is not None:
+        shared_path = (load_raw_user_data(config_path).get("repository") or {}).get("path")
+        if not isinstance(shared_path, str):
+            shared_path = DEFAULT_CONFIG["repository"]["path"]
+        data["repository"]["path"] = shared_path
 
     try:
         yaml_text = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)

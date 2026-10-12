@@ -1,5 +1,19 @@
 # Release Notes
 
+## Version 2.71.0 (12.10.2026)
+
+### Added (each host decides where its sync repo lives)
+
+- **`~/.config/sccs/local.yaml` holds this host's repository path.** `config.yaml` is shared between hosts through `sccs_config`, so `repository.path` was the same everywhere — a host whose clone lives elsewhere had no way to say so. `local.yaml` is never synced and overrides `repository.path`; it carries that one key and nothing else.
+- **`sccs config repo-path [PATH]`** shows the path in use and where it comes from, or records a clone for this host (it must contain `.git`). `config.yaml` is not touched. `config show` names the source too, `config show --json` as `repository_path_source` (`shared`/`local`).
+
+### Fixed (adopting the shared config broke a host whose clone lived elsewhere)
+
+- **Adoption keeps the host's repository.** 2.70.0 replaced the whole `config.yaml`, path included: a Windows host with its clone in `C:\Projects\sccs-sync` was pointed at the Mac's `~/gitbase/sccs-sync`. `doctor install`/`optimize` now pin the current path in `local.yaml` first when the shared config names another location. A host already hit by this: `sccs config repo-path <clone>`.
+- **`sccs sync` stops with a clear message when the repository directory is missing** instead of a `NotADirectoryError` traceback on Windows. It stops before syncing, so nothing is copied into a newly created directory at the wrong place; `--json` reports it as an error envelope. Git calls with a missing working directory no longer claim that git is not installed.
+- `sccs convert fish-to-pwsh|fish-to-zsh` on Windows says that the repository itself is missing rather than suggesting `sccs sync --pull`.
+- Saving the config (`categories enable/disable`) never writes a host-local path into the shared `config.yaml`.
+
 ## Version 2.70.0 (11.10.2026)
 
 ### Added (a host that never received the shared config adopts it through `doctor install`)

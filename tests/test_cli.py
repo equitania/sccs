@@ -423,6 +423,8 @@ class TestConfigCommands:
         with (
             patch("sccs.cli.get_config_path", return_value=mock_path),
             patch("sccs.cli.load_config", return_value=mock_cfg),
+            # A MagicMock path would hand yaml.safe_load a mock stream that never ends.
+            patch("sccs.cli.read_local_repo_path", return_value=None),
         ):
             result = runner.invoke(cli, ["config", "show"])
         assert result.exit_code == 0

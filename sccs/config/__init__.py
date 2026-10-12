@@ -7,11 +7,14 @@ from sccs.config.loader import (
     adopt_new_categories,
     ensure_config_exists,
     get_config_path,
+    get_local_config_path,
     load_config,
     load_raw_user_data,
+    read_local_repo_path,
     save_config,
     update_category_enabled,
     validate_config_file,
+    write_local_repo_path,
 )
 from sccs.config.schema import (
     ConflictResolution,
@@ -45,6 +48,9 @@ __all__ = [
     "validate_config_file",
     "update_category_enabled",
     "adopt_new_categories",
+    "get_local_config_path",
+    "read_local_repo_path",
+    "write_local_repo_path",
     "ConfigWriteError",
     # Defaults
     "DEFAULT_CONFIG",

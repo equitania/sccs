@@ -67,6 +67,11 @@ def _run_git(
         GitError: If command fails and check is True.
     """
     cmd = ["git", *args]
+    # A missing cwd surfaces as NotADirectoryError on Windows (an uncaught
+    # traceback) and as FileNotFoundError on POSIX, which the handler below
+    # would misreport as a missing git binary.
+    if cwd is not None and not Path(cwd).is_dir():
+        raise GitError(f"Repository directory not found: {cwd}")
     try:
         result = subprocess.run(
             cmd,

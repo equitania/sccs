@@ -16,10 +16,13 @@ from sccs.config import (
     ensure_config_exists,
     generate_default_config,
     get_config_path,
+    get_local_config_path,
     load_config,
     load_raw_user_data,
+    read_local_repo_path,
     update_category_enabled,
     validate_config_file,
+    write_local_repo_path,
 )
 from sccs.config.migration import (
     MigrationStateManager,
@@ -200,6 +203,17 @@ def sync(
         _run_migration_check(console, migrate, get_config_path())
 
     repo_path = Path(config.repository.path).expanduser()
+
+    # Without this the engine would create the missing tree and copy every
+    # local item into it — a second, unversioned "repo" in the wrong place.
+    if not repo_path.is_dir():
+        message = _missing_repo_message(repo_path)
+        if output_json:
+            emit_json_error(message, repository_path=str(repo_path))
+        else:
+            console.print_error(message)
+            console.print_info(_REPO_PATH_HINT)
+        sys.exit(1)
 
     if not dry_run and not no_pull_check:
         _handle_remote_status(ctx, console, repo_path, config, do_pull)
@@ -512,14 +526,25 @@ def config_show(ctx: click.Context, output_json: bool) -> None:
         except Exception as e:
             emit_json_error(f"Error loading config: {e}", config_path=str(config_path))
             return
-        emit_json({"config_path": str(config_path), "config": cfg})
+        emit_json(
+            {
+                "config_path": str(config_path),
+                "config": cfg,
+                "repository_path_source": "local" if read_local_repo_path(config_path) else "shared",
+            }
+        )
         return
 
     console.print(f"[bold]Config file:[/bold] {config_path}")
 
     try:
         cfg = load_config()
-        console.print(f"\n[bold]Repository:[/bold] {cfg.repository.path}")
+        source = (
+            f" [dim](host-local: {get_local_config_path(config_path)})[/dim]"
+            if read_local_repo_path(config_path)
+            else ""
+        )
+        console.print(f"\n[bold]Repository:[/bold] {cfg.repository.path}{source}")
         console.print(f"[bold]Auto-commit:[/bold] {cfg.repository.auto_commit}")
         console.print(f"[bold]Auto-push:[/bold] {cfg.repository.auto_push}")
 
@@ -598,6 +623,54 @@ def config_init(ctx: click.Context, force: bool, repo_path_opt: str | None, outp
     # Ask about enabling/disabling categories
     console.print("\n[bold]Default category settings applied.[/bold]")
     console.print("Edit the config file to customize enabled categories.")
+
+
+@config.command("repo-path")
+@click.argument("path", required=False)
+@click.pass_context
+def config_repo_path(ctx: click.Context, path: str | None) -> None:
+    """Show or set where THIS host keeps the sync repository.
+
+    \b
+    config.yaml is shared between hosts through the sccs_config category,
+    so its repository.path is the same everywhere. A host whose clone lives
+    elsewhere records its own path in ~/.config/sccs/local.yaml, which is
+    never synced and takes precedence.
+
+    \b
+    Examples:
+        sccs config repo-path                         Show path and its source
+        sccs config repo-path C:\\Projects\\sccs-sync   Use this clone on this host
+    """
+    console = ctx.obj["console"]
+    config_path = get_config_path()
+
+    if path is None:
+        local = read_local_repo_path(config_path)
+        shared = (load_raw_user_data(config_path).get("repository") or {}).get("path")
+        effective = local or shared or "~/gitbase/sccs-sync"
+        console.print(f"[bold]Repository:[/bold] {effective}")
+        if local:
+            console.print(f"  source: host-local ({get_local_config_path(config_path)})")
+            console.print(f"  shared config.yaml says: {shared}")
+        else:
+            console.print(f"  source: shared config.yaml ({config_path})")
+        if not Path(effective).expanduser().is_dir():
+            console.print_warning(_missing_repo_message(Path(effective).expanduser()))
+        return
+
+    target = Path(path).expanduser()
+    if not (target / ".git").exists():
+        console.print_error(f"Not a git repository: {target}")
+        console.print_info("Clone the sync repository there first, then run this command again.")
+        sys.exit(1)
+
+    # Keep a ~-relative spelling as typed; anything else is stored absolute so
+    # a relative argument does not depend on the directory sccs runs in later.
+    stored = path if path.startswith("~") else str(target.resolve())
+    local_file = write_local_repo_path(stored, config_path)
+    console.print_success(f"Repository for this host: {target}")
+    console.print_info(f"Stored in {local_file} — never synced, config.yaml stays unchanged.")
 
 
 @config.command("edit")
@@ -893,8 +966,12 @@ def convert_fish_to_pwsh(
     if not src_path.exists():
         console.print_error(f"Source directory not found: {src_path}")
         if src is None and get_current_platform() == "windows":
-            console.print_info("Run 'sccs sync --pull' first to fetch fish configs from the repo,")
-            console.print_info("or pass --src explicitly if Fish is installed locally.")
+            if not repo_path.is_dir():
+                console.print_info(_missing_repo_message(repo_path))
+                console.print_info(_REPO_PATH_HINT)
+            else:
+                console.print_info("Run 'sccs sync --pull' first to fetch fish configs from the repo,")
+                console.print_info("or pass --src explicitly if Fish is installed locally.")
         sys.exit(1)
 
     # Refuse to clobber an existing destination unless --force or --dry-run.
@@ -1027,8 +1104,12 @@ def convert_fish_to_zsh(
     if not src_path.exists():
         console.print_error(f"Source directory not found: {src_path}")
         if src is None and get_current_platform() == "windows":
-            console.print_info("Run 'sccs sync --pull' first to fetch fish configs from the repo,")
-            console.print_info("or pass --src explicitly if Fish is installed locally.")
+            if not repo_path.is_dir():
+                console.print_info(_missing_repo_message(repo_path))
+                console.print_info(_REPO_PATH_HINT)
+            else:
+                console.print_info("Run 'sccs sync --pull' first to fetch fish configs from the repo,")
+                console.print_info("or pass --src explicitly if Fish is installed locally.")
         sys.exit(1)
 
     # Refuse to clobber an existing destination unless --force or --dry-run.
@@ -1440,6 +1521,15 @@ def _print_platform_hint(console: Console, cfg) -> None:
     console.print(f"[dim]ℹ Plattform: {current} — {'; '.join(parts)}[/dim]")
     if extra_tip:
         console.print(f"[dim]  {extra_tip}[/dim]")
+
+
+_REPO_PATH_HINT = (
+    "If the clone lives elsewhere on this host: sccs config repo-path <path> (stored host-locally, never synced)."
+)
+
+
+def _missing_repo_message(repo_path: Path) -> str:
+    return f"Sync repository not found: {repo_path}"
 
 
 def _handle_remote_status(

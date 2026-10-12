@@ -95,9 +95,11 @@ class TestCategoriesJson:
 class TestConfigShowJson:
     """sccs config show --json"""
 
+    # A MagicMock path would hand yaml.safe_load a mock stream that never ends.
+    @patch("sccs.cli.read_local_repo_path", return_value=None)
     @patch("sccs.cli.load_config")
     @patch("sccs.cli.get_config_path")
-    def test_config_show_json_full_model(self, mock_path, mock_load, sample_config):
+    def test_config_show_json_full_model(self, mock_path, mock_load, _mock_local, sample_config):
         cfg_path = MagicMock()
         cfg_path.exists.return_value = True
         cfg_path.__str__ = lambda self: "/fake/config.yaml"

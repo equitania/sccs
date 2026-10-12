@@ -99,6 +99,11 @@ Plugins, keine Skill-Pakete, keine korrigierten Kategorien.
   `--yes`; ohne Terminal (`--json`, GUI) wird sie übersprungen.
 - Danach `sccs doctor install` noch einmal: Der erste Lauf hat noch mit der
   alten Config geplant.
+- **Der Repo-Pfad bleibt beim Rechner (ab v2.71.0).** Liegt der Clone hier
+  woanders, als die gemeinsame Config sagt (etwa `C:\Projects\sccs-sync` unter
+  Windows), schreibt die Übernahme den bisherigen Pfad nach
+  `~/.config/sccs/local.yaml`. Diese Datei wird nie gesynct und hat Vorrang
+  vor `repository.path`. Von Hand: `sccs config repo-path PFAD`.
 
 ### Spiegel-Abgleich (zweiter Mac) — ab v2.68.0
 
@@ -465,6 +470,11 @@ category definitions.
   (`--json`, a GUI) it is skipped.
 - Then run `sccs doctor install` once more: the first run planned from the
   previous config.
+- **The repo path stays with the host (since v2.71.0).** When the clone lives
+  somewhere other than the shared config says (e.g. `C:\Projects\sccs-sync` on
+  Windows), adoption writes the current path to `~/.config/sccs/local.yaml`.
+  That file is never synced and overrides `repository.path`. By hand:
+  `sccs config repo-path PATH`.
 
 ### Mirror parity (second Mac) — since v2.68.0
 

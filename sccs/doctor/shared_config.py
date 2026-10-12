@@ -82,7 +82,9 @@ def detect_shared_config(config_path: Path) -> SharedConfigStatus | None:
         return None
     if not isinstance(raw, dict):
         return None
-    repo_raw = (raw.get("repository") or {}).get("path")
+    from sccs.config.loader import read_local_repo_path
+
+    repo_raw = read_local_repo_path(config_path) or (raw.get("repository") or {}).get("path")
     if not isinstance(repo_raw, str):
         return None
     repo_path = expand_path(repo_raw)
@@ -98,6 +100,23 @@ def detect_shared_config(config_path: Path) -> SharedConfigStatus | None:
     return SharedConfigStatus(state=state, local_path=config_path, repo_path=repo_path, repo_copy=repo_copy)
 
 
+def _repo_path_differs(shared_text: str, repo_path: Path) -> bool:
+    """True when the shared config names a repo location other than this host's.
+
+    An unreadable shared copy counts as differing — pinning the path that
+    demonstrably works here is the safe side; load_config rejects the copy
+    a moment later anyway.
+    """
+    try:
+        raw = yaml.safe_load(shared_text) or {}
+    except yaml.YAMLError:
+        return True
+    shared = (raw.get("repository") or {}).get("path") if isinstance(raw, dict) else None
+    if not isinstance(shared, str):
+        return True
+    return expand_path(shared).resolve() != repo_path.resolve()
+
+
 def _git_pull(repo_path: Path) -> bool:
     from sccs.git.operations import pull
 
@@ -109,8 +128,15 @@ def adopt_shared_config(
     *,
     pull_fn: Callable[[Path], bool] | None = None,
 ) -> None:
-    """Replace the local config with the shared copy — backed up, validated, rolled back on failure."""
-    from sccs.config.loader import load_config
+    """Replace the local config with the shared copy — backed up, validated, rolled back on failure.
+
+    The repo path is the one key that must not be adopted: it is where THIS
+    host keeps its clone. When the shared copy names another location, the
+    current one is pinned in local.yaml first — otherwise the adopted config
+    points at a directory that does not exist here (a Windows host with its
+    clone in C:\\Projects, 2.70.0).
+    """
+    from sccs.config.loader import get_local_config_path, load_config, read_local_repo_path, write_local_repo_path
 
     pull = pull_fn or _git_pull
     if not pull(status.repo_path):
@@ -126,11 +152,19 @@ def adopt_shared_config(
     backup.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(status.local_path, backup)
 
-    atomic_write(status.local_path, status.repo_copy.read_text(encoding="utf-8"), mode=0o600)
+    shared_text = status.repo_copy.read_text(encoding="utf-8")
+    pinned_local = None
+    if read_local_repo_path(status.local_path) is None and _repo_path_differs(shared_text, status.repo_path):
+        pinned_local = write_local_repo_path(str(status.repo_path), status.local_path)
+        logger.info("repository path %s kept for this host in %s", status.repo_path, pinned_local)
+
+    atomic_write(status.local_path, shared_text, mode=0o600)
     try:
         load_config(status.local_path)
     except (ValueError, OSError, yaml.YAMLError) as exc:
         atomic_write(status.local_path, original, mode=0o600)
+        if pinned_local is not None:
+            get_local_config_path(status.local_path).unlink(missing_ok=True)
         raise DoctorError(f"shared config is invalid ({exc}) — previous config restored") from exc
     logger.info("shared config adopted from %s; previous config at %s", status.repo_copy, backup)
 

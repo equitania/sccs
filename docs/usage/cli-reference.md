@@ -42,6 +42,7 @@ sccs log                         # Sync-Verlauf
 # Konfiguration
 sccs config show                 # Konfiguration anzeigen
 sccs config init                 # Neue Konfiguration erstellen
+sccs config repo-path [PFAD]     # Repo-Pfad nur für diesen Rechner (local.yaml, nie gesynct)
 sccs config edit                 # Im Editor öffnen
 sccs config validate             # Konfiguration prüfen
 
@@ -168,6 +169,7 @@ sccs log                         # Sync history
 # Configuration
 sccs config show                 # Show configuration
 sccs config init                 # Create new configuration
+sccs config repo-path [PATH]     # Repo path for this host only (local.yaml, never synced)
 sccs config edit                 # Open in editor
 sccs config validate             # Validate configuration
 
