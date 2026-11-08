@@ -121,8 +121,37 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
         _print_platform_hint(console, cfg)
 
 
+def _require_known_categories(console, config, names: tuple[str, ...], output_json: bool) -> list[str] | None:
+    """Return the `-c` names in order without repeats, or None when none were given.
+
+    Exits on a name the config does not define. Before this, an unknown name
+    synced nothing and still reported success, so `sync -c skills` (instead
+    of `claude_skills`) looked like a clean run.
+    """
+    if not names:
+        return None
+    unknown = [name for name in dict.fromkeys(names) if config.get_category(name) is None]
+    if unknown:
+        listed = ", ".join(f"'{name}'" for name in unknown)
+        message = f"Unknown categor{'y' if len(unknown) == 1 else 'ies'}: {listed}"
+        valid = sorted(config.sync_categories)
+        if output_json:
+            emit_json_error(message, valid_categories=valid)
+        else:
+            console.print_error(message)
+            console.print_info("Valid categories: " + ", ".join(valid))
+        sys.exit(1)
+    return list(dict.fromkeys(names))
+
+
 @cli.command()
-@click.option("-c", "--category", help="Sync specific category only")
+@click.option(
+    "-c",
+    "--category",
+    "categories",
+    multiple=True,
+    help="Sync only this category (repeatable: -c a -c b)",
+)
 @click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
 @click.option(
     "-f",
@@ -147,7 +176,7 @@ def cli(ctx: click.Context, verbose: bool, no_color: bool) -> None:
 @click.pass_context
 def sync(
     ctx: click.Context,
-    category: str | None,
+    categories: tuple[str, ...],
     dry_run: bool,
     force: str | None,
     interactive: bool,
@@ -170,7 +199,10 @@ def sync(
     \b
     Publish local changes:
         sccs sync --commit --push    Sync all, then commit and push
-        sccs sync -c skills --push   Sync and push specific category
+        sccs sync -c claude_skills --commit --push
+                                     Sync, commit and push one category
+        sccs sync -c sccs_config -c claude_settings --commit
+                                     Several categories in one commit
         sccs sync --dry-run          Preview changes before syncing
 
     \b
@@ -199,6 +231,8 @@ def sync(
     # New-category check is opt-in (default off): only when --migrate is given.
     # The dedicated path is `sccs config upgrade`. Skip entirely in JSON mode —
     # the migration prompt is interactive and a GUI never drives it.
+    selected = _require_known_categories(console, config, categories, output_json)
+
     if not output_json:
         _run_migration_check(console, migrate, get_config_path())
 
@@ -227,7 +261,7 @@ def sync(
 
     # Perform sync
     result = engine.sync(
-        category_name=category,
+        category_names=selected,
         dry_run=dry_run,
         force_direction=force,
         conflict_resolver=conflict_resolver,
@@ -239,10 +273,16 @@ def sync(
 
 
 @cli.command()
-@click.option("-c", "--category", help="Show status for specific category only")
+@click.option(
+    "-c",
+    "--category",
+    "categories",
+    multiple=True,
+    help="Show status for this category only (repeatable)",
+)
 @click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of Rich tables")
 @click.pass_context
-def status(ctx: click.Context, category: str | None, output_json: bool) -> None:
+def status(ctx: click.Context, categories: tuple[str, ...], output_json: bool) -> None:
     """Show synchronization status.
 
     \b
@@ -252,7 +292,8 @@ def status(ctx: click.Context, category: str | None, output_json: bool) -> None:
     \b
     Examples:
         sccs status                  All enabled categories
-        sccs status -c skills        Only skills category
+        sccs status -c claude_skills Only the skills category
+        sccs status -c a -c b        Several categories
         sccs status --json           Machine-readable output
     """
     console = ctx.obj["console"]
@@ -266,15 +307,17 @@ def status(ctx: click.Context, category: str | None, output_json: bool) -> None:
             console.print_error(str(e))
         sys.exit(1)
 
+    selected = _require_known_categories(console, config, categories, output_json)
+
     engine = SyncEngine(config)
-    statuses = engine.get_status(category_name=category)
+    statuses = engine.get_status(category_names=selected)
 
     if not statuses:
         if output_json:
             emit_json({})
             return
-        if category:
-            console.print_error(f"Category '{category}' not found or not enabled")
+        if selected:
+            console.print_error("No status for " + ", ".join(f"'{name}'" for name in selected))
         else:
             console.print_warning("No enabled categories found")
         sys.exit(1)
@@ -294,10 +337,10 @@ def status(ctx: click.Context, category: str | None, output_json: bool) -> None:
 
 @cli.command()
 @click.argument("item_name", required=False)
-@click.option("-c", "--category", help="Category to show diffs for")
+@click.option("-c", "--category", "categories", multiple=True, help="Category to show diffs for (repeatable)")
 @click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of a styled diff")
 @click.pass_context
-def diff(ctx: click.Context, item_name: str | None, category: str | None, output_json: bool) -> None:
+def diff(ctx: click.Context, item_name: str | None, categories: tuple[str, ...], output_json: bool) -> None:
     """Show diff for items.
 
     \b
@@ -318,24 +361,15 @@ def diff(ctx: click.Context, item_name: str | None, category: str | None, output
             console.print_error(str(e))
         sys.exit(1)
 
+    selected = _require_known_categories(console, config, categories, output_json)
+
     engine = SyncEngine(config)
 
-    # Determine which categories to check
-    if category:
-        handler = engine.get_handler(category)
-        if handler is None:
-            if output_json:
-                emit_json_error(f"Category '{category}' not found")
-            else:
-                console.print_error(f"Category '{category}' not found")
-            sys.exit(1)
-        categories_to_check = [(category, handler)]
-    else:
-        categories_to_check = []
-        for name in engine.get_enabled_categories():
-            handler = engine.get_handler(name)
-            if handler is not None:
-                categories_to_check.append((name, handler))
+    categories_to_check = []
+    for name in selected or engine.get_enabled_categories():
+        handler = engine.get_handler(name)
+        if handler is not None:
+            categories_to_check.append((name, handler))
 
     if not categories_to_check:
         if output_json:
@@ -357,19 +391,25 @@ def diff(ctx: click.Context, item_name: str | None, category: str | None, output
     diffs: list[dict] = []
     diff_count = 0
 
+    scanned = []
     for cat_name, handler in categories_to_check:
         items = handler.scan_items()
-
-        # Filter to specific item if provided
         if item_name:
             items = [i for i in items if i.name == item_name]
-            if not items and category:
-                if output_json:
-                    emit_json_error(f"Item '{item_name}' not found in category '{category}'")
-                else:
-                    console.print_error(f"Item '{item_name}' not found in category '{category}'")
-                sys.exit(1)
+        scanned.append((cat_name, items))
 
+    # With named categories an absent item is an error; across all categories
+    # it just means "no differences".
+    if item_name and selected and not any(items for _, items in scanned):
+        where = ", ".join(f"'{name}'" for name in selected)
+        message = f"Item '{item_name}' not found in category {where}"
+        if output_json:
+            emit_json_error(message)
+        else:
+            console.print_error(message)
+        sys.exit(1)
+
+    for cat_name, items in scanned:
         # Show diffs for items that have changes
         for item in items:
             if item.local_path and item.repo_path:
@@ -3589,6 +3629,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool, include_optiona
     for foreign MCP servers — each behind its own confirm prompt
     (default: No).
     """
+    from sccs.doctor.detectors import _load_known_marketplace_locations, load_plugin_project_paths
     from sccs.doctor.installer import build_optimize_plan, execute_plan
     from sccs.doctor.reporter import render_execute_result
     from sccs.doctor.shared_config import shared_config_actions
@@ -3619,6 +3660,8 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool, include_optiona
         cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
         mirror=statuses.get("mirror"),
+        registered_marketplaces=list(_load_known_marketplace_locations()),
+        plugin_project_paths=load_plugin_project_paths(),
         strict=strict,
         include_optional=include_optional,
     )

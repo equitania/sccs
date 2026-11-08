@@ -231,14 +231,16 @@ class TestDiffJson:
     @patch("sccs.cli.SyncEngine")
     @patch("sccs.cli.load_config")
     def test_diff_json_unknown_category(self, mock_load, mock_engine_cls):
-        mock_load.return_value = MagicMock()
-        mock_engine = MagicMock()
-        mock_engine.get_handler.return_value = None
-        mock_engine_cls.return_value = mock_engine
+        mock_config = MagicMock()
+        mock_config.get_category.return_value = None
+        mock_config.sync_categories = {"claude_skills": MagicMock()}
+        mock_load.return_value = mock_config
 
         result = CliRunner().invoke(cli, ["diff", "-c", "nope", "--json"])
         assert result.exit_code == 1
-        assert _parse_clean(result.output)["success"] is False
+        payload = _parse_clean(result.output)
+        assert payload["success"] is False
+        assert payload["valid_categories"] == ["claude_skills"]
 
 
 class TestDoctorJson:

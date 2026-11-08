@@ -24,7 +24,8 @@ finden sich themenspezifisch in den anderen Usage-Docs:
 ```bash
 # Synchronisierung
 sccs sync                        # Alle aktivierten Kategorien
-sccs sync -c skills              # Bestimmte Kategorie
+sccs sync -c claude_skills       # Bestimmte Kategorie
+sccs sync -c sccs_config -c claude_settings  # Mehrere Kategorien (-c wiederholbar)
 sccs sync -n                     # Vorschau (Dry-Run)
 sccs sync -i                     # Interaktive Konfliktauflösung
 sccs sync --force local          # Lokale Version erzwingen
@@ -36,7 +37,7 @@ sccs sync --pull                 # Vorher Remote-Änderungen ziehen
 # Status und Diff
 sccs status                      # Sync-Status aller Kategorien
 sccs diff                        # Alle Unterschiede anzeigen
-sccs diff -c skills              # Diffs einer Kategorie
+sccs diff -c claude_skills       # Diffs einer Kategorie
 sccs log                         # Sync-Verlauf
 
 # Konfiguration
@@ -84,6 +85,7 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 sccs doctor check                # … zeigt auf einem Spiegel `mirror: …`-Zeilen (v2.68.0)
 sccs doctor update               # auf der Quelle: Brewfile + inventory.yaml neu schreiben
 sccs doctor optimize --strict    # auf einem Spiegel: Überzähliges einzeln zur Bestätigung
+sccs doctor optimize             # entfernt doctor.retired_plugins + leere Marktplätze (je mit Rückfrage)
 
 # Profile (LOKALE Artefakt-Gruppen parken, um den System-Prompt zu verkleinern — ungleich den Deployment-Profilen oben, siehe profiles.md)
 sccs profile list                # Profile + Zustand anzeigen
@@ -151,7 +153,7 @@ in the other usage docs:
 ```bash
 # Synchronization
 sccs sync                        # All enabled categories
-sccs sync -c skills              # Specific category
+sccs sync -c claude_skills              # Specific category
 sccs sync -n                     # Preview (dry-run)
 sccs sync -i                     # Interactive conflict resolution
 sccs sync --force local          # Force local version
@@ -163,7 +165,7 @@ sccs sync --pull                 # Pull remote changes first
 # Status and diff
 sccs status                      # Sync status of all categories
 sccs diff                        # Show all differences
-sccs diff -c skills              # Diffs for a category
+sccs diff -c claude_skills       # Diffs for a category
 sccs log                         # Sync history
 
 # Configuration
@@ -211,6 +213,7 @@ sccs doctor update               # Update plugins + refresh npx tools
 sccs doctor check                # … shows `mirror: …` rows on a mirror (v2.68.0)
 sccs doctor update               # on the source: rewrite Brewfile + inventory.yaml
 sccs doctor optimize --strict    # on a mirror: confirm each extra individually
+sccs doctor optimize             # removes doctor.retired_plugins + emptied marketplaces (each confirmed)
 
 # Profiles (park LOCAL artefact groups to shrink the system prompt — unrelated to the deployment profiles above, see profiles.md)
 sccs profile list                # Show profiles + their state

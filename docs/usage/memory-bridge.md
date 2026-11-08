@@ -99,7 +99,7 @@ uv pip install "sccs[memory]"
 export ANTHROPIC_API_KEY="..."
 
 # 5. Ersten Sync durchführen
-sccs sync -c claude_memory
+sccs sync -c claude_memories
 ```
 
 > **Wichtig**: Das private Repository für Memory-Sync verwenden, da Memory-Items persönliche Entscheidungen und Kontextinformationen enthalten können.
@@ -260,7 +260,7 @@ uv pip install "sccs[memory]"
 export ANTHROPIC_API_KEY="..."
 
 # 5. Run first sync
-sccs sync -c claude_memory
+sccs sync -c claude_memories
 ```
 
 > **Important**: Use a private repository for memory sync, as memory items may contain personal decisions and context information.

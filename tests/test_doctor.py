@@ -3935,6 +3935,187 @@ class TestBuildOptimizePlan:
         assert plan.is_empty() or all(not a.runnable for a in plan.actions)
 
 
+class TestRetiredPlugins:
+    """`doctor.retired_plugins` — removed by a plain `optimize` on every host.
+
+    The shared config reaches every host, so a plugin dropped on one machine
+    is named here and `optimize` uninstalls it everywhere, without `--strict`
+    (which would also remove every other plugin a host keeps on purpose).
+    """
+
+    _kwargs = staticmethod(TestBuildOptimizePlan._minimal_kwargs)
+
+    @staticmethod
+    def _cfg(*retired: dict) -> DoctorConfig:
+        return DoctorConfig.model_validate({"retired_plugins": list(retired)})
+
+    @staticmethod
+    def _by_component(plan, prefix):
+        return [a for a in plan.actions if a.component.startswith(prefix)]
+
+    def test_installed_retired_plugin_is_removed_without_strict(self):
+        plan = build_optimize_plan(
+            self._cfg({"name": "remember", "marketplace": "claude-plugins-official"}),
+            **self._kwargs(
+                foreign_plugins=[
+                    ForeignPluginStatus(name="remember", marketplace="claude-plugins-official", scope="user")
+                ]
+            ),
+            strict=False,
+        )
+        [action] = self._by_component(plan, "retired-plugin:")
+        assert action.cmd == [
+            "claude",
+            "plugin",
+            "uninstall",
+            "remember@claude-plugins-official",
+            "--scope",
+            "user",
+        ]
+        assert action.runnable is True
+        assert action.auto_confirm is False  # asks, unless --yes
+        # not listed again as "foreign — review needed"
+        assert self._by_component(plan, "foreign-plugins:summary") == []
+
+    def test_project_scope_is_forwarded(self):
+        plan = build_optimize_plan(
+            self._cfg({"name": "code-simplifier"}),
+            **self._kwargs(
+                foreign_plugins=[
+                    ForeignPluginStatus(
+                        name="code-simplifier", marketplace="anthropic-plugin-directory", scope="project"
+                    )
+                ]
+            ),
+        )
+        [action] = self._by_component(plan, "retired-plugin:")
+        assert action.cmd[-2:] == ["--scope", "project"]
+        assert "code-simplifier@anthropic-plugin-directory" in action.cmd
+
+    def test_other_foreign_plugins_still_only_warned(self):
+        plan = build_optimize_plan(
+            self._cfg({"name": "remember"}),
+            **self._kwargs(
+                foreign_plugins=[
+                    ForeignPluginStatus(name="remember", marketplace="m", scope="user"),
+                    ForeignPluginStatus(name="kept-on-purpose", marketplace="m", scope="user"),
+                ]
+            ),
+            strict=False,
+        )
+        [summary] = self._by_component(plan, "foreign-plugins:summary")
+        assert "kept-on-purpose" in summary.manual_block
+        assert "remember" not in summary.manual_block
+        assert self._by_component(plan, "foreign-plugin:") == []
+
+    def test_strict_does_not_queue_the_retired_plugin_twice(self):
+        plan = build_optimize_plan(
+            self._cfg({"name": "remember"}),
+            **self._kwargs(foreign_plugins=[ForeignPluginStatus(name="remember", marketplace="m", scope="user")]),
+            strict=True,
+        )
+        uninstalls = [a for a in plan.actions if a.cmd[:3] == ["claude", "plugin", "uninstall"]]
+        assert len(uninstalls) == 1
+
+    def test_marketplace_must_match_when_given(self):
+        plan = build_optimize_plan(
+            self._cfg({"name": "frontend-design", "marketplace": "claude-code-plugins"}),
+            **self._kwargs(
+                foreign_plugins=[
+                    ForeignPluginStatus(name="frontend-design", marketplace="claude-plugins-official", scope="user")
+                ]
+            ),
+        )
+        assert self._by_component(plan, "retired-plugin:") == []
+
+    def test_absent_retired_plugin_queues_nothing(self):
+        plan = build_optimize_plan(self._cfg({"name": "remember"}), **self._kwargs())
+        assert self._by_component(plan, "retired-plugin:") == []
+
+    def test_emptied_marketplace_is_removed_after_its_plugins(self):
+        plan = build_optimize_plan(
+            self._cfg(
+                {"name": "savvy-flow", "marketplace": "claude-kit"},
+                {"name": "savvy-progress", "marketplace": "claude-kit"},
+            ),
+            **self._kwargs(
+                foreign_plugins=[
+                    ForeignPluginStatus(name="savvy-flow", marketplace="claude-kit", scope="user"),
+                    ForeignPluginStatus(name="savvy-progress", marketplace="claude-kit", scope="user"),
+                ]
+            ),
+            registered_marketplaces=["claude-kit", "claude-plugins-official"],
+        )
+        [market] = self._by_component(plan, "retired-marketplace:")
+        assert market.cmd == ["claude", "plugin", "marketplace", "remove", "claude-kit"]
+        assert market.auto_confirm is False
+        assert set(market.depends_on_components) == {
+            "retired-plugin:savvy-flow",
+            "retired-plugin:savvy-progress",
+        }
+        order = [a.component for a in plan.actions]
+        assert order.index("retired-marketplace:claude-kit") > order.index("retired-plugin:savvy-progress")
+
+    def test_marketplace_left_over_after_manual_uninstall_is_removed(self):
+        plan = build_optimize_plan(
+            self._cfg({"name": "terminal-browser", "marketplace": "terminal-browser"}),
+            **self._kwargs(),
+            registered_marketplaces=["terminal-browser"],
+        )
+        [market] = self._by_component(plan, "retired-marketplace:")
+        assert market.depends_on_components == ()
+
+    def test_marketplace_kept_while_spec_uses_it(self):
+        # mattpocock-skills lives next to superpowers in the official marketplace
+        plan = build_optimize_plan(
+            self._cfg({"name": "mattpocock-skills", "marketplace": "claude-plugins-official"}),
+            **self._kwargs(),
+            registered_marketplaces=["claude-plugins-official"],
+        )
+        assert self._by_component(plan, "retired-marketplace:") == []
+
+    def test_marketplace_kept_while_another_installed_plugin_uses_it(self):
+        plan = build_optimize_plan(
+            self._cfg({"name": "remember", "marketplace": "shared"}),
+            **self._kwargs(
+                foreign_plugins=[
+                    ForeignPluginStatus(name="remember", marketplace="shared", scope="user"),
+                    ForeignPluginStatus(name="still-wanted", marketplace="shared", scope="user"),
+                ]
+            ),
+            registered_marketplaces=["shared"],
+        )
+        assert self._by_component(plan, "retired-marketplace:") == []
+
+    def test_unregistered_marketplace_queues_nothing(self):
+        plan = build_optimize_plan(
+            self._cfg({"name": "remember", "marketplace": "gone"}),
+            **self._kwargs(),
+            registered_marketplaces=[],
+        )
+        assert self._by_component(plan, "retired-marketplace:") == []
+
+    def test_retired_and_installable_at_once_is_rejected(self):
+        with pytest.raises(ValueError, match="superpowers"):
+            DoctorConfig.model_validate(
+                {"retired_plugins": [{"name": "superpowers", "marketplace": "claude-plugins-official"}]}
+            )
+
+    def test_retiring_an_allowlist_only_default_is_allowed(self):
+        cfg = DoctorConfig.model_validate(
+            {"retired_plugins": [{"name": "frontend-design", "marketplace": "claude-code-plugins"}]}
+        )
+        assert cfg.retired_plugins[0].marketplace == "claude-code-plugins"
+
+    def test_retired_plugin_no_longer_counts_toward_allowlist(self):
+        cfg = DoctorConfig.model_validate(
+            {"retired_plugins": [{"name": "frontend-design", "marketplace": "claude-code-plugins"}]}
+        )
+        assert not any(
+            s.name == "frontend-design" and s.marketplace == "claude-code-plugins" for s in cfg.effective_plugins()
+        )
+
+
 class TestDoctorConfigLoaderPreservesMCPOverride:
     """Loader regression: doctor.mcp_servers and ignored_mcp_patterns must
     survive _merge_with_defaults — same bug class as v2.29.1's doctor.plugins.
@@ -5847,3 +6028,120 @@ class TestOptionalNpxTools:
         assert mock_plan.call_args.kwargs["include_optional"] is True
         result = CliRunner().invoke(cli, ["doctor", "install", "--json"])
         assert mock_plan.call_args.kwargs["include_optional"] is False
+
+
+class TestProjectScopedUninstall:
+    """`claude plugin uninstall --scope project` only works inside that project."""
+
+    _kwargs = staticmethod(TestBuildOptimizePlan._minimal_kwargs)
+
+    def _plan(self, project_paths, *, strict=False, retired=True):
+        cfg = DoctorConfig.model_validate({"retired_plugins": [{"name": "code-simplifier"}]} if retired else {})
+        return build_optimize_plan(
+            cfg,
+            **self._kwargs(
+                foreign_plugins=[
+                    ForeignPluginStatus(
+                        name="code-simplifier", marketplace="anthropic-plugin-directory", scope="project"
+                    )
+                ]
+            ),
+            plugin_project_paths=project_paths,
+            strict=strict,
+        )
+
+    def test_runs_inside_the_recorded_project(self, tmp_path):
+        plan = self._plan({"code-simplifier@anthropic-plugin-directory": [tmp_path]})
+        [action] = [a for a in plan.actions if a.component == "retired-plugin:code-simplifier"]
+        assert action.cwd == tmp_path
+        assert str(tmp_path) in action.label
+
+    def test_one_action_per_project(self, tmp_path):
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        plan = self._plan({"code-simplifier@anthropic-plugin-directory": [a, b]})
+        cwds = [x.cwd for x in plan.actions if x.component == "retired-plugin:code-simplifier"]
+        assert cwds == [a, b]
+
+    def test_missing_project_folder_is_print_only(self, tmp_path):
+        plan = self._plan({"code-simplifier@anthropic-plugin-directory": [tmp_path / "gone"]})
+        [action] = [a for a in plan.actions if a.component == "retired-plugin:code-simplifier"]
+        assert action.runnable is False
+        assert "gone" in action.manual_block
+
+    def test_foreign_strict_removal_uses_the_project_too(self, tmp_path):
+        plan = self._plan({"code-simplifier@anthropic-plugin-directory": [tmp_path]}, strict=True, retired=False)
+        [action] = [a for a in plan.actions if a.component == "foreign-plugin:code-simplifier"]
+        assert action.cwd == tmp_path
+
+    def test_user_scope_never_gets_a_cwd(self, tmp_path):
+        cfg = DoctorConfig.model_validate({"retired_plugins": [{"name": "remember"}]})
+        plan = build_optimize_plan(
+            cfg,
+            **self._kwargs(foreign_plugins=[ForeignPluginStatus(name="remember", marketplace="m", scope="user")]),
+            plugin_project_paths={"remember@m": [tmp_path]},
+        )
+        [action] = [a for a in plan.actions if a.component == "retired-plugin:remember"]
+        assert action.cwd is None
+
+    def test_execute_passes_cwd_to_the_runner(self, tmp_path, monkeypatch):
+        import subprocess
+
+        from sccs.doctor import installer
+        from sccs.doctor.installer import DoctorAction, InstallPlan, execute_plan
+
+        seen = {}
+
+        def fake_run(cmd, *, check, capture, timeout, cwd=None):
+            seen["cwd"] = cwd
+            return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+        monkeypatch.setattr(installer, "_run", fake_run)
+        plan = InstallPlan(
+            actions=[
+                DoctorAction(label="x", cmd=["claude", "plugin", "uninstall", "p"], cwd=tmp_path, auto_confirm=True)
+            ]
+        )
+        execute_plan(plan, assume_yes=True, print_fn=lambda *a, **k: None)
+        assert seen["cwd"] == tmp_path
+
+
+class TestLoadPluginProjectPaths:
+    def test_reads_project_and_local_installs_only(self, tmp_path, monkeypatch):
+        import json
+
+        from sccs.doctor import detectors
+
+        f = tmp_path / "installed_plugins.json"
+        f.write_text(
+            json.dumps(
+                {
+                    "plugins": {
+                        "Code-Simplifier@dir": [{"scope": "project", "projectPath": "/p/one"}],
+                        "remember@official": [{"scope": "user"}],
+                        "x@m": [{"scope": "local", "projectPath": "/p/two"}, {"scope": "project"}],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(detectors, "_INSTALLED_PLUGINS_PATH", str(f))
+        assert detectors.load_plugin_project_paths() == {
+            "code-simplifier@dir": [Path("/p/one")],
+            "x@m": [Path("/p/two")],
+        }
+
+    def test_unreadable_file_is_empty(self, tmp_path, monkeypatch):
+        from sccs.doctor import detectors
+
+        monkeypatch.setattr(detectors, "_INSTALLED_PLUGINS_PATH", str(tmp_path / "missing.json"))
+        assert detectors.load_plugin_project_paths() == {}
+
+
+class TestRunnerCwd:
+    def test_missing_cwd_fails_before_spawning(self, tmp_path):
+        from sccs.doctor.runner import DoctorError, _run
+
+        with pytest.raises(DoctorError, match="Working directory"):
+            _run(["claude", "--version"], cwd=tmp_path / "gone")

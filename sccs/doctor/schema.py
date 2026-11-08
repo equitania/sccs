@@ -852,6 +852,16 @@ class DoctorConfig(BaseModel):
         default_factory=list,
         description="Additional plugins appended to the default list.",
     )
+    retired_plugins: list[PluginSpec] = Field(
+        default_factory=list,
+        description=(
+            "Plugins dropped on purpose. `sccs doctor optimize` uninstalls them on "
+            "every host (each behind a confirm prompt, no --strict needed) and then "
+            "removes their marketplace once nothing else uses it. A missing "
+            "marketplace matches the plugin from any marketplace. A retired plugin "
+            "must not also be in plugins/extra_plugins."
+        ),
+    )
     npx_tools: list[NpxToolSpec] | None = Field(
         default=None,
         description=("Override list of npx helper tools. None keeps DEFAULT_NPX_TOOLS."),
@@ -988,12 +998,51 @@ class DoctorConfig(BaseModel):
         ),
     )
 
-    def effective_plugins(self) -> list[PluginSpec]:
-        """Return plugins to check: override or default, plus extras."""
+    @model_validator(mode="after")
+    def _retired_is_not_installed_too(self) -> DoctorConfig:
+        clash = sorted(
+            {
+                f"{s.name}@{s.marketplace}"
+                for s in self._declared_plugins()
+                if not s.allowlist_only and self.is_retired(s.name, s.marketplace)
+            }
+        )
+        if clash:
+            raise ValueError(
+                "doctor.retired_plugins names a plugin that doctor also installs: "
+                + ", ".join(clash)
+                + " — drop it from plugins/extra_plugins or from retired_plugins"
+            )
+        return self
+
+    def is_retired(self, name: str, marketplace: str | None) -> bool:
+        """True when `name@marketplace` matches a `retired_plugins` entry.
+
+        An entry without a marketplace matches the plugin from any marketplace;
+        an installed plugin whose marketplace is unknown matches only such an entry.
+        """
+        name = name.lower()
+        found = marketplace.lower() if marketplace else None
+        for spec in self.retired_plugins:
+            if spec.name.lower() != name:
+                continue
+            if spec.marketplace is None or (found is not None and spec.marketplace.lower() == found):
+                return True
+        return False
+
+    def _declared_plugins(self) -> list[PluginSpec]:
         from sccs.doctor.defaults import DEFAULT_CLAUDE_PLUGINS
 
         base = list(self.plugins) if self.plugins is not None else list(DEFAULT_CLAUDE_PLUGINS)
         return base + list(self.extra_plugins)
+
+    def effective_plugins(self) -> list[PluginSpec]:
+        """Return plugins to check: override or default, plus extras, minus retired.
+
+        A retired `allowlist_only` default drops out here, so the installed copy
+        is no longer excused as known and `optimize` can remove it.
+        """
+        return [s for s in self._declared_plugins() if not self.is_retired(s.name, s.marketplace)]
 
     def checkable_plugins(self) -> list[PluginSpec]:
         """Plugins to install-/marketplace-check on this host.

@@ -1,7 +1,7 @@
 # SCCS Sync Engine
 # Main synchronization engine coordinating all categories
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -97,27 +97,38 @@ class SyncEngine:
         """Get list of all category names."""
         return list(self.config.sync_categories.keys())
 
-    def get_status(self, category_name: str | None = None) -> dict[str, CategoryStatus]:
+    def _select_categories(self, category_name: str | None, category_names: Sequence[str] | None) -> list[str]:
+        """Named categories in the given order without repeats, else all enabled ones."""
+        names = list(category_names or [])
+        if category_name:
+            names.insert(0, category_name)
+        if not names:
+            return self.get_enabled_categories()
+        return list(dict.fromkeys(names))
+
+    def get_status(
+        self,
+        category_name: str | None = None,
+        *,
+        category_names: Sequence[str] | None = None,
+    ) -> dict[str, CategoryStatus]:
         """
         Get status for categories.
 
         Args:
-            category_name: Optional specific category. If None, returns all enabled.
+            category_name: Optional specific category.
+            category_names: Optional several categories. With neither given,
+                returns all enabled.
 
         Returns:
             Dict of category name to status.
         """
         statuses: dict[str, CategoryStatus] = {}
 
-        if category_name:
-            handler = self.get_handler(category_name)
+        for name in self._select_categories(category_name, category_names):
+            handler = self.get_handler(name)
             if handler:
-                statuses[category_name] = handler.get_status()
-        else:
-            for name in self.get_enabled_categories():
-                handler = self.get_handler(name)
-                if handler:
-                    statuses[name] = handler.get_status()
+                statuses[name] = handler.get_status()
 
         return statuses
 
@@ -125,6 +136,7 @@ class SyncEngine:
         self,
         *,
         category_name: str | None = None,
+        category_names: Sequence[str] | None = None,
         dry_run: bool = False,
         force_direction: str | None = None,
         conflict_resolver: (
@@ -135,7 +147,9 @@ class SyncEngine:
         Synchronize categories.
 
         Args:
-            category_name: Optional specific category. If None, syncs all enabled.
+            category_name: Optional specific category.
+            category_names: Optional several categories, synced in the given
+                order. With neither given, syncs all enabled.
             dry_run: If True, don't perform actual operations.
             force_direction: Force sync direction ("local" or "repo").
             conflict_resolver: Optional callback for interactive conflict resolution.
@@ -145,11 +159,7 @@ class SyncEngine:
         """
         result = SyncResult(success=True)
 
-        # Determine which categories to sync
-        if category_name:
-            categories = [category_name]
-        else:
-            categories = self.get_enabled_categories()
+        categories = self._select_categories(category_name, category_names)
 
         result.total_categories = len(categories)
 

@@ -124,15 +124,22 @@ def _run(
     check: bool = True,
     capture: bool = True,
     timeout: int = 60,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Execute a command list. Validates argv[0] before exec."""
+    """Execute a command list. Validates argv[0] before exec.
+
+    `cwd` must be an existing directory; it only moves the child, never the argv.
+    """
     if not cmd:
         raise DoctorError("Empty command")
     validate_command_head(cmd[0])
+    if cwd is not None and not cwd.is_dir():
+        raise DoctorError(f"Working directory does not exist: {cwd}")
     exec_cmd = _resolve_exec_command(cmd, is_windows=(os.name == "nt"))
     try:
         result = subprocess.run(  # nosec B603 - shell=False, head validated above
             exec_cmd,
+            cwd=cwd,
             check=False,
             capture_output=capture,
             text=True,

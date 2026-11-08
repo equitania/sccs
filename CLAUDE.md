@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.71.2
+**Version**: 2.72.0
 
 ### Key Features
 
@@ -24,6 +24,7 @@ history lives in `RELEASE_NOTES.md`.
 
 - **Trust ceilings** (`deploy/install.py`, `doctor/schema.py`): deploy without a config writes only inside default category roots; `post_install` runs only the tool's own binary, and only bundled steps skip the prompt. → [Security ceilings](docs/development/maintainer-notes.md#security-ceilings)
 - **Optional npx tools** (`doctor/installer.py`): optional + absent = INFO, never installed or updated without `--with-optional`; a missing marketplace *with* a source is added by a runnable action, test via `execute_plan`. → [Doctor](docs/development/maintainer-notes.md#doctor)
+- **Retired plugins** (`doctor/installer.py`, `doctor/schema.py`): `retired_plugins` are removed by plain `optimize`, each confirmed; retired entries leave `effective_plugins()`; a marketplace goes only when nothing uses it; project-scope uninstalls run in the project folder. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Mirror parity** (`doctor/mirror.py`): macOS only — any other platform resolves to `off`; the source never receives install/remove actions, a mirror never writes `inventory.yaml`; removals only under `optimize --strict` + `cleanup: true`; never `brew bundle cleanup` or bare `fisher update`. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Shared config** (`doctor/shared_config.py`): `sccs_config` is bundled; adoption always asks (`always_confirm`, skipped without a terminal), pulls, backs up, validates, rolls back; never merges; `~/.config/sccs` is never a deploy root. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Host-local repo path** (`config/loader.py`): `local.yaml` carries `repository.path` only and is never synced; `save_config` never writes the effective path back; adoption pins the current path before replacing `config.yaml`. → [Doctor](docs/development/maintainer-notes.md#doctor)
@@ -51,7 +52,7 @@ uv pip install -e ".[dev]"
 ```bash
 # Main commands
 sccs sync                    # Sync all enabled categories
-sccs sync --category skills  # Sync specific category
+sccs sync -c claude_skills     # Sync specific category (repeatable: -c a -c b)
 sccs sync --dry-run          # Preview changes
 sccs status                  # Show status
 sccs diff <item> -c <cat>    # Show diff for item

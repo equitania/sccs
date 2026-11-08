@@ -15,7 +15,7 @@
 ```bash
 sccs sync --commit --push      # Synchronisieren, committen und pushen
 sccs sync --dry-run             # Vorschau der Änderungen
-sccs sync -c skills --push      # Nur Skills pushen
+sccs sync -c claude_skills --push      # Nur Skills pushen
 ```
 
 #### Subscriber (Änderungen empfangen)
@@ -23,7 +23,7 @@ sccs sync -c skills --push      # Nur Skills pushen
 ```bash
 sccs sync --pull                # Aktuelle Version ziehen und lokal synchronisieren
 sccs sync --force repo          # Lokale Version mit Repo überschreiben
-sccs sync -c skills --pull      # Nur Skills empfangen
+sccs sync -c claude_skills --pull      # Nur Skills empfangen
 ```
 
 ### Schnellstart
@@ -142,7 +142,7 @@ Querverweise: [categories.md](categories.md), [doctor.md](doctor.md), [transfer.
 ```bash
 sccs sync --commit --push      # Sync, commit and push to remote
 sccs sync --dry-run             # Preview what would change
-sccs sync -c skills --push      # Push only skills category
+sccs sync -c claude_skills --push      # Push only skills category
 ```
 
 #### Subscriber (receive shared configs)
@@ -150,7 +150,7 @@ sccs sync -c skills --push      # Push only skills category
 ```bash
 sccs sync --pull                # Pull latest and sync to local
 sccs sync --force repo          # Overwrite local with repo version
-sccs sync -c skills --pull      # Pull only skills category
+sccs sync -c claude_skills --pull      # Pull only skills category
 ```
 
 ### Quick Start

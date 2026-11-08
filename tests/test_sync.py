@@ -335,6 +335,27 @@ class TestSyncEngine:
         assert result.category_results == {}
         assert result.success is True
 
+    def test_sync_several_categories(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        result = engine.sync(category_names=["claude_skills", "claude_framework"], dry_run=True)
+        assert result.total_categories == 2
+        assert set(result.category_results) == {"claude_skills", "claude_framework"}
+
+    def test_sync_several_categories_drops_duplicates(
+        self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path
+    ):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        result = engine.sync(category_names=["claude_skills", "claude_skills"], dry_run=True)
+        assert result.total_categories == 1
+
+    def test_get_status_several_categories(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
+        config = SccsConfig.model_validate(sample_config)
+        engine = SyncEngine(config)
+        statuses = engine.get_status(category_names=["claude_skills", "claude_framework"])
+        assert list(statuses.keys()) == ["claude_skills", "claude_framework"]
+
     def test_sync_all_delegates(self, sample_config: dict, mock_claude_dir: Path, mock_repo: Path):
         config = SccsConfig.model_validate(sample_config)
         engine = SyncEngine(config)

@@ -110,6 +110,37 @@ def _load_known_marketplace_locations() -> dict[str, str]:
     return out
 
 
+_INSTALLED_PLUGINS_PATH = "~/.claude/plugins/installed_plugins.json"
+
+
+def load_plugin_project_paths() -> dict[str, list[Path]]:
+    """Map `name@marketplace` (lowercase) → project folders of its project/local installs.
+
+    `claude plugin uninstall --scope project` works only from inside that
+    project, and `claude plugin list` does not say which one it is; only
+    `installed_plugins.json` records `projectPath`. Empty dict on any failure.
+    """
+    path = Path(_INSTALLED_PLUGINS_PATH).expanduser()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, dict):
+        return {}
+    out: dict[str, list[Path]] = {}
+    for key, entries in plugins.items():
+        if not isinstance(key, str):
+            continue
+        for entry in entries if isinstance(entries, list) else [entries]:
+            if not isinstance(entry, dict) or entry.get("scope") not in ("project", "local"):
+                continue
+            project = entry.get("projectPath")
+            if isinstance(project, str) and project:
+                out.setdefault(key.lower(), []).append(Path(project))
+    return out
+
+
 def _read_marketplace_manifest_versions(install_location: str) -> dict[str, str]:
     """Parse `<install_location>/.claude-plugin/marketplace.json` into a
     {plugin_name: version} map. Empty dict on any read/parse failure."""

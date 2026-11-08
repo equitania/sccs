@@ -1,5 +1,21 @@
 # Release Notes
 
+## Version 2.72.0 (08.11.2026)
+
+### Added
+
+- **`-c/--category` takes several categories.** `sccs sync -c sccs_config -c claude_settings --commit --push` syncs both and commits them together; `status` and `diff` accept the same. Repeats are dropped, the order is kept.
+- **`doctor.retired_plugins`: drop a plugin once, every host follows.** Name it in the shared `config.yaml` and a plain `sccs doctor optimize` uninstalls it on each host — asking first, and without `--strict`, which would also remove the plugins a host keeps on purpose. Afterwards its marketplace is removed as soon as nothing uses it, also when the plugin had been removed by hand. A plugin cannot be retired and installed by the spec at once; `config validate` says so.
+
+### Fixed (project-scope plugins could not be removed)
+
+- **`optimize` uninstalls a project-scope plugin inside its project.** Claude resolves `--scope project` from the current directory, so the uninstall failed with "not installed" whenever `optimize --strict` ran anywhere else. The project folder now comes from `installed_plugins.json`; one step per project, and a folder that no longer exists is listed instead of run.
+
+### Fixed (a sync that did nothing and said it succeeded)
+
+- **A second `-c` no longer silently replaces the first.** The option took one value, so with two `-c` only the last category was synced, without a warning.
+- **An unknown category name is an error.** `sccs sync -c skills` (the category is called `claude_skills`) used to sync nothing and still report a clean run. `sync`, `status` and `diff` now stop before touching anything, name the unknown category and list the valid ones; `--json` returns them as `valid_categories`. The examples in the help texts and docs that used `-c skills` and `-c claude_memory` now use the real names.
+
 ## Version 2.71.2 (12.10.2026)
 
 ### Fixed (two ways a Windows host could damage the shared state)

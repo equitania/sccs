@@ -40,7 +40,7 @@ from sccs.doctor.detectors import (
     StatusLineStatus,
 )
 from sccs.doctor.runner import DoctorError, _run
-from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec
+from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec, _validate_safe_name
 from sccs.doctor.skill_packages import (
     SkillPackageStatus,
     skill_package_install_actions,
@@ -113,6 +113,10 @@ class DoctorAction:
     # None keeps the default; set higher for actions known to run long, e.g.
     # `brew bundle install` (many casks) or `git clone` (a big repo).
     timeout: int | None = None
+    # Working directory for `cmd`. Only for `claude plugin uninstall --scope
+    # project|local`: Claude resolves that scope from the current directory,
+    # so run elsewhere it answers "not installed".
+    cwd: Path | None = None
 
     def is_print_only(self) -> bool:
         return not self.runnable or (self.cmd is None and self.python_callable is None)
@@ -1246,8 +1250,52 @@ def _browser_bundle_repair_actions(
     return actions
 
 
+def _plugin_uninstall_actions(
+    st: ForeignPluginStatus,
+    *,
+    kind: str,
+    component: str,
+    project_paths: dict[str, list[Path]] | None,
+) -> list[DoctorAction]:
+    """`claude plugin uninstall` for one installed plugin, scope forwarded.
+
+    A project/local install is removed from inside its project folder, one
+    action per folder that `installed_plugins.json` records — run anywhere
+    else, Claude answers "not installed in project scope". A folder that no
+    longer exists becomes a print-only row.
+    """
+    target = f"{st.name}@{st.marketplace}" if st.marketplace else st.name
+    cmd = ["claude", "plugin", "uninstall", target]
+    scope = st.scope.lower() if st.scope and st.scope.lower() in _VALID_PLUGIN_SCOPES else None
+    if scope:
+        cmd.extend(["--scope", scope])
+    label = f"REMOVE {kind} plugin {target}" + (f" (scope: {scope})" if scope else "")
+
+    folders = (project_paths or {}).get(target.lower(), []) if scope in ("project", "local") else []
+    if not folders:
+        return [DoctorAction(label=label, cmd=cmd, runnable=True, component=component)]
+
+    actions: list[DoctorAction] = []
+    for folder in folders:
+        if folder.is_dir():
+            actions.append(
+                DoctorAction(label=f"{label} in {folder}", cmd=cmd, runnable=True, component=component, cwd=folder)
+            )
+        else:
+            actions.append(
+                DoctorAction(
+                    label=f"{label}: project folder {folder} is gone",
+                    runnable=False,
+                    manual_block=f"# Recreate {folder} and run there:\n{' '.join(cmd)}",
+                    component=component,
+                )
+            )
+    return actions
+
+
 def _foreign_plugin_remove_actions(
     statuses: list[ForeignPluginStatus],
+    project_paths: dict[str, list[Path]] | None = None,
 ) -> list[DoctorAction]:
     """Plan `claude plugin uninstall` steps for plugins outside the spec.
 
@@ -1263,20 +1311,69 @@ def _foreign_plugin_remove_actions(
     """
     actions: list[DoctorAction] = []
     for st in statuses:
-        target = f"{st.name}@{st.marketplace}" if st.marketplace else st.name
-        cmd = ["claude", "plugin", "uninstall", target]
-        scope_label = ""
-        if st.scope and st.scope.lower() in _VALID_PLUGIN_SCOPES:
-            cmd.extend(["--scope", st.scope.lower()])
-            scope_label = f" (scope: {st.scope.lower()})"
+        # foreign:<name> component so a future plugin-install action
+        # for the same name can depend on it if needed.
+        actions.extend(
+            _plugin_uninstall_actions(
+                st, kind="foreign", component=f"foreign-plugin:{st.name}", project_paths=project_paths
+            )
+        )
+    return actions
+
+
+def _retired_plugin_actions(
+    config: DoctorConfig,
+    retired: list[ForeignPluginStatus],
+    still_installed: list[ForeignPluginStatus],
+    plugins: list[PluginStatus],
+    registered_marketplaces: list[str] | None,
+    project_paths: dict[str, list[Path]] | None = None,
+) -> list[DoctorAction]:
+    """Uninstall `doctor.retired_plugins`, then drop each emptied marketplace.
+
+    Runs without `--strict`: the list names exactly what the user dropped, and
+    it reaches every host through the shared config. Every step asks
+    (`auto_confirm=False`); `--yes` answers for all of them.
+
+    A marketplace goes only when it is registered, no spec plugin names it, and
+    no other installed plugin comes from it. That also covers a marketplace left
+    behind after the plugin was uninstalled by hand.
+    """
+    actions: list[DoctorAction] = []
+    removed_by_market: dict[str, list[str]] = {}
+    for st in retired:
+        component = f"retired-plugin:{st.name}"
+        actions.extend(_plugin_uninstall_actions(st, kind="retired", component=component, project_paths=project_paths))
+        if st.marketplace:
+            removed_by_market.setdefault(st.marketplace.lower(), []).append(component)
+
+    registered = {m.lower(): m for m in (registered_marketplaces or [])}
+    if not registered:
+        return actions
+
+    in_use = {s.marketplace.lower() for s in config.effective_plugins() if s.marketplace}
+    in_use |= {fp.marketplace.lower() for fp in still_installed if fp.marketplace}
+    in_use |= {st.found_marketplace.lower() for st in plugins if st.installed and st.found_marketplace}
+
+    candidates: list[str] = []
+    for spec in config.retired_plugins:
+        market = spec.marketplace.lower() if spec.marketplace else None
+        if market and market in registered and market not in in_use and market not in candidates:
+            candidates.append(market)
+
+    for market in candidates:
+        name = registered[market]
+        try:
+            _validate_safe_name(name, "marketplace")
+        except ValueError:
+            continue  # a name from known_marketplaces.json never becomes argv unchecked
         actions.append(
             DoctorAction(
-                label=f"REMOVE foreign plugin {target}{scope_label}",
-                cmd=cmd,
+                label=f"REMOVE marketplace {name} (no plugin left that uses it)",
+                cmd=["claude", "plugin", "marketplace", "remove", name],
                 runnable=True,
-                # foreign:<name> component so a future plugin-install action
-                # for the same name can depend on it if needed.
-                component=f"foreign-plugin:{st.name}",
+                component=f"retired-marketplace:{name}",
+                depends_on_components=tuple(removed_by_market.get(market, [])),
             )
         )
     return actions
@@ -1774,7 +1871,7 @@ def build_update_plan(
 
 
 def build_optimize_plan(
-    config: DoctorConfig,  # noqa: ARG001 — symmetry with build_install_plan / build_update_plan
+    config: DoctorConfig,
     *,
     node: NodeStatus,
     claude_cli: ClaudeCliStatus,
@@ -1794,10 +1891,16 @@ def build_optimize_plan(
     cao_providers: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
     mirror: MirrorReport | None = None,
+    registered_marketplaces: list[str] | None = None,
+    plugin_project_paths: dict[str, list[Path]] | None = None,
     strict: bool = False,
     include_optional: bool = False,
 ) -> InstallPlan:
     """Plan a one-shot optimize pass.
+
+    `doctor.retired_plugins` are uninstalled with or without `strict`, and
+    their marketplace goes once nothing uses it (`registered_marketplaces`:
+    the names in known_marketplaces.json).
 
     Combines `build_update_plan`'s install+update behaviour with two new
     concerns:
@@ -1832,10 +1935,18 @@ def build_optimize_plan(
     if cli_action:
         actions.append(cli_action)
 
+    retired = [fp for fp in foreign_plugins if config.is_retired(fp.name, fp.marketplace)]
+    foreign_plugins = [fp for fp in foreign_plugins if not config.is_retired(fp.name, fp.marketplace)]
+    actions.extend(
+        _retired_plugin_actions(
+            config, retired, foreign_plugins, plugins, registered_marketplaces, plugin_project_paths
+        )
+    )
+
     # Strict cleanup happens first so subsequent install/update steps don't
     # race against foreign entries we're about to remove.
     if strict:
-        actions.extend(_foreign_plugin_remove_actions(foreign_plugins))
+        actions.extend(_foreign_plugin_remove_actions(foreign_plugins, plugin_project_paths))
         actions.extend(_foreign_mcp_remove_actions(foreign_mcp_servers))
 
         from sccs.doctor.mirror import mirror_remove_actions
@@ -2020,7 +2131,7 @@ def execute_plan(
 
             if action.cmd is None:
                 raise DoctorError(f"Action {action.label!r} is not print-only but has no command")
-            proc = _run(action.cmd, check=True, capture=True, timeout=action.timeout or 300)
+            proc = _run(action.cmd, check=True, capture=True, timeout=action.timeout or 300, cwd=action.cwd)
             detail = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout else ""
             result.outcomes.append(ActionOutcome(label=action.label, status="executed", detail=detail))
             logger.info("doctor action ok: %s", action.label)

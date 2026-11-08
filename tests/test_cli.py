@@ -251,6 +251,123 @@ class TestSyncCommand:
         assert "aborted" in result.output.lower()
 
 
+def _category_config(known: set[str]) -> MagicMock:
+    """A mocked config whose get_category only knows the given names."""
+    cfg = MagicMock()
+    cfg.repository.path = _REPO
+    cfg.repository.auto_commit = False
+    cfg.repository.auto_push = False
+    cfg.get_category.side_effect = lambda name: MagicMock() if name in known else None
+    cfg.sync_categories = {name: MagicMock() for name in known}
+    return cfg
+
+
+def _ok_sync_result() -> MagicMock:
+    res = MagicMock()
+    res.synced_items = 0
+    res.conflicts = 0
+    res.errors = 0
+    res.success = True
+    res.aborted = False
+    res.has_issues = False
+    res.total_categories = 2
+    res.synced_categories = 2
+    res.category_results = {}
+    return res
+
+
+class TestCategoryOption:
+    """`-c/--category` takes several names and refuses unknown ones.
+
+    A plain Click option kept only the last of two `-c` values, so
+    `sync -c a -c b` silently synced only b; an unknown name synced nothing
+    and still reported success.
+    """
+
+    @patch("sccs.cli.get_remote_status", return_value={"up_to_date": True})
+    @patch("sccs.cli.SyncEngine")
+    @patch("sccs.cli.load_config")
+    def test_sync_passes_every_category(self, mock_load, mock_engine_cls, mock_remote):
+        mock_load.return_value = _category_config({"sccs_config", "claude_settings"})
+        mock_engine_cls.return_value.sync.return_value = _ok_sync_result()
+
+        result = CliRunner().invoke(cli, ["sync", "-c", "sccs_config", "-c", "claude_settings", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        kwargs = mock_engine_cls.return_value.sync.call_args.kwargs
+        assert kwargs["category_names"] == ["sccs_config", "claude_settings"]
+
+    @patch("sccs.cli.get_remote_status", return_value={"up_to_date": True})
+    @patch("sccs.cli.SyncEngine")
+    @patch("sccs.cli.load_config")
+    def test_sync_without_category_syncs_all(self, mock_load, mock_engine_cls, mock_remote):
+        mock_load.return_value = _category_config({"sccs_config"})
+        mock_engine_cls.return_value.sync.return_value = _ok_sync_result()
+
+        result = CliRunner().invoke(cli, ["sync", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert mock_engine_cls.return_value.sync.call_args.kwargs["category_names"] is None
+
+    @patch("sccs.cli.get_remote_status", return_value={"up_to_date": True})
+    @patch("sccs.cli.SyncEngine")
+    @patch("sccs.cli.load_config")
+    def test_sync_unknown_category_fails_before_syncing(self, mock_load, mock_engine_cls, mock_remote):
+        mock_load.return_value = _category_config({"claude_skills"})
+
+        result = CliRunner().invoke(cli, ["sync", "-c", "claude_skills", "-c", "skills"])
+
+        assert result.exit_code == 1
+        assert "skills" in result.output
+        assert "claude_skills" in result.output  # the valid names are listed
+        mock_engine_cls.return_value.sync.assert_not_called()
+        mock_remote.assert_not_called()
+
+    @patch("sccs.cli.SyncEngine")
+    @patch("sccs.cli.load_config")
+    def test_sync_unknown_category_json(self, mock_load, mock_engine_cls):
+        mock_load.return_value = _category_config({"claude_skills"})
+
+        result = CliRunner().invoke(cli, ["sync", "-c", "ghost", "--json"])
+
+        assert result.exit_code == 1
+        assert '"ghost"' in result.output or "ghost" in result.output
+        mock_engine_cls.return_value.sync.assert_not_called()
+
+    @patch("sccs.cli._show_integrations_inline")
+    @patch("sccs.cli.SyncEngine")
+    @patch("sccs.cli.load_config")
+    def test_status_passes_every_category(self, mock_load, mock_engine_cls, mock_integrations):
+        mock_load.return_value = _category_config({"a", "b"})
+        mock_engine_cls.return_value.get_status.return_value = {}
+
+        CliRunner().invoke(cli, ["status", "-c", "a", "-c", "b"])
+
+        kwargs = mock_engine_cls.return_value.get_status.call_args.kwargs
+        assert kwargs["category_names"] == ["a", "b"]
+
+    @patch("sccs.cli.SyncEngine")
+    @patch("sccs.cli.load_config")
+    def test_status_unknown_category_fails(self, mock_load, mock_engine_cls):
+        mock_load.return_value = _category_config({"a"})
+
+        result = CliRunner().invoke(cli, ["status", "-c", "ghost"])
+
+        assert result.exit_code == 1
+        assert "ghost" in result.output
+        mock_engine_cls.return_value.get_status.assert_not_called()
+
+    @patch("sccs.cli.SyncEngine")
+    @patch("sccs.cli.load_config")
+    def test_diff_unknown_category_fails(self, mock_load, mock_engine_cls):
+        mock_load.return_value = _category_config({"a"})
+
+        result = CliRunner().invoke(cli, ["diff", "-c", "a", "-c", "ghost"])
+
+        assert result.exit_code == 1
+        assert "ghost" in result.output
+
+
 class TestStatusCommand:
     """Tests for status command."""
 
@@ -324,22 +441,30 @@ class TestStatusCommand:
             runner = CliRunner()
             result = runner.invoke(cli, ["status", "-c", "skills"])
         assert result.exit_code == 0
-        mock_engine.get_status.assert_called_once_with(category_name="skills")
+        mock_engine.get_status.assert_called_once_with(category_names=["skills"])
 
     @patch("sccs.cli.load_config")
     @patch("sccs.cli.SyncEngine")
     def test_status_unknown_category(self, mock_engine_cls, mock_load):
         mock_config = MagicMock()
+        mock_config.get_category.return_value = None
+        mock_config.sync_categories = {}
         mock_load.return_value = mock_config
-
-        mock_engine = MagicMock()
-        mock_engine.get_status.return_value = {}
-        mock_engine_cls.return_value = mock_engine
 
         runner = CliRunner()
         result = runner.invoke(cli, ["status", "-c", "nonexistent"])
         assert result.exit_code == 1
-        assert "not found" in result.output or "not enabled" in result.output
+        assert "Unknown category" in result.output
+
+    @patch("sccs.cli.load_config")
+    @patch("sccs.cli.SyncEngine")
+    def test_status_known_category_without_status(self, mock_engine_cls, mock_load):
+        mock_load.return_value = MagicMock()
+        mock_engine_cls.return_value.get_status.return_value = {}
+
+        result = CliRunner().invoke(cli, ["status", "-c", "claude_skills"])
+        assert result.exit_code == 1
+        assert "No status" in result.output
 
 
 class TestLogCommand:
@@ -629,16 +754,15 @@ class TestDiffCommand:
     @patch("sccs.cli.SyncEngine")
     def test_diff_unknown_category(self, mock_engine_cls, mock_load):
         mock_config = MagicMock()
+        mock_config.get_category.return_value = None
+        mock_config.sync_categories = {}
         mock_load.return_value = mock_config
-
-        mock_engine = MagicMock()
-        mock_engine.get_handler.return_value = None
-        mock_engine_cls.return_value = mock_engine
 
         runner = CliRunner()
         result = runner.invoke(cli, ["diff", "-c", "nonexistent"])
         assert result.exit_code == 1
-        assert "not found" in result.output
+        assert "Unknown category" in result.output
+        mock_engine_cls.assert_not_called()
 
     @patch("sccs.cli.load_config")
     @patch("sccs.cli.SyncEngine")

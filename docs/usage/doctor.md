@@ -213,6 +213,24 @@ Die mitgelieferte Baseline (`DEFAULT_CLAUDE_PLUGINS`) enthält als **required** 
 
 ⚠️ **Scope-Falle**: `/plugin install` aus einem Projekt heraus schreibt `<projekt>/.claude/settings.json` — **Projekt-Scope**, der weder auf andere Projekte noch auf andere Rechner mitreist. `doctor install` setzt dagegen ein schlichtes `claude plugin install <name>@<marketplace>` ab, also **User-Scope** — der richtige Ort für eine doctor-verwaltete Baseline. Ein nur projekt-scoped installiertes Plugin erscheint überall sonst als `MISSING`; genau diese Drift soll der Doctor aufdecken.
 
+### Ausgemusterte Plugins (v2.72.0)
+
+Ein Plugin, das du bewusst loswerden willst, trägst du unter `doctor.retired_plugins` ein. Weil die `config.yaml` über die geteilte Konfiguration auf jeden Rechner kommt, räumt ein einfaches `sccs doctor optimize` es dort ab – ohne `--strict`, das auch alle anderen, absichtlich installierten Plugins eines Rechners entfernen würde.
+
+```yaml
+doctor:
+  retired_plugins:
+  - name: remember
+    marketplace: claude-plugins-official
+  - name: savvy-flow            # ohne marketplace: passt auf jede Quelle
+```
+
+- Jede Deinstallation fragt nach (Standard: Nein); `--yes` beantwortet alle.
+- Danach wird der Marktplatz entfernt, sobald ihn nichts mehr braucht: kein Plugin aus `plugins`/`extra_plugins` nennt ihn, und kein anderes installiertes Plugin stammt daher. Das greift auch, wenn das Plugin schon von Hand entfernt wurde.
+- Ein Plugin im **Projekt-Scope** wird in seinem Projektordner deinstalliert (aus `~/.claude/plugins/installed_plugins.json`), anderswo meldet Claude „nicht installiert“. Das gilt jetzt auch für `optimize --strict`.
+- Ein Plugin darf nicht gleichzeitig ausgemustert und in `plugins`/`extra_plugins` stehen – `config validate` lehnt das ab. Ein nur geduldeter Eintrag der Baseline (`allowlist_only`, etwa `frontend-design@claude-code-plugins`) darf ausgemustert werden.
+- Ältere sccs-Versionen ignorieren den Schlüssel.
+
 ### Beispiel-Tabelle (`sccs doctor check`)
 
 ```
@@ -591,6 +609,24 @@ PowerShell 7+ not found — install (Windows 11):
 The bundled baseline (`DEFAULT_CLAUDE_PLUGINS`) treats `skill-creator`, `superpowers`, `frontend-design`, `context-mode` and — new — `claude-security` (deep vulnerability scanning of your own code) and `claude-md-management` (audits and maintains `CLAUDE.md` files) as **required**. The LSP plugins and second-marketplace entries are `allowlist_only`: never installed, never reported missing, but not counted as foreign by `optimize --strict`.
 
 ⚠️ **Scope pitfall**: running `/plugin install` from inside a project writes `<project>/.claude/settings.json` — **project scope**, which travels neither to other projects nor to other machines. `doctor install` instead issues a plain `claude plugin install <name>@<marketplace>`, i.e. **user scope** — the correct home for a doctor-managed baseline. A plugin that exists only at project scope shows up as `MISSING` everywhere else; that drift is exactly what the doctor is meant to surface.
+
+### Retired plugins (v2.72.0)
+
+A plugin you want gone for good goes under `doctor.retired_plugins`. `config.yaml` reaches every host through the shared config, so a plain `sccs doctor optimize` removes it there — without `--strict`, which would also remove every other plugin a host keeps on purpose.
+
+```yaml
+doctor:
+  retired_plugins:
+  - name: remember
+    marketplace: claude-plugins-official
+  - name: savvy-flow            # no marketplace: matches any source
+```
+
+- Every uninstall asks (default: No); `--yes` answers all of them.
+- The marketplace goes afterwards once nothing needs it: no plugin in `plugins`/`extra_plugins` names it and no other installed plugin comes from it. This also applies when the plugin was already removed by hand.
+- A **project-scope** plugin is uninstalled inside its project folder (read from `~/.claude/plugins/installed_plugins.json`); anywhere else Claude answers "not installed". `optimize --strict` now does the same.
+- A plugin cannot be retired and listed in `plugins`/`extra_plugins` at once — `config validate` rejects it. A tolerated baseline entry (`allowlist_only`, e.g. `frontend-design@claude-code-plugins`) may be retired.
+- Older sccs versions ignore the key.
 
 ### Sample `sccs doctor check` table
 
