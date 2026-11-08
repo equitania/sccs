@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.72.1 (08.11.2026)
+
+### Fixed
+
+- **A declined plugin removal keeps its marketplace.** When `optimize` asked to uninstall a retired plugin and you said no — or there was no terminal, or the plugin's project folder was gone — it still offered to remove the plugin's marketplace as "no plugin left that uses it". The marketplace removal now waits until every uninstall of its plugins has actually run.
+- **A plugin installed in several scopes is removed in each.** `optimize` handled only the first scope it saw for a plugin installed at user and project scope, and could run a `local` uninstall in a folder that only held the `project` install. Scope is now part of the lookup.
+- **A retired entry without `marketplace` still drops the emptied marketplace.** The marketplace the plugin was actually installed from counts as a candidate.
+
 ## Version 2.72.0 (08.11.2026)
 
 ### Added

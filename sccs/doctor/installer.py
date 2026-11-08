@@ -91,6 +91,12 @@ class DoctorAction:
     #   - npx install depends on permission:npm-root-global
     #   - npx post_install depends on path:npm-prefix-bin (binary on PATH)
     depends_on_components: tuple[str, ...] = ()
+    # Stricter reading of `depends_on_components`: every earlier action of
+    # each named component must have been *executed*. A declined, skipped or
+    # print-only dependency then blocks this action too. Used for dropping a
+    # marketplace after its retired plugins: if one uninstall did not run,
+    # the plugin is still there and the marketplace must stay (v2.72.1).
+    requires_dependencies_executed: bool = False
     # Best-effort actions: a failure marks the action `warned` instead of
     # `failed` and leaves no entry in `failed_components`. Used for
     # `claude plugin marketplace update <name>` which is a stale-cache
@@ -1255,7 +1261,7 @@ def _plugin_uninstall_actions(
     *,
     kind: str,
     component: str,
-    project_paths: dict[str, list[Path]] | None,
+    project_paths: dict[tuple[str, str], list[Path]] | None,
 ) -> list[DoctorAction]:
     """`claude plugin uninstall` for one installed plugin, scope forwarded.
 
@@ -1271,7 +1277,7 @@ def _plugin_uninstall_actions(
         cmd.extend(["--scope", scope])
     label = f"REMOVE {kind} plugin {target}" + (f" (scope: {scope})" if scope else "")
 
-    folders = (project_paths or {}).get(target.lower(), []) if scope in ("project", "local") else []
+    folders = (project_paths or {}).get((target.lower(), scope), []) if scope in ("project", "local") else []
     if not folders:
         return [DoctorAction(label=label, cmd=cmd, runnable=True, component=component)]
 
@@ -1295,7 +1301,7 @@ def _plugin_uninstall_actions(
 
 def _foreign_plugin_remove_actions(
     statuses: list[ForeignPluginStatus],
-    project_paths: dict[str, list[Path]] | None = None,
+    project_paths: dict[tuple[str, str], list[Path]] | None = None,
 ) -> list[DoctorAction]:
     """Plan `claude plugin uninstall` steps for plugins outside the spec.
 
@@ -1327,7 +1333,7 @@ def _retired_plugin_actions(
     still_installed: list[ForeignPluginStatus],
     plugins: list[PluginStatus],
     registered_marketplaces: list[str] | None,
-    project_paths: dict[str, list[Path]] | None = None,
+    project_paths: dict[tuple[str, str], list[Path]] | None = None,
 ) -> list[DoctorAction]:
     """Uninstall `doctor.retired_plugins`, then drop each emptied marketplace.
 
@@ -1355,10 +1361,12 @@ def _retired_plugin_actions(
     in_use |= {fp.marketplace.lower() for fp in still_installed if fp.marketplace}
     in_use |= {st.found_marketplace.lower() for st in plugins if st.installed and st.found_marketplace}
 
+    # Configured marketplaces, plus the ones the retired plugins were found
+    # in — an entry may omit `marketplace` and still empty one.
+    named = [spec.marketplace.lower() for spec in config.retired_plugins if spec.marketplace]
     candidates: list[str] = []
-    for spec in config.retired_plugins:
-        market = spec.marketplace.lower() if spec.marketplace else None
-        if market and market in registered and market not in in_use and market not in candidates:
+    for market in [*named, *removed_by_market]:
+        if market in registered and market not in in_use and market not in candidates:
             candidates.append(market)
 
     for market in candidates:
@@ -1374,6 +1382,7 @@ def _retired_plugin_actions(
                 runnable=True,
                 component=f"retired-marketplace:{name}",
                 depends_on_components=tuple(removed_by_market.get(market, [])),
+                requires_dependencies_executed=True,
             )
         )
     return actions
@@ -1892,7 +1901,7 @@ def build_optimize_plan(
     skill_packages: list[SkillPackageStatus] | None = None,
     mirror: MirrorReport | None = None,
     registered_marketplaces: list[str] | None = None,
-    plugin_project_paths: dict[str, list[Path]] | None = None,
+    plugin_project_paths: dict[tuple[str, str], list[Path]] | None = None,
     strict: bool = False,
     include_optional: bool = False,
 ) -> InstallPlan:
@@ -2073,13 +2082,22 @@ def execute_plan(
     failed_components: set[str] = set()
     blocked_components: set[str] = set()
 
+    # Index of each action's outcome in result.outcomes (one outcome per action).
+    outcome_index: list[int] = []
+
     for action in plan.actions:
+        outcome_index.append(len(result.outcomes))
         # Cascade-skip: any blocked or failed dependency turns this into a
         # no-op. Evaluated BEFORE the manual-block / confirm path so a
         # blocked downstream action never even prints a prompt.
-        blocking = sorted(
-            {c for c in action.depends_on_components if c in failed_components or c in blocked_components}
-        )
+        blocking_set = {c for c in action.depends_on_components if c in failed_components or c in blocked_components}
+        if action.requires_dependencies_executed and action.depends_on_components:
+            for j, earlier in enumerate(plan.actions[: len(outcome_index) - 1]):
+                if earlier.component in action.depends_on_components:
+                    start, end = outcome_index[j], outcome_index[j + 1]
+                    if start >= end or result.outcomes[start].status != "executed":
+                        blocking_set.add(earlier.component)
+        blocking = sorted(blocking_set)
         if blocking:
             joined = ", ".join(blocking)
             result.outcomes.append(

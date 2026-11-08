@@ -6051,7 +6051,7 @@ class TestProjectScopedUninstall:
         )
 
     def test_runs_inside_the_recorded_project(self, tmp_path):
-        plan = self._plan({"code-simplifier@anthropic-plugin-directory": [tmp_path]})
+        plan = self._plan({("code-simplifier@anthropic-plugin-directory", "project"): [tmp_path]})
         [action] = [a for a in plan.actions if a.component == "retired-plugin:code-simplifier"]
         assert action.cwd == tmp_path
         assert str(tmp_path) in action.label
@@ -6060,18 +6060,20 @@ class TestProjectScopedUninstall:
         a, b = tmp_path / "a", tmp_path / "b"
         a.mkdir()
         b.mkdir()
-        plan = self._plan({"code-simplifier@anthropic-plugin-directory": [a, b]})
+        plan = self._plan({("code-simplifier@anthropic-plugin-directory", "project"): [a, b]})
         cwds = [x.cwd for x in plan.actions if x.component == "retired-plugin:code-simplifier"]
         assert cwds == [a, b]
 
     def test_missing_project_folder_is_print_only(self, tmp_path):
-        plan = self._plan({"code-simplifier@anthropic-plugin-directory": [tmp_path / "gone"]})
+        plan = self._plan({("code-simplifier@anthropic-plugin-directory", "project"): [tmp_path / "gone"]})
         [action] = [a for a in plan.actions if a.component == "retired-plugin:code-simplifier"]
         assert action.runnable is False
         assert "gone" in action.manual_block
 
     def test_foreign_strict_removal_uses_the_project_too(self, tmp_path):
-        plan = self._plan({"code-simplifier@anthropic-plugin-directory": [tmp_path]}, strict=True, retired=False)
+        plan = self._plan(
+            {("code-simplifier@anthropic-plugin-directory", "project"): [tmp_path]}, strict=True, retired=False
+        )
         [action] = [a for a in plan.actions if a.component == "foreign-plugin:code-simplifier"]
         assert action.cwd == tmp_path
 
@@ -6080,7 +6082,7 @@ class TestProjectScopedUninstall:
         plan = build_optimize_plan(
             cfg,
             **self._kwargs(foreign_plugins=[ForeignPluginStatus(name="remember", marketplace="m", scope="user")]),
-            plugin_project_paths={"remember@m": [tmp_path]},
+            plugin_project_paths={("remember@m", "project"): [tmp_path]},
         )
         [action] = [a for a in plan.actions if a.component == "retired-plugin:remember"]
         assert action.cwd is None
@@ -6106,6 +6108,95 @@ class TestProjectScopedUninstall:
         execute_plan(plan, assume_yes=True, print_fn=lambda *a, **k: None)
         assert seen["cwd"] == tmp_path
 
+    def test_local_scope_never_uses_project_folders(self, tmp_path):
+        cfg = DoctorConfig.model_validate({"retired_plugins": [{"name": "x"}]})
+        plan = build_optimize_plan(
+            cfg,
+            **self._kwargs(foreign_plugins=[ForeignPluginStatus(name="x", marketplace="m", scope="local")]),
+            plugin_project_paths={("x@m", "project"): [tmp_path]},
+        )
+        [action] = [a for a in plan.actions if a.component == "retired-plugin:x"]
+        assert action.cwd is None
+
+
+class TestRetiredMarketplaceGuard:
+    """The marketplace goes only after every uninstall of its retired plugins ran (v2.72.1)."""
+
+    def _plan(self, project_paths=None, *, spec_marketplace="m"):
+        entry = {"name": "p", "marketplace": spec_marketplace} if spec_marketplace else {"name": "p"}
+        cfg = DoctorConfig.model_validate({"retired_plugins": [entry]})
+        return build_optimize_plan(
+            cfg,
+            **TestBuildOptimizePlan._minimal_kwargs(
+                foreign_plugins=[ForeignPluginStatus(name="p", marketplace="m", scope="user")]
+            ),
+            registered_marketplaces=["m"],
+            plugin_project_paths=project_paths,
+        )
+
+    def _run(self, plan, answers, monkeypatch):
+        import subprocess
+
+        from sccs.doctor import installer
+        from sccs.doctor.installer import execute_plan
+
+        ran = []
+
+        def fake_run(cmd, *, check, capture, timeout, cwd=None):
+            ran.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+        replies = iter(answers)
+        monkeypatch.setattr(installer, "_run", fake_run)
+        monkeypatch.setattr(installer, "_confirm", lambda label, assume_yes=False: next(replies))
+        monkeypatch.setattr(installer, "_interactive", lambda: True)
+        result = execute_plan(plan, print_fn=lambda *a, **k: None)
+        return ran, result
+
+    def test_declined_uninstall_keeps_the_marketplace(self, monkeypatch):
+        plan = self._plan()
+        assert [a.component for a in plan.actions][-2:] == ["retired-plugin:p", "retired-marketplace:m"]
+        ran, result = self._run(plan, [False, True], monkeypatch)
+        assert not any("marketplace" in c for c in ran)
+        assert result.outcomes[-1].status == "skipped"
+        assert "retired-plugin:p" in result.outcomes[-1].detail
+
+    def test_executed_uninstall_lets_the_marketplace_go(self, monkeypatch):
+        ran, _ = self._run(self._plan(), [True, True], monkeypatch)
+        assert ran[-1] == ["claude", "plugin", "marketplace", "remove", "m"]
+
+    def test_print_only_uninstall_keeps_the_marketplace(self, tmp_path, monkeypatch):
+        cfg = DoctorConfig.model_validate({"retired_plugins": [{"name": "p", "marketplace": "m"}]})
+        plan = build_optimize_plan(
+            cfg,
+            **TestBuildOptimizePlan._minimal_kwargs(
+                foreign_plugins=[ForeignPluginStatus(name="p", marketplace="m", scope="project")]
+            ),
+            registered_marketplaces=["m"],
+            plugin_project_paths={("p@m", "project"): [tmp_path / "gone"]},
+        )
+        ran, result = self._run(plan, [True], monkeypatch)
+        assert ran == []
+        assert result.outcomes[-1].status == "skipped"
+
+    def test_entry_without_marketplace_still_drops_the_emptied_one(self):
+        plan = self._plan(spec_marketplace=None)
+        assert "retired-marketplace:m" in [a.component for a in plan.actions]
+
+
+class TestForeignPluginScopes:
+    def test_same_plugin_in_two_scopes_is_listed_twice(self):
+        from sccs.doctor.detectors import ClaudePluginDetector
+
+        output = (
+            "Installed plugins:\n\n"
+            "  ❯ p@m\n    Version: 1.0.0\n    Scope: user\n    Status: ✔ enabled\n\n"
+            "  ❯ p@m\n    Version: 1.0.0\n    Scope: project\n    Status: ✔ enabled\n"
+        )
+        det = ClaudePluginDetector(raw_output=output)
+        scopes = [fp.scope for fp in det.get_foreign_plugins([])]
+        assert scopes == ["user", "project"]
+
 
 class TestLoadPluginProjectPaths:
     def test_reads_project_and_local_installs_only(self, tmp_path, monkeypatch):
@@ -6128,8 +6219,8 @@ class TestLoadPluginProjectPaths:
         )
         monkeypatch.setattr(detectors, "_INSTALLED_PLUGINS_PATH", str(f))
         assert detectors.load_plugin_project_paths() == {
-            "code-simplifier@dir": [Path("/p/one")],
-            "x@m": [Path("/p/two")],
+            ("code-simplifier@dir", "project"): [Path("/p/one")],
+            ("x@m", "local"): [Path("/p/two")],
         }
 
     def test_unreadable_file_is_empty(self, tmp_path, monkeypatch):

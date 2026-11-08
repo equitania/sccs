@@ -113,8 +113,11 @@ def _load_known_marketplace_locations() -> dict[str, str]:
 _INSTALLED_PLUGINS_PATH = "~/.claude/plugins/installed_plugins.json"
 
 
-def load_plugin_project_paths() -> dict[str, list[Path]]:
-    """Map `name@marketplace` (lowercase) → project folders of its project/local installs.
+def load_plugin_project_paths() -> dict[tuple[str, str], list[Path]]:
+    """Map (`name@marketplace` lowercase, scope) → project folders of its project/local installs.
+
+    Keyed by scope too: a `local` install must not be uninstalled with
+    `--scope project` in a folder that only holds the other scope (v2.72.1).
 
     `claude plugin uninstall --scope project` works only from inside that
     project, and `claude plugin list` does not say which one it is; only
@@ -128,7 +131,7 @@ def load_plugin_project_paths() -> dict[str, list[Path]]:
     plugins = data.get("plugins") if isinstance(data, dict) else None
     if not isinstance(plugins, dict):
         return {}
-    out: dict[str, list[Path]] = {}
+    out: dict[tuple[str, str], list[Path]] = {}
     for key, entries in plugins.items():
         if not isinstance(key, str):
             continue
@@ -137,7 +140,7 @@ def load_plugin_project_paths() -> dict[str, list[Path]]:
                 continue
             project = entry.get("projectPath")
             if isinstance(project, str) and project:
-                out.setdefault(key.lower(), []).append(Path(project))
+                out.setdefault((key.lower(), entry["scope"]), []).append(Path(project))
     return out
 
 
@@ -722,11 +725,14 @@ class ClaudePluginDetector:
             spec_index.setdefault(spec.name.lower(), set()).add(spec.marketplace.lower() if spec.marketplace else None)
 
         foreign: list[ForeignPluginStatus] = []
-        seen: set[tuple[str, str | None]] = set()
+        seen: set[tuple[str, str | None, str]] = set()
         for m in header_re.finditer(output):
             name = m.group(1)
             marketplace = m.group(2)
-            key = (name.lower(), marketplace.lower() if marketplace else None)
+            # Scope is part of the key: one plugin installed at user AND
+            # project scope needs two uninstalls, not one (v2.72.1).
+            scope = ClaudePluginDetector._extract_scope_from_block(output, m.end())
+            key = (name.lower(), marketplace.lower() if marketplace else None, (scope or "").lower())
             if key in seen:
                 continue
             seen.add(key)
@@ -739,7 +745,6 @@ class ClaudePluginDetector:
                 if None in spec_marketplaces or installed_mp in spec_marketplaces:
                     continue
 
-            scope = ClaudePluginDetector._extract_scope_from_block(output, m.end())
             foreign.append(ForeignPluginStatus(name=name, marketplace=marketplace, scope=scope))
 
         return foreign
