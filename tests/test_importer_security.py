@@ -278,6 +278,46 @@ class TestItemNameTraversal:
 # ── H2: Symlink rejection ──────────────────────────────────────
 
 
+class TestManifestZipPathTraversal:
+    """2.72.2 — manifest zip_path must point inside the extracted bundle."""
+
+    @pytest.mark.parametrize("kind", ["absolute", "parent"])
+    def test_zip_path_outside_staging_is_refused(self, temp_dir: Path, temp_home: Path, kind: str) -> None:
+        config = _make_config(temp_home)
+        target_dir = temp_home / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        secret = temp_home / ".ssh" / "id_ed25519"
+        secret.parent.mkdir(parents=True)
+        secret.write_text("PRIVATE KEY", encoding="utf-8")
+        zip_path_value = str(secret) if kind == "absolute" else "../" * 12 + str(secret).lstrip("/")
+
+        manifest = ExportManifest(
+            sccs_version="2.72.1",
+            created_at="2026-11-08T00:00:00Z",
+            created_on="macos",
+            categories={
+                "claude_commands": ManifestCategory(
+                    description="Commands",
+                    item_type="file",
+                    local_path=str(target_dir),
+                    items=[ManifestItem(name="stolen.md", zip_path=zip_path_value, item_type="file")],
+                ),
+            },
+        )
+        bundle = temp_dir / "steal.zip"
+        _write_zip(bundle, manifest)
+
+        importer = Importer(bundle, config=config)
+        importer.load_manifest()
+        selections = importer.build_selections_all()
+        assert importer.staged_hashes(selections)[("claude_commands", "stolen.md")] is None
+        result = importer.apply(selections, overwrite=True)
+
+        assert result.success is False
+        assert any("unsafe zip_path" in err for err in result.errors)
+        assert not (target_dir / "stolen.md").exists()
+
+
 class TestZipSymlinkRejection:
     """H2 — symlink entries in ZIP must be rejected before extraction."""
 

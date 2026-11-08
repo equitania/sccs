@@ -21,6 +21,7 @@ from sccs.utils.paths import expand_path
 # scoped npm packages (e.g. "@opengsd/gsd-core") are valid npx-tool
 # names; '@' is not an option-injection vector — only a leading '-' is, and
 # that stays blocked below.
+_NPX_INVOCATION_HEADS = frozenset({"npx", "npm"})
 _SAFE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_@][A-Za-z0-9_./@\-]*$")
 # Marketplace source spec is "owner/repo" or a longer slash path. Same
 # allowlist as plugin name to keep the policy uniform.
@@ -123,6 +124,25 @@ class BundledSkillSpec(BaseModel):
         body = v[1:] if v.startswith("~") else v
         if any(ch in body for ch in (";", "|", "&", "$", "`", "\n", "\r")):
             raise ValueError(f"path contains shell metacharacters: {v!r}")
+        return v
+
+    @field_validator("package_subpath")
+    @classmethod
+    def _validate_subpath(cls, v: str) -> str:
+        # Resolved under `npm root -g`; it must not climb out of it (2.72.2).
+        parts = v.replace("\\", "/").split("/")
+        if v.startswith(("/", "~")) or (len(v) > 1 and v[1] == ":") or ".." in parts:
+            raise ValueError(f"package_subpath must be relative to the npm root, without '..': {v!r}")
+        return v
+
+    @field_validator("target")
+    @classmethod
+    def _validate_target(cls, v: str) -> str:
+        # The target is replaced wholesale (rmtree + copytree) without a
+        # prompt, so it may only ever be one skill folder (2.72.2).
+        parts = v.replace("\\", "/").rstrip("/").split("/")
+        if parts[:3] != ["~", ".claude", "skills"] or len(parts) != 4 or not _SAFE_NAME_PATTERN.match(parts[3]):
+            raise ValueError(f"bundled_skill target must be ~/.claude/skills/<name>: {v!r}")
         return v
 
 
@@ -287,6 +307,10 @@ class NpxToolSpec(BaseModel):
             raise ValueError(f"Invocation head must not start with '-': {head!r}")
         if not _SAFE_NAME_PATTERN.match(head):
             raise ValueError(f"Invocation head contains invalid characters: {head!r}")
+        # An npx tool is installed through npm; any other head (bash, curl,
+        # python3) would turn a config entry into an arbitrary command (2.72.2).
+        if head not in _NPX_INVOCATION_HEADS:
+            raise ValueError(f"Invocation must start with 'npx' or 'npm', not {head!r}")
         return v
 
     @field_validator("post_install")

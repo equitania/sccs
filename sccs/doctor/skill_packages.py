@@ -166,6 +166,12 @@ def package_skill_names(spec: SkillPackageSpec) -> list[str]:
     return lock_skill_names(spec) or sorted(spec.known_skills)
 
 
+def _is_builtin(spec: SkillPackageSpec) -> bool:
+    """True when `spec` fetches from the source SCCS ships for that name; any other source asks."""
+    builtin = BUILTIN_SKILL_PACKAGES.get(spec.name)
+    return builtin is not None and builtin.source == spec.source
+
+
 def resolve_skill_packages(names: list[str], extra: list[SkillPackageSpec] | None = None) -> list[SkillPackageSpec]:
     """Built-in names (unknown ones ignored, like cli_tools) plus fully specified extras."""
     resolved = [BUILTIN_SKILL_PACKAGES[n] for n in names if n in BUILTIN_SKILL_PACKAGES]
@@ -283,7 +289,7 @@ def skill_package_install_actions(
                 runnable=True,
                 component=f"skill-package:{st.spec.name}",
                 depends_on_components=install_deps,
-                auto_confirm=True,  # same trust level as the GSD npx install
+                auto_confirm=_is_builtin(st.spec),  # a config-defined source asks (2.72.2)
             )
         )
     return actions
@@ -307,7 +313,7 @@ def skill_package_update_actions(
                 runnable=True,
                 component=f"skill-package:{st.spec.name}",
                 depends_on_components=install_deps,
-                auto_confirm=True,
+                auto_confirm=_is_builtin(st.spec),
             )
         )
     return actions

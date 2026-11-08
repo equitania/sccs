@@ -274,7 +274,11 @@ class Importer:
                 return hashes
 
             for cat_name, item in selections:
-                source = tmp_path / item.zip_path.rstrip("/")
+                source = _staged_source(tmp_path, item.zip_path)
+                if source is None:
+                    logger.error("Refused item with unsafe zip_path: %r", item.zip_path)
+                    hashes[(cat_name, item.name)] = None
+                    continue
                 if item.item_type == "directory":
                     hashes[(cat_name, item.name)] = directory_hash(source)
                 else:
@@ -356,12 +360,13 @@ class Importer:
         if not _is_safe_relative_name(item.name):
             return f"Refused item with unsafe name: {item.name!r}"
 
-        if item.item_type == "directory":
-            source = staging_dir / item.zip_path.rstrip("/")
-            target = target_base / item.name
-        else:
-            source = staging_dir / item.zip_path
-            target = target_base / item.name
+        # The manifest is part of the (untrusted) bundle: an absolute or
+        # `../` zip_path would read any local file into a synced folder (2.72.2).
+        staged = _staged_source(staging_dir, item.zip_path)
+        if staged is None:
+            return f"Refused item with unsafe zip_path: {item.zip_path!r}"
+        source = staged
+        target = target_base / item.name
 
         # Defense-in-depth: the resolved target must stay underneath target_base.
         try:
@@ -436,6 +441,24 @@ class Importer:
                     raise ValueError(f"ZIP path traversal detected: {info.filename}")
 
             zf.extractall(extract_path)
+
+
+def _staged_source(staging_dir: Path, zip_path: str) -> Path | None:
+    """Return the extracted item for ``zip_path``, or None if it leaves ``staging_dir``.
+
+    ``zip_path`` comes from the bundle's manifest, not from the ZIP entries
+    that ``_safe_extract`` checked, so it is validated on its own.
+    """
+    rel = zip_path.rstrip("/")
+    if not _is_safe_relative_name(rel):
+        return None
+    source = staging_dir / rel
+    try:
+        if not source.resolve().is_relative_to(staging_dir.resolve()):
+            return None
+    except OSError:
+        return None
+    return source
 
 
 def _is_safe_relative_name(name: str) -> bool:

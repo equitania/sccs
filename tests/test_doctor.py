@@ -1370,8 +1370,9 @@ class TestPlaywrightCliBundling:
         (skill_src / "SKILL.md").write_text("# my skill\n", encoding="utf-8")
         (skill_src / "references" / "ref.md").write_text("ref\n", encoding="utf-8")
 
-        target = tmp_path / "claude_home" / "skills" / "my-skill"
-        bs = BundledSkillSpec(package_subpath="@vendor/cli/skills/my-skill", target=str(target))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        target = tmp_path / ".claude" / "skills" / "my-skill"
+        bs = BundledSkillSpec(package_subpath="@vendor/cli/skills/my-skill", target="~/.claude/skills/my-skill")
 
         fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=f"{fake_npm_root}\n", stderr="")
         with patch("sccs.doctor.installer._run", return_value=fake_proc):
@@ -1380,7 +1381,7 @@ class TestPlaywrightCliBundling:
         assert (target / "SKILL.md").read_text(encoding="utf-8") == "# my skill\n"
         assert (target / "references" / "ref.md").read_text(encoding="utf-8") == "ref\n"
 
-    def test_sync_bundled_skill_overwrites_existing_target(self, tmp_path):
+    def test_sync_bundled_skill_overwrites_existing_target(self, tmp_path, monkeypatch):
         """A second run replaces the directory — npm package is the source of truth."""
         from sccs.doctor.installer import _sync_bundled_skill
         from sccs.doctor.schema import BundledSkillSpec
@@ -1390,12 +1391,13 @@ class TestPlaywrightCliBundling:
         skill_src.mkdir(parents=True)
         (skill_src / "SKILL.md").write_text("v2\n", encoding="utf-8")
 
-        target = tmp_path / "skills" / "s"
+        monkeypatch.setenv("HOME", str(tmp_path))
+        target = tmp_path / ".claude" / "skills" / "s"
         target.mkdir(parents=True)
         (target / "SKILL.md").write_text("v1-stale\n", encoding="utf-8")
         (target / "stray.md").write_text("should be removed\n", encoding="utf-8")
 
-        bs = BundledSkillSpec(package_subpath="p/skills/s", target=str(target))
+        bs = BundledSkillSpec(package_subpath="p/skills/s", target="~/.claude/skills/s")
         fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=f"{fake_npm_root}\n", stderr="")
         with patch("sccs.doctor.installer._run", return_value=fake_proc):
             _sync_bundled_skill(bs)
@@ -1408,7 +1410,7 @@ class TestPlaywrightCliBundling:
         from sccs.doctor.runner import DoctorError
         from sccs.doctor.schema import BundledSkillSpec
 
-        bs = BundledSkillSpec(package_subpath="does/not/exist", target=str(tmp_path / "s"))
+        bs = BundledSkillSpec(package_subpath="does/not/exist", target="~/.claude/skills/s")
         fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=f"{tmp_path}\n", stderr="")
         with (
             patch("sccs.doctor.installer._run", return_value=fake_proc),
@@ -1686,7 +1688,9 @@ class TestBundledSkillDetector:
         return NpxToolSpec(
             name="playwright-cli",
             invocation=["npm", "install", "-g", "@playwright/cli@latest"],
-            bundled_skill=BundledSkillSpec(
+            # model_construct: these tests exercise detection on a temp path,
+            # which the ~/.claude/skills validator rightly rejects.
+            bundled_skill=BundledSkillSpec.model_construct(
                 package_subpath="@playwright/cli/skills/playwright-cli",
                 target=target,
             ),
@@ -1807,7 +1811,7 @@ class TestBundledSkillReporter:
             spec=NpxToolSpec(
                 name="playwright-cli",
                 invocation=["npm", "install", "-g", "@playwright/cli@latest"],
-                bundled_skill=BundledSkillSpec(
+                bundled_skill=BundledSkillSpec.model_construct(
                     package_subpath="@playwright/cli/skills/playwright-cli",
                     target=str(tmp_path),
                 ),
@@ -1829,7 +1833,7 @@ class TestBundledSkillReporter:
             spec=NpxToolSpec(
                 name="playwright-cli",
                 invocation=["npm", "install", "-g", "@playwright/cli@latest"],
-                bundled_skill=BundledSkillSpec(
+                bundled_skill=BundledSkillSpec.model_construct(
                     package_subpath="@playwright/cli/skills/playwright-cli",
                     target=str(tmp_path),
                 ),

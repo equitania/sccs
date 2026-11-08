@@ -401,7 +401,8 @@ def _marketplace_missing_actions(statuses: list[MarketplaceStatus]) -> list[Doct
                     cmd=["claude", "plugin", "marketplace", "add", st.suggested_source],
                     runnable=True,
                     component=f"plugin-marketplace:{st.name}:exists",
-                    auto_confirm=True,  # prerequisite for unattended install
+                    # A source the defaults ship runs unattended; one from config asks.
+                    auto_confirm=_is_bundled_marketplace_source(st.suggested_source),
                 )
             )
             continue
@@ -922,7 +923,8 @@ def _plugin_install_actions(
                     cmd=["claude", "plugin", "marketplace", "add", spec.marketplace_source],
                     runnable=True,
                     component=f"plugin:{spec.name}",
-                    auto_confirm=True,  # prerequisite for unattended install
+                    # A source the defaults ship runs unattended; one from config asks.
+                    auto_confirm=_is_bundled_marketplace_source(spec.marketplace_source),
                 )
             )
         actions.append(
@@ -1020,6 +1022,27 @@ def _post_install_actions(
     ]
 
 
+def _is_bundled_npx_tool(spec: NpxToolSpec) -> bool:
+    """True when `spec` runs exactly what the bundled default of that name runs.
+
+    Same ceiling as `post_install`: a step SCCS ships runs unattended, a step
+    from `config.yaml` (shared through the sync repo) asks first (2.72.2).
+    """
+    from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
+
+    return any(
+        d.name == spec.name and d.invocation == spec.invocation and d.bundled_skill == spec.bundled_skill
+        for d in DEFAULT_NPX_TOOLS
+    )
+
+
+def _is_bundled_marketplace_source(source: str | None) -> bool:
+    """True when a bundled default plugin names this marketplace source (2.72.2)."""
+    from sccs.doctor.defaults import DEFAULT_CLAUDE_PLUGINS
+
+    return bool(source) and any(p.marketplace_source == source for p in DEFAULT_CLAUDE_PLUGINS)
+
+
 def _bundled_post_install(tool_name: str) -> list[list[str]]:
     """The `post_install` steps SCCS itself ships for `tool_name`, else []."""
     from sccs.doctor.defaults import DEFAULT_NPX_TOOLS
@@ -1049,7 +1072,7 @@ def _bundled_skill_action(
         component=f"npx:{spec.name}:skill",
         depends_on_components=extra_deps,
         python_callable=_run_skill_sync,
-        auto_confirm=True,  # follow-up of an auto-confirmed npx maintenance step
+        auto_confirm=_is_bundled_npx_tool(spec),  # replaces a folder: config-defined asks
     )
 
 
@@ -1070,9 +1093,17 @@ def _sync_bundled_skill(bs: BundledSkillSpec) -> None:
     source = npm_root / bs.package_subpath
     if not source.is_dir():
         raise DoctorError(f"bundled skill source not found: {source}")
+    if not source.resolve().is_relative_to(npm_root.resolve()):
+        raise DoctorError(f"bundled skill source leaves the npm root: {source}")
     target = Path(bs.target).expanduser()
+    skills_root = Path("~/.claude/skills").expanduser()
+    if target.is_symlink() or not target.resolve().is_relative_to(skills_root.resolve()):
+        raise DoctorError(f"bundled skill target is not a folder under {skills_root}: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
+        # Only a skill folder is replaced; anything else is never deleted.
+        if not (target / "SKILL.md").is_file() and any(target.iterdir()):
+            raise DoctorError(f"refusing to replace {target}: it holds no SKILL.md")
         shutil.rmtree(target)
     shutil.copytree(source, target)
     logger.info("doctor copied bundled skill: %s → %s", source, target)
@@ -1142,7 +1173,7 @@ def _npx_install_actions(
                 depends_on_components=install_deps,
                 npx_tool_name=spec.name if spec.detect_via_state else None,
                 npx_invocation=list(spec.invocation) if spec.detect_via_state else None,
-                auto_confirm=True,  # safe maintenance — runs unattended
+                auto_confirm=_is_bundled_npx_tool(spec),  # a config-defined invocation asks
             )
         )
         post_deps = (install_component, *use_deps)
@@ -1183,7 +1214,7 @@ def _npx_update_actions(
                 depends_on_components=install_deps,
                 npx_tool_name=spec.name if spec.detect_via_state else None,
                 npx_invocation=list(spec.invocation) if spec.detect_via_state else None,
-                auto_confirm=True,  # safe maintenance — runs unattended (GSD refresh)
+                auto_confirm=_is_bundled_npx_tool(spec),  # a config-defined invocation asks
             )
         )
         post_deps = (install_component, *use_deps)

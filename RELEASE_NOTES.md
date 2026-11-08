@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.72.2 (08.11.2026)
+
+### Security
+
+- **An imported bundle can no longer copy arbitrary local files.** `sccs import` and `sccs deploy install` checked an item's name, but not the path inside the ZIP that its manifest points to. A crafted bundle could name an absolute path such as an SSH key, and the file was copied into a synced folder — from where the next `sccs sync` would push it. That path must now lie inside the unpacked bundle.
+- **`bundled_skill` replaces only a skill folder.** The target is deleted and copied anew without a prompt, but any path was accepted, so a typo such as `~/Documents` would have wiped that folder. The target must now be `~/.claude/skills/<name>`, the source must stay inside the npm root, a symlinked target is refused, and a folder without `SKILL.md` is never deleted.
+- **Steps that only `config.yaml` defines ask first.** The shared config reaches every host through the sync repo. An npx tool's `invocation`, a plugin's `marketplace_source` and a skill package's `source` now run unattended only when SCCS ships them; one from the config asks (`--yes` still answers). An npx `invocation` must start with `npx` or `npm` — before, `bash -c …` was accepted.
+
 ## Version 2.72.1 (08.11.2026)
 
 ### Fixed

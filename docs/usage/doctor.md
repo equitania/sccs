@@ -374,6 +374,10 @@ doctor:
     - name: my-cli
       invocation: ["npm", "install", "-g", "my-cli@latest"]
       detect_command: my-cli
+  # v2.72.2 — invocation beginnt mit `npx` oder `npm`. Schritte, die nur diese
+  # Config definiert (eigene npx-Tools, marketplace_source, Skill-Paket-Quellen),
+  # fragen vor dem Ausführen nach; `--yes` beantwortet die Frage.
+  # bundled_skill.target ist immer ~/.claude/skills/<name>.
   extra_permission_checks:
     - path: ~/my-fragile-cache
       label: my cache
@@ -773,6 +777,9 @@ doctor:
     - name: my-cli
       invocation: ["npm", "install", "-g", "my-cli@latest"]
       detect_command: my-cli
+  # v2.72.2 — invocation starts with `npx` or `npm`. Steps that only this config
+  # defines (own npx tools, marketplace_source, skill-package sources) ask before
+  # they run; `--yes` answers. bundled_skill.target is always ~/.claude/skills/<name>.
   extra_permission_checks:
     - path: ~/my-fragile-cache
       label: my cache
