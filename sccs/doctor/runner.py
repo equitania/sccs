@@ -465,3 +465,20 @@ def run_fisher_list() -> list[str] | None:
     if proc.returncode != 0:
         return None
     return _lines(proc)
+
+
+def run_tool_version(binary: str) -> str | None:
+    """Return the first non-empty stdout line of `<binary> --version`.
+
+    None when the binary is missing, hangs, or exits non-zero.
+    """
+    try:
+        proc = _run([binary, "--version"], timeout=10, check=False)
+    except DoctorError:
+        return None
+    if proc.returncode != 0:
+        return None
+    for line in (proc.stdout or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return None

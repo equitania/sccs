@@ -1,6 +1,7 @@
 # SCCS Test Fixtures
 # Pytest fixtures for SCCS tests
 
+import os
 import tempfile
 from collections.abc import Generator
 from pathlib import Path
@@ -173,3 +174,38 @@ def state_file(temp_home: Path) -> Path:
     config_dir = temp_home / ".config" / "sccs"
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir / ".sync_state.yaml"
+
+
+@pytest.fixture
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Empty home directory; HOME (and USERPROFILE) point to it."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
+
+
+@pytest.fixture
+def empty_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """PATH points to an empty directory: no external binary is found."""
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    return empty
+
+
+@pytest.fixture
+def fake_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Factory writing an executable `#!/bin/sh` stub into a tmp dir prepended to PATH."""
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+
+    def make(name: str, stdout: str = "", exit_code: int = 0) -> Path:
+        script = bin_dir / name
+        script.write_text(f"#!/bin/sh\nprintf '%s' '{stdout}'\nexit {exit_code}\n", encoding="utf-8")
+        script.chmod(0o755)
+        return script
+
+    return make
