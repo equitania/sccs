@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 2.72.3 (09.11.2026)
+
+### Security
+
+- **The version probe of a tool runs only a version switch.** `sccs doctor check` fills its Version column by running a tool's `detect_command` with its `version_args`, unattended, on every check. Both came straight from `config.yaml`, which reaches every host through the sync repo, so `detect_command: python3` with `version_args: ["-c", "…"]` ran arbitrary code on every host without a prompt — the gap the 2.72.2 ceilings closed for install steps, left open for detection. `version_args` now accepts exactly one of `--version`, `-version`, `-V`, `-v`, `version` (every bundled tool uses `--version`), for npx tools and CLI tools alike, and an npx tool's `detect_command` passes the same name check as a CLI tool's. A config that sets anything else fails validation with the allowed list. Found by a cross-model review (Codex), 09.11.2026.
+
 ## Version 2.72.2 (08.11.2026)
 
 ### Security

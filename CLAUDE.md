@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.72.2
+**Version**: 2.72.3
 
 ### Key Features
 
@@ -22,7 +22,7 @@ incident behind it and the exact edge cases are in [`docs/development/maintainer
 **read the matching section there before changing that code**. The release
 history lives in `RELEASE_NOTES.md`.
 
-- **Trust ceilings** (`deploy/install.py`, `doctor/schema.py`): deploy without a config writes only inside default category roots; `post_install` runs only the tool's own binary, and only bundled steps skip the prompt — the same holds for npx `invocation` (head `npx`/`npm` only), `marketplace_source` and skill-package `source`; `bundled_skill.target` is one `~/.claude/skills/<name>` folder; a bundle's `zip_path` stays inside the staging dir. → [Security ceilings](docs/development/maintainer-notes.md#security-ceilings)
+- **Trust ceilings** (`deploy/install.py`, `doctor/schema.py`): deploy without a config writes only inside default category roots; `post_install` runs only the tool's own binary, and only bundled steps skip the prompt — the same holds for npx `invocation` (head `npx`/`npm` only), `marketplace_source` and skill-package `source`; `bundled_skill.target` is one `~/.claude/skills/<name>` folder; a bundle's `zip_path` stays inside the staging dir; `version_args` (the unattended `doctor check` probe) is one version switch only. → [Security ceilings](docs/development/maintainer-notes.md#security-ceilings)
 - **Optional npx tools** (`doctor/installer.py`): optional + absent = INFO, never installed or updated without `--with-optional`; a missing marketplace *with* a source is added by a runnable action, test via `execute_plan`. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Retired plugins** (`doctor/installer.py`, `doctor/schema.py`): `retired_plugins` are removed by plain `optimize`, each confirmed; retired entries leave `effective_plugins()`; a marketplace goes only when nothing uses it; project-scope uninstalls run in the project folder. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Mirror parity** (`doctor/mirror.py`): macOS only — any other platform resolves to `off`; the source never receives install/remove actions, a mirror never writes `inventory.yaml`; removals only under `optimize --strict` + `cleanup: true`; never `brew bundle cleanup` or bare `fisher update`. → [Doctor](docs/development/maintainer-notes.md#doctor)

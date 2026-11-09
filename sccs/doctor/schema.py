@@ -36,6 +36,22 @@ def _validate_safe_name(value: str, field: str) -> str:
     return value
 
 
+# `version_args` are appended to the detect command and run unattended on every
+# `doctor check`. config.yaml reaches every host through the sync repo, so a
+# free-form list (`python3` + `-c …`) was code execution without a prompt. Only
+# plain version switches are admitted — every bundled tool uses `--version`.
+_VERSION_ARGS_ALLOWED = frozenset({"--version", "-version", "-V", "-v", "version"})
+
+
+def _validate_version_args(value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return value
+    bad = [a for a in value if a not in _VERSION_ARGS_ALLOWED]
+    if bad or len(value) > 1:
+        raise ValueError(f"version_args must be a single version switch {sorted(_VERSION_ARGS_ALLOWED)}, got {value!r}")
+    return value
+
+
 class PluginSpec(BaseModel):
     """A Claude Code plugin to install via the `claude plugin` CLI."""
 
@@ -285,6 +301,17 @@ class NpxToolSpec(BaseModel):
     @classmethod
     def _validate_name(cls, v: str) -> str:
         return _validate_safe_name(v, "Npx tool name")
+
+    @field_validator("detect_command")
+    @classmethod
+    def _validate_detect_command(cls, v: str | None) -> str | None:
+        # Head of the unattended version probe — same policy as CliToolSpec.
+        return _validate_safe_name(v, "detect_command") if v else v
+
+    @field_validator("version_args")
+    @classmethod
+    def _validate_version_args(cls, v: list[str] | None) -> list[str] | None:
+        return _validate_version_args(v)
 
     @field_validator("npm_package")
     @classmethod
@@ -678,6 +705,11 @@ class CliToolSpec(BaseModel):
     @classmethod
     def _validate_detect_command(cls, v: str) -> str:
         return _validate_safe_name(v, "detect_command")
+
+    @field_validator("version_args")
+    @classmethod
+    def _validate_version_args(cls, v: list[str] | None) -> list[str] | None:
+        return _validate_version_args(v)
 
     @field_validator("winget_id")
     @classmethod

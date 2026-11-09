@@ -141,3 +141,48 @@ class TestSourceConfirm:
         builtin = BUILTIN_SKILL_PACKAGES["hyperframes"]
         assert _is_builtin(builtin) is True
         assert _is_builtin(builtin.model_copy(update={"source": "evil/fork"})) is False
+
+
+class TestVersionProbeArgs:
+    """`version_args` run unattended on every `doctor check` (2.72.3).
+
+    The probe is `[detect_command or name, *version_args]`; config.yaml travels
+    through the sync repo, so `python3 -c …` there was code execution on every
+    host without a prompt.
+    """
+
+    @pytest.mark.parametrize(
+        "args",
+        [["-c", "import os"], ["-e", "1"], ["--version", "-c", "x"], ["--eval=1"], ["exec", "rm"]],
+    )
+    def test_npx_non_version_args_are_rejected(self, args: list[str]) -> None:
+        with pytest.raises(ValidationError, match="version_args"):
+            NpxToolSpec(name="x", invocation=["npx", "pkg"], detect_command="python3", version_args=args)
+
+    @pytest.mark.parametrize("args", [["-c", "import os"], ["--version", "-e", "1"]])
+    def test_cli_non_version_args_are_rejected(self, args: list[str]) -> None:
+        from sccs.doctor.schema import CliToolSpec
+
+        with pytest.raises(ValidationError, match="version_args"):
+            CliToolSpec(name="x", detect_command="python3", version_args=args)
+
+    @pytest.mark.parametrize("args", [["--version"], ["-V"], ["-v"], ["version"]])
+    def test_version_flags_are_accepted(self, args: list[str]) -> None:
+        from sccs.doctor.schema import CliToolSpec
+
+        assert NpxToolSpec(name="x", invocation=["npx", "pkg"], version_args=args).version_args == args
+        assert CliToolSpec(name="x", detect_command="x", version_args=args).version_args == args
+
+    def test_every_default_passes(self) -> None:
+        from sccs.doctor.defaults import BUILTIN_CLI_TOOLS
+        from sccs.doctor.schema import CliToolSpec
+
+        for tool in DEFAULT_NPX_TOOLS:
+            NpxToolSpec.model_validate(tool.model_dump())
+        for tool in BUILTIN_CLI_TOOLS.values():
+            CliToolSpec.model_validate(tool.model_dump())
+
+    @pytest.mark.parametrize("value", ["-rf", "a b", "x;y", "$(id)"])
+    def test_npx_detect_command_is_validated(self, value: str) -> None:
+        with pytest.raises(ValidationError, match="detect_command"):
+            NpxToolSpec(name="x", invocation=["npx", "pkg"], detect_command=value)

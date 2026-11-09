@@ -15,6 +15,10 @@ The release history — what each version added — lives in `RELEASE_NOTES.md`.
 
 `config.yaml` reaches every host through the sync repo, so it is treated like `post_install`: a step SCCS ships runs unattended, a step that only the config defines asks (`--yes` still answers). That covers npx `invocation` (`_is_bundled_npx_tool`: same name, invocation and `bundled_skill` as a default), `marketplace_source` (`_is_bundled_marketplace_source`) and skill-package `source` (`skill_packages._is_builtin`, source only — target and lock paths are host details). The npx `invocation` head is pinned to `npx`/`npm` in the schema; before, `bash -c …` validated. `BundledSkillSpec.target` must be `~/.claude/skills/<name>` and `package_subpath` relative without `..`, because `_sync_bundled_skill` replaces the target with `rmtree`; at execute time the source must resolve under `npm root -g`, the target must not be a symlink and must resolve under `~/.claude/skills`, and a non-empty folder without `SKILL.md` is refused, never deleted. In a transfer bundle the manifest's `zip_path` is validated on its own (`importer._staged_source`) — `_safe_extract` only checks ZIP entry names, and an absolute `zip_path` replaced the staging prefix, so `import`/`deploy install` could copy any local file (an SSH key) into a synced folder. Found by a security audit, 08.11.2026.
 
+### The version probe is a step too (v2.72.3)
+
+`_resolve_version` in both `NpxToolDetector` and `CliToolDetector` runs `[detect_command or name, *version_args]` on every `doctor check`, with no prompt and no bundled-check — detection is not an install, so the 2.72.2 "config-sourced steps ask" rule never reached it. The schema therefore pins `version_args` to a single switch from `_VERSION_ARGS_ALLOWED` and validates `NpxToolSpec.detect_command` like `CliToolSpec.detect_command`. Do not widen the allowlist to free-form args, and do not add a new unattended probe that takes argv from config; a probe that needs more belongs in `DEFAULT_NPX_TOOLS`/`BUILTIN_CLI_TOOLS`.
+
 ## Doctor
 
 ### Optional npx tools (v2.68.0)
