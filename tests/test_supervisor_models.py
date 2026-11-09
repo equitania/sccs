@@ -9,7 +9,7 @@ import pytest
 from sccs.supervisor.models import ModelList, check_model, list_models
 
 
-@pytest.mark.parametrize("bad", ["x; rm -rf ~", "$(id)", "a b", "`id`", "-m", "--help", "", "a|b", "a\nb"])
+@pytest.mark.parametrize("bad", ["x; rm -rf ~", "$(id)", "a b", "`id`", "-m", "--help", "", "a|b", "a\nb", "opus\n"])
 def test_pattern_rejects(bad):
     assert check_model("opencode", bad, ModelList("opencode", (bad,), True)).status == "rejected"
 
@@ -84,3 +84,14 @@ def test_pi_unparseable_is_unreadable(fake_home, empty_path):
 def test_codex_unreadable_list_is_unverified():
     c = check_model("codex", "gpt-5.5", ModelList("codex", (), False))
     assert c.ok and c.status == "unverified"
+
+
+def test_trailing_newline_rejected_for_agy():
+    ml = ModelList("agy", ("gemini-x\n",), True)
+    assert check_model("agy", "gemini-x\n", ml).status == "rejected"
+
+
+def test_agy_nonzero_exit_gives_unreadable_list(fake_home, fake_bin):
+    fake_bin("agy", stdout="Error: not logged in", exit_code=1)
+    ml = list_models("agy", fake_home)
+    assert ml.readable is False and ml.models == ()

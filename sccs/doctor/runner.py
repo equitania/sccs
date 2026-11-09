@@ -348,6 +348,8 @@ def run_agy_models() -> str:
         proc = _run(["agy", "models"], timeout=30, check=False)
     except DoctorError:
         return ""
+    if proc.returncode != 0:
+        return ""
     return proc.stdout or ""
 
 
