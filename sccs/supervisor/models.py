@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 from sccs.doctor.runner import run_agy_models, run_opencode_models
-from sccs.supervisor.tools import ToolId, _codex_model
+from sccs.supervisor.tools import ToolId, codex_default_model
 
 MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._:/~][A-Za-z0-9._:/~-]*$")
 
@@ -66,7 +66,7 @@ def list_models(tool: ToolId, home: Path | None = None) -> ModelList:
     if tool == "claude":
         return ModelList(tool, _CLAUDE_MODELS, True)
     if tool == "codex":
-        model = _codex_model(base)
+        model = codex_default_model(base)
         return ModelList(tool, (model,) if model else (), False)
     if tool == "pi":
         ids = _pi_models(base)

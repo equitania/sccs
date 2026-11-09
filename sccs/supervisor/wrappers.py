@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from sccs.convert.frontmatter import parse_frontmatter_ex
-from sccs.supervisor.tools import detect_tools
+from sccs.supervisor.tools import codex_default_model
 
 if TYPE_CHECKING:
     from sccs.config.schema import SccsConfig
@@ -72,6 +72,27 @@ def find_model_token(body: str, template: TemplateId) -> tuple[int, int] | None:
     if match is None:
         return None
     return offset + match.start(1), offset + match.end(1)
+
+
+def find_model_token_in_file_text(text: str, template: TemplateId) -> tuple[int, int] | None:
+    """Like :func:`find_model_token`, but on raw file text: skips the frontmatter itself.
+
+    Offsets index into ``text`` (CRLF and any leading BOM untouched), so a caller can
+    edit the file in place.
+    """
+    start = 1 if text.startswith("\ufeff") else 0
+    lines = text[start:].splitlines(keepends=True)
+    offset = start
+    if lines and lines[0].strip() == "---":
+        offset += len(lines[0])
+        for line in lines[1:]:
+            offset += len(line)
+            if line.strip() == "---":
+                break
+        else:
+            offset = start  # unterminated: no frontmatter
+    span = find_model_token(text[offset:], template)
+    return (span[0] + offset, span[1] + offset) if span else None
 
 
 def body_hash(body: str, template: TemplateId) -> str:
@@ -136,7 +157,7 @@ def _plugin_agents(home: Path) -> list[AgentInfo]:
         return []
     if not install_paths:
         return []
-    codex_model = next((t.default_model for t in detect_tools(home) if t.id == "codex"), None)
+    codex_model = codex_default_model(home)
     found: list[AgentInfo] = []
     for install in install_paths:
         try:

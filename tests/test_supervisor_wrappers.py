@@ -8,6 +8,7 @@ from sccs.supervisor.wrappers import (
     body_hash,
     detect_shape,
     find_model_token,
+    find_model_token_in_file_text,
     scan_agents,
 )
 from tests.conftest import FIX, write_agent
@@ -148,7 +149,11 @@ def test_managed_adopted(fake_home):
     assert (a.template, a.managed, a.hash_ok) == ("opencode", "adopted", True)
 
 
-def test_codex_plugin_agent_listed_readonly(fake_home):
+def test_codex_plugin_agent_listed_readonly(fake_home, empty_path, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("subprocess spawned")
+
+    monkeypatch.setattr("sccs.doctor.runner._run", boom)
     (fake_home / ".codex").mkdir()
     (fake_home / ".codex" / "config.toml").write_text('model = "gpt-9"\n', encoding="utf-8")
     install_fake_plugin(fake_home, "codex@openai-codex", agents=["codex-rescue"])
@@ -170,3 +175,14 @@ def test_excluded_needs_all_three_lists(fake_home):
     write_agent(fake_home, "w", "---\nname: w\n---\nx\n")
     assert only(scan_agents(fake_home, config_with_excludes(["w"], ["w"], ["w"])), "w").excluded is True
     assert only(scan_agents(fake_home, config_with_excludes(["w"], ["w"], [])), "w").excluded is False
+
+
+def test_find_model_token_in_raw_crlf_file_text():
+    for prefix in ("", "\ufeff"):
+        text = prefix + FIX("opencode-worker.md").replace("\n", "\r\n")
+        s, e = find_model_token_in_file_text(text, "opencode")  # type: ignore[misc]
+        assert text[s:e] == "openrouter/~moonshotai/kimi-latest"
+    lf = FIX("antigravity-worker.md")
+    s, e = find_model_token_in_file_text(lf, "agy")  # type: ignore[misc]
+    assert lf[s:e] == "gemini-4-argon-high"
+    assert find_model_token_in_file_text("no frontmatter\n", "agy") is None
