@@ -104,6 +104,15 @@ sccs capacity                    # Rich-Tabelle + Routing-Empfehlung
 sccs capacity --json             # Einzeiliges JSON für Orchestrator/GUI
 sccs capacity --offline          # Ohne Netzwerk-Probe (Antigravity /usage)
 
+# Agenten (Konfiguration der Agent-CLIs und der Wrapper in ~/.claude/agents)
+sccs agents                      # Terminal: Vollbild-Ansicht; sonst Tabelle
+sccs agents list [--json]        # CLIs, Modelle und Agenten auf einen Blick
+sccs agents tools [--json]       # Installierte Agent-CLIs, Version, Login
+sccs agents models opencode      # Modelle eines Tools (claude|codex|opencode|agy|pi)
+sccs agents set-model NAME MODELL   # Modell eines verwalteten Wrappers ändern
+sccs agents new opencode NAME --model MODELL   # Read-only-Wrapper anlegen (agy|opencode|codex)
+sccs agents adopt NAME [--yes]   # Handgeschriebenen Wrapper übernehmen
+
 # Konvertierung (Shell-Profile aus der Fish-Config generieren)
 sccs convert fish-to-pwsh        # PowerShell-Profil aus der Fish-Config erzeugen
 sccs convert fish-to-zsh         # Zsh-Profil aus der Fish-Config erzeugen
@@ -231,6 +240,15 @@ sccs statusline show             # Show the current statusLine entry
 sccs capacity                    # Rich table + routing advice
 sccs capacity --json             # Single-line JSON for an orchestrator/GUI
 sccs capacity --offline          # Skip the network probe (Antigravity /usage)
+
+# Agents (configure the agent CLIs and the wrappers in ~/.claude/agents)
+sccs agents                      # Terminal: full-screen view; otherwise a table
+sccs agents list [--json]        # CLIs, models and agents at a glance
+sccs agents tools [--json]       # Installed agent CLIs, version, login
+sccs agents models opencode      # Models of a tool (claude|codex|opencode|agy|pi)
+sccs agents set-model NAME MODEL    # Change the model of a managed wrapper
+sccs agents new opencode NAME --model MODEL    # Create a read-only wrapper (agy|opencode|codex)
+sccs agents adopt NAME [--yes]   # Take over a hand-written wrapper
 
 # Convert (generate shell profiles from the Fish config)
 sccs convert fish-to-pwsh        # Generate a PowerShell profile from the Fish config

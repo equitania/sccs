@@ -526,6 +526,248 @@ def capacity(ctx: click.Context, offline: bool, output_json: bool) -> None:
     console.print_capacity_report(report)
 
 
+def _agents_fail(message: str, output_json: bool) -> None:
+    """Report a refused supervisor operation and exit 1 (JSON envelope with --json)."""
+    if output_json:
+        emit_json_error(message)
+    else:
+        click.echo(f"Error: {message}", err=True)
+    sys.exit(1)
+
+
+def _agents_payload() -> dict:
+    from pathlib import Path
+
+    from sccs.supervisor import detect_tools, scan_agents
+
+    tools = detect_tools()
+    claude = next((t for t in tools if t.id == "claude"), None)
+    return {
+        "supervisor": {
+            "tool": "claude",
+            "model": claude.default_model if claude else None,
+            "agents_dir": str(Path.home() / ".claude" / "agents"),
+        },
+        "tools": tools,
+        "agents": scan_agents(),
+    }
+
+
+def _print_agents_table(console, payload: dict) -> None:
+    from rich.table import Table
+
+    tools = {t.id: t for t in payload["tools"]}
+    table = Table(title="Agents", show_header=True, header_style="bold")
+    table.add_column("Agent")
+    table.add_column("Tool")
+    table.add_column("Model")
+    table.add_column("Mode")
+    for agent in payload["agents"]:
+        tool_id = "codex" if agent.source == "plugin" else agent.template
+        tool = tools.get(tool_id) if tool_id else None
+        if tool is None:
+            tool_cell = "-"
+        elif tool.installed:
+            tool_cell = f"{tool.id} {tool.version or 'unknown'} [green]\u2713[/green]"
+        else:
+            tool_cell = f"{tool.id} [red]missing[/red]"
+        if agent.source == "plugin":
+            mode = "plugin"
+        elif agent.managed == "no":
+            mode = "unmanaged"
+        else:
+            mode = "read-only"
+        if agent.template == "opencode":
+            mode += " \u20ac"
+        table.add_row(agent.name, tool_cell, agent.cli_model or "unknown", mode)
+    console.print(table)
+    if not payload["agents"]:
+        console.print("[dim]No agents found.[/dim]")
+
+
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def agents(ctx: click.Context) -> None:
+    """Inspect and configure the Claude agents and the agent CLIs behind them.
+
+    \b
+    Configuration only: nothing here starts or monitors agent work.
+    Without a subcommand, a terminal opens the full-screen view;
+    otherwise the agent table is printed.
+
+    \b
+    Examples:
+        sccs agents list --json
+        sccs agents models opencode
+        sccs agents new opencode review-worker --model openrouter/some-model
+        sccs agents set-model review-worker openrouter/other-model
+        sccs agents adopt opencode-worker --yes
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    if sys.stdout.isatty():
+        from sccs.supervisor.tui import run
+
+        run()
+        return
+    console = ctx.obj["console"]
+    _print_agents_table(console, _agents_payload())
+    console.print("Run in a terminal for the full-screen view.")
+
+
+@agents.command("list")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON instead of a table")
+@click.pass_context
+def agents_list(ctx: click.Context, output_json: bool) -> None:
+    """List the agent CLIs and the agents in ~/.claude/agents."""
+    payload = _agents_payload()
+    if output_json:
+        emit_json(payload)
+        return
+    _print_agents_table(ctx.obj["console"], payload)
+
+
+@agents.command("tools")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def agents_tools(ctx: click.Context, output_json: bool) -> None:
+    """Show which agent CLIs are installed, their version, login and default model."""
+    from sccs.supervisor import detect_tools
+
+    tools = detect_tools()
+    if output_json:
+        emit_json({"tools": tools})
+        return
+    from rich.table import Table
+
+    table = Table(title="Agent CLIs", show_header=True, header_style="bold")
+    for column in ("Tool", "Installed", "Version", "Login", "Default model"):
+        table.add_column(column)
+    for t in tools:
+        table.add_row(
+            t.label,
+            "yes" if t.installed else "no",
+            t.version or "unknown",
+            t.login,
+            t.default_model or "unknown",
+        )
+    ctx.obj["console"].print(table)
+
+
+@agents.command("models")
+@click.argument("tool", type=click.Choice(["claude", "codex", "opencode", "agy", "pi"]))
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def agents_models(ctx: click.Context, tool: str, output_json: bool) -> None:
+    """List the models a tool reports (empty when its list cannot be read)."""
+    from sccs.supervisor import SupervisorError, list_models
+
+    try:
+        result = list_models(tool)  # type: ignore[arg-type]
+    except SupervisorError as exc:
+        _agents_fail(str(exc), output_json)
+        return
+    if output_json:
+        emit_json({"tool": tool, "readable": result.readable, "models": list(result.models)})
+        return
+    console = ctx.obj["console"]
+    if not result.readable:
+        console.print_warning("The model list of this tool could not be read.")
+        return
+    for model in result.models:
+        click.echo(model)
+
+
+def _print_model_status(console, status: str, reason: str | None = None) -> None:
+    if status == "unverified":
+        console.print_warning(reason or "Model not verified: the tool's model list could not be read.")
+
+
+@agents.command("set-model")
+@click.argument("name")
+@click.argument("model")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def agents_set_model(ctx: click.Context, name: str, model: str, output_json: bool) -> None:
+    """Change the model of a managed wrapper agent."""
+    from sccs.supervisor import SupervisorError, set_model
+
+    try:
+        check = set_model(name, model)
+    except SupervisorError as exc:
+        _agents_fail(str(exc), output_json)
+        return
+    if output_json:
+        emit_json({"success": True, "name": name, "model": model, "status": check.status})
+        return
+    console = ctx.obj["console"]
+    console.print_success(f"{name}: model set to {model}")
+    _print_model_status(console, check.status)
+
+
+@agents.command("new")
+@click.argument("tool", type=click.Choice(["agy", "opencode", "codex", "pi"]))
+@click.argument("name")
+@click.option("--model", "model", default=None, help="Model for the wrapper (default: the template's default)")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def agents_new(ctx: click.Context, tool: str, name: str, model: str | None, output_json: bool) -> None:
+    """Create a read-only wrapper agent for an agent CLI in ~/.claude/agents."""
+    from sccs.supervisor import SupervisorError
+    from sccs.supervisor.render import new_agent
+
+    try:
+        result = new_agent(tool, name, model)
+    except SupervisorError as exc:
+        _agents_fail(str(exc), output_json)
+        return
+    if output_json:
+        emit_json(
+            {
+                "success": True,
+                "name": name,
+                "path": result.path,
+                "model_status": result.model_status,
+                "excludes_added": result.excludes_added,
+            }
+        )
+        return
+    console = ctx.obj["console"]
+    console.print_success(f"Created {result.path}")
+    _print_model_status(console, result.model_status)
+
+
+@agents.command("adopt")
+@click.argument("name")
+@click.option("--yes", "-y", is_flag=True, help="Do not ask for confirmation")
+@click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
+@click.pass_context
+def agents_adopt(ctx: click.Context, name: str, yes: bool, output_json: bool) -> None:
+    """Mark a hand-written wrapper agent as managed by sccs."""
+    from sccs.supervisor import SupervisorError, adopt
+
+    if not yes:
+        if output_json:
+            _agents_fail("Refusing to adopt without --yes in --json mode.", output_json)
+            return
+        if not click.confirm(f"Adopt '{name}' as an sccs-managed wrapper?", default=False):
+            click.echo("Aborted.", err=True)
+            sys.exit(1)
+    try:
+        adopted = adopt(name)
+    except SupervisorError as exc:
+        _agents_fail(str(exc), output_json)
+        return
+    if output_json:
+        emit_json({"success": True, "name": name, "adopted": adopted})
+        return
+    console = ctx.obj["console"]
+    if adopted:
+        console.print_success(f"Adopted {name}")
+    else:
+        console.print(f"{name} is already managed.")
+
+
 # Config subcommands
 @cli.group()
 def config() -> None:
