@@ -56,7 +56,7 @@ def test_list_table_columns(fake_home):
     result = _run("list")
     assert result.exit_code == 0, result.output
     out = _plain(result.output)
-    for word in ("Agent", "Tool", "Model", "Mode", "opencode-worker", "unmanaged"):
+    for word in ("Agent", "Tool", "Model", "Mode", "opencode-worker", "read-only", "adopted)"):
         assert word in out
 
 

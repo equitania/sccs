@@ -554,7 +554,10 @@ def _agents_payload() -> dict:
 
 
 def _print_agents_table(console, payload: dict) -> None:
+    from rich.markup import escape
     from rich.table import Table
+
+    from sccs.supervisor import mode_label
 
     tools = {t.id: t for t in payload["tools"]}
     table = Table(title="Agents", show_header=True, header_style="bold")
@@ -571,15 +574,7 @@ def _print_agents_table(console, payload: dict) -> None:
             tool_cell = f"{tool.id} {tool.version or 'unknown'} [green]\u2713[/green]"
         else:
             tool_cell = f"{tool.id} [red]missing[/red]"
-        if agent.source == "plugin":
-            mode = "plugin"
-        elif agent.managed == "no":
-            mode = "unmanaged"
-        else:
-            mode = "read-only"
-        if agent.template == "opencode":
-            mode += " \u20ac"
-        table.add_row(agent.name, tool_cell, agent.cli_model or "unknown", mode)
+        table.add_row(escape(agent.name), tool_cell, escape(agent.cli_model or "unknown"), escape(mode_label(agent)))
     console.print(table)
     if not payload["agents"]:
         console.print("[dim]No agents found.[/dim]")

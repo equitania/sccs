@@ -17,6 +17,7 @@ from sccs.supervisor.wrappers import (  # noqa: E402
     detect_shape,
     find_model_token,
     find_model_token_in_file_text,
+    mode_label,
     scan_agents,
 )
 
@@ -38,6 +39,7 @@ __all__ = [
     "find_model_token",
     "find_model_token_in_file_text",
     "list_models",
+    "mode_label",
     "scan_agents",
     "set_model",
 ]

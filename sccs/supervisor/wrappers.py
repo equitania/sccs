@@ -41,6 +41,19 @@ class AgentInfo:
     excluded: bool
 
 
+def mode_label(agent: AgentInfo) -> str:
+    """Human label for an agent's mode (shared by the CLI table and the TUI)."""
+    if agent.source == "plugin":
+        return "plugin"
+    if agent.template is None:
+        label = "unmanaged"
+    elif agent.managed == "no":
+        label = "read-only (not adopted)"
+    else:
+        label = "read-only"
+    return label + " \u20ac" if agent.template == "opencode" else label
+
+
 def _first_bash_block(body: str) -> tuple[int, str] | None:
     """Offset (in ``body``) and text of the first ```bash fenced block."""
     match = _BASH_BLOCK.search(body)
