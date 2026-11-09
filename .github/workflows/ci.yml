@@ -10,13 +10,13 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -37,9 +37,26 @@ jobs:
       - name: Bandit security scan
         run: uv run bandit -r sccs/ -ll
 
-      - name: Dependency vulnerability audit
-        # Audits the locked dependency set, not whatever resolves today.
-        # The project itself is not on PyPI under this lock, so it is skipped.
+  audit:
+    # Kept out of `lint`: a new advisory is not a code defect, and it used to
+    # turn the lint badge red. Audits the locked set, not what resolves today;
+    # the project itself is not on PyPI under this lock, so it is skipped.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: Audit runtime dependencies (blocking)
+        # What `pip install sccs` ships. A finding here fails the build.
+        run: uv export --frozen --no-hashes --no-emit-project --no-dev | uvx pip-audit --disable-pip --no-deps -r /dev/stdin
+
+      - name: Audit dev tooling (report only)
+        # pytest, ruff, mypy, pre-commit and their chain (virtualenv, filelock …)
+        # never reach users. A finding shows as a warning; fix it with
+        # `uv lock --upgrade-package <name>` when convenient.
+        continue-on-error: true
         run: uv export --frozen --no-hashes --no-emit-project --all-extras | uvx pip-audit --disable-pip --no-deps -r /dev/stdin
 
   test:
@@ -48,13 +65,13 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -70,15 +87,15 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, audit]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
