@@ -209,3 +209,23 @@ def fake_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         return script
 
     return make
+
+
+# --- Supervisor (sccs agents) helpers ---------------------------------------
+
+SUPERVISOR_FIXTURES = Path(__file__).parent / "fixtures" / "supervisor"
+
+
+def FIX(name: str) -> str:  # noqa: N802 - fixture reader, reads byte-exact (no newline translation)
+    """Text of a supervisor fixture file, line endings untouched."""
+    with open(SUPERVISOR_FIXTURES / name, encoding="utf-8", newline="") as fh:
+        return fh.read()
+
+
+def write_agent(home: Path, name: str, text: str) -> Path:
+    """Write ``~/.claude/agents/<name>.md`` below ``home`` (byte-exact, no newline translation)."""
+    path = home / ".claude" / "agents" / f"{name}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+    return path
