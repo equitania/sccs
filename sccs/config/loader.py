@@ -377,6 +377,47 @@ def save_opencode_model_map(model_map: dict[str, str], config_path: Path | None 
     return load_config(config_path)
 
 
+def add_supervisor_excludes(name: str, config_path: Path | None = None) -> bool:
+    """Add an agent name to `opencode.exclude`, `pi.exclude` and `codex.exclude`.
+
+    Raw-YAML edit like `save_opencode_model_map`: blocks and lists are created as
+    needed, nothing else in the file changes. A backup is written before the write.
+    Returns True when something was added; no write and no backup when all three
+    lists already contain the name.
+    """
+    if config_path is None:
+        config_path = get_config_path()
+
+    raw = load_raw_user_data(config_path)
+    changed = False
+    for key in ("opencode", "pi", "codex"):
+        block = raw.get(key)
+        if not isinstance(block, dict):
+            block = {}
+        excludes = block.get("exclude")
+        if not isinstance(excludes, list):
+            excludes = []
+        if name not in excludes:
+            excludes.append(name)
+            changed = True
+        block["exclude"] = excludes
+        raw[key] = block
+    if not changed:
+        return False
+
+    if config_path.is_file():
+        create_backup(config_path, category="config")
+    try:
+        yaml_text = yaml.dump(raw, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+    except (OSError, yaml.YAMLError) as exc:
+        logger.error("Could not persist export excludes to %s: %s", config_path, exc)
+        raise ConfigWriteError(f"Cannot persist export excludes to {config_path}: {exc}") from exc
+    return True
+
+
 def save_statusline_active(preset_name: str, config_path: Path | None = None) -> SccsConfig | None:
     """Record `statusline.active` in the user's config.yaml.
 
