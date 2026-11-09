@@ -30,15 +30,16 @@ from sccs.supervisor import (
     scan_agents,
     set_model,
 )
+from sccs.supervisor.models import model_warning
 from sccs.supervisor.render import PI_REFUSAL, new_agent
 
 _EXPLAIN: dict[str, str] = {
     "agy": "Read-only via --mode plan + allowlist · material inline",
     "opencode": (
-        "Read-only via --agent claude-ro (inline config) · material inline"
+        "Read-only via --agent claude-ro (inline config) · reads files itself"
         " · free opencode/* models: unclear data policy"
     ),
-    "codex": "Read-only via codex exec -s read-only --ephemeral · material inline",
+    "codex": "Read-only via codex exec -s read-only --ephemeral · reads files itself",
 }
 _NEW_TOOLS: tuple[tuple[str, str], ...] = (
     ("agy", "Antigravity (Gemini)"),
@@ -51,16 +52,32 @@ _UNMANAGED_NOTICE = "Unmanaged agent: no wrapper template recognised; nothing is
 _FREE_NOTICE = "No agent uses this tool. Press n to create one."
 
 
-def find_help_doc() -> Path | None:
-    """Bundled `data/agents.md` first, the repo's `docs/usage/agents.md` as fallback."""
+def _find_doc(name: str, repo_relative: tuple[str, ...]) -> Path | None:
+    """Bundled `data/<name>` first, the repo's docs file as fallback."""
     package_dir = Path(__file__).resolve().parent.parent
-    for candidate in (
-        package_dir / "data" / "agents.md",
-        package_dir.parent / "docs" / "usage" / "agents.md",
-    ):
+    for candidate in (package_dir / "data" / name, package_dir.parent.joinpath(*repo_relative)):
         if candidate.is_file():
             return candidate
     return None
+
+
+def find_help_doc() -> Path | None:
+    """The usage guide: bundled `data/agents.md`, else `docs/usage/agents.md`."""
+    return _find_doc("agents.md", ("docs", "usage", "agents.md"))
+
+
+def find_approach_doc() -> Path | None:
+    """The approach document: bundled `data/architecture.md`, else `docs/architecture.md`."""
+    return _find_doc("architecture.md", ("docs", "architecture.md"))
+
+
+def _read_doc(path: Path | None, missing: str) -> str:
+    if path is None:
+        return f"# Help not available\n\n{missing} was not found."
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return f"# Help not available\n\n{missing} could not be read."
 
 
 def _tilde(path: Path, home: Path) -> str:
@@ -79,18 +96,37 @@ def _tool_id(agent: AgentInfo) -> str | None:
 
 
 class HelpScreen(Screen[None]):
-    """Usage guide (bundled agents.md)."""
+    """Usage guide (bundled agents.md) and approach document (bundled architecture.md)."""
 
-    BINDINGS = [Binding("escape", "app.pop_screen", "Close"), Binding("question_mark", "app.pop_screen", "Close")]
+    BINDINGS = [
+        Binding("escape", "app.pop_screen", "Close"),
+        Binding("question_mark", "app.pop_screen", "Close"),
+        Binding("tab", "switch", "Usage/Approach"),
+    ]
 
     def __init__(self) -> None:
         super().__init__()
-        path = find_help_doc()
-        self.text = path.read_text(encoding="utf-8") if path else "# Help not available\n\nagents.md was not found."
+        self.texts = {
+            "Usage": _read_doc(find_help_doc(), "agents.md"),
+            "Approach": _read_doc(find_approach_doc(), "architecture.md"),
+        }
+        self.current = "Usage"
+        self.text = self.texts[self.current]
 
     def compose(self) -> ComposeResult:
-        yield MarkdownViewer(self.text, show_table_of_contents=False)
+        yield Static(self._title(), id="help-title")
+        yield MarkdownViewer(self.text, show_table_of_contents=False, id="help-viewer")
         yield Footer()
+
+    def _title(self) -> str:
+        other = "Approach" if self.current == "Usage" else "Usage"
+        return f"[b]{self.current}[/b] · Tab: {other}"
+
+    def action_switch(self) -> None:
+        self.current = "Approach" if self.current == "Usage" else "Usage"
+        self.text = self.texts[self.current]
+        self.query_one("#help-title", Static).update(self._title())
+        self.query_one("#help-viewer", MarkdownViewer).document.update(self.text)
 
 
 class ToolsScreen(ModalScreen[None]):
@@ -284,10 +320,17 @@ class AgentsApp(App[None]):
         self._rebuild()
         self._detect()
 
-    @work(thread=True, exclusive=True, group="detect")
+    @work(thread=True, exclusive=True, group="detect", exit_on_error=False)
     def _detect(self) -> None:
         tools = detect_tools(self.home)
-        self.call_from_thread(self._apply_tools, tools)
+        self._thread_call(self._apply_tools, tools)
+
+    def _thread_call(self, callback: Any, *args: Any) -> None:
+        """call_from_thread that survives the app having closed meanwhile."""
+        try:
+            self.call_from_thread(callback, *args)
+        except RuntimeError:
+            pass
 
     def _apply_tools(self, tools: list[ToolInfo]) -> None:
         self.tools = tools
@@ -318,7 +361,7 @@ class AgentsApp(App[None]):
         selected = self._selected_key()
         table.clear()
         for agent in self.agents:
-            mode = mode_label(agent) + (" edited" if agent.hash_ok is False else "")
+            mode = mode_label(agent)
             table.add_row(
                 Text(agent.name),
                 self._tool_cell(_tool_id(agent)),
@@ -429,20 +472,25 @@ class AgentsApp(App[None]):
         action, value = result
         self._write(action, name, value)
 
-    @work(thread=True, group="write")
+    @work(thread=True, group="write", exit_on_error=False)
     def _write(self, action: str, name: str, value: str) -> None:
+        warning: str | None = None
         try:
             if action == "adopt":
                 done = adopt(name, self.home)
                 message = f"Adopted {name}." if done else f"{name} is already adopted."
             else:
+                template = next((a.template for a in self.agents if a.name == name), None)
                 check = set_model(name, value, self.home)
+                warning = model_warning(template, value) if template else None
                 message = f"{name}: model set to {value}" + (" (unverified)" if check.status == "unverified" else "")
         except SupervisorError as exc:
-            self.call_from_thread(self.notice, str(exc), True)
+            self._thread_call(self.notice, str(exc), True)
             return
-        self.call_from_thread(self.notice, message)
-        self.call_from_thread(self.action_refresh)
+        self._thread_call(self.notice, message)
+        if warning:
+            self._thread_call(self.notice, warning, True)
+        self._thread_call(self.action_refresh)
 
     def action_new(self) -> None:
         self.push_screen(NewScreen(), self._created)
@@ -451,15 +499,15 @@ class AgentsApp(App[None]):
         if result is not None:
             self._create(*result)
 
-    @work(thread=True, group="write")
+    @work(thread=True, group="write", exit_on_error=False)
     def _create(self, tool: str, name: str) -> None:
         try:
             created = new_agent(tool, name, home=self.home)
         except SupervisorError as exc:
-            self.call_from_thread(self.notice, str(exc), True)
+            self._thread_call(self.notice, str(exc), True)
             return
-        self.call_from_thread(self.notice, f"Created {created.path.name} ({created.model_status} model).")
-        self.call_from_thread(self.action_refresh)
+        self._thread_call(self.notice, f"Created {created.path.name} ({created.model_status} model).")
+        self._thread_call(self.action_refresh)
 
     def action_tools(self) -> None:
         self.push_screen(ToolsScreen(self.tools, self.home))

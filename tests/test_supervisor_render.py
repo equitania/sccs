@@ -34,7 +34,8 @@ def test_rendered_template_round_trips(t):
     meta, body = parsed.metadata, parsed.body
     assert detect_shape(body) == t and meta["model"] == "haiku" and meta["tools"] == "Bash, Read"
     assert meta["name"] == "x-worker"
-    assert meta["sccs"] == {"managed": True, "template": t, "template_version": 1, "hash": body_hash(body, t)}
+    version = 2 if t == "codex" else 1
+    assert meta["sccs"] == {"managed": True, "template": t, "template_version": version, "hash": body_hash(body, t)}
     s, e = find_model_token(body, t)
     assert body[s:e] == MODEL[t]
     assert "{{" not in text
@@ -57,9 +58,10 @@ def test_description_override_is_valid_yaml():
 
 def test_codex_command_block_exact():
     assert command_block(render_template("codex", "c", "gpt-5.5")) == (
-        "OUT=$(mktemp -t codex-worker)\n"
-        'timeout 900 codex exec -s read-only --ephemeral -m gpt-5.5 -o "$OUT" "<PROMPT>" </dev/null >/dev/null 2>&1\n'
-        'echo "exit $?"; cat "$OUT"'
+        'OUT=$(mktemp "${TMPDIR:-/tmp}/codex-worker.XXXXXX")\n'
+        "timeout 900 codex exec -s read-only --ephemeral -m gpt-5.5 "
+        '-o "$OUT" "<PROMPT>" </dev/null >/dev/null 2>"$OUT.err"\n'
+        'echo "exit $?"; cat "$OUT"; tail -n 20 "$OUT.err"'
     )
 
 
@@ -139,3 +141,23 @@ def test_excludes_keep_other_keys_and_write_backup(tmp_path, monkeypatch):
     raw = yaml.safe_load(cfg.read_text())
     assert raw["opencode"] == {"model_map": {"a": "b"}, "exclude": ["old", "w"]}
     assert raw["codex"]["exclude"] == ["w"] and raw["pi"]["exclude"] == ["w"]
+
+
+def test_new_with_malformed_config_raises_and_writes_no_agent(fake_home, empty_path, tmp_path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("a: [unclosed\n")
+    with pytest.raises(SupervisorError):
+        new_agent("agy", "w", model="gemini-x", home=fake_home, config_path=bad)
+    assert not (fake_home / ".claude" / "agents" / "w.md").exists()
+
+
+def test_new_rolls_back_agent_file_when_exclude_write_fails(fake_home, empty_path, cfg, monkeypatch):
+    from sccs.config.loader import ConfigWriteError
+
+    def boom(*_a, **_k):
+        raise ConfigWriteError("disk full")
+
+    monkeypatch.setattr("sccs.supervisor.render.add_supervisor_excludes", boom)
+    with pytest.raises(SupervisorError, match="disk full"):
+        new_agent("agy", "w", model="gemini-x", home=fake_home, config_path=cfg)
+    assert not (fake_home / ".claude" / "agents" / "w.md").exists()

@@ -51,6 +51,8 @@ def mode_label(agent: AgentInfo) -> str:
         label = "read-only (not adopted)"
     else:
         label = "read-only"
+    if agent.managed != "no" and agent.hash_ok is False:
+        label += " (edited)"
     return label + " \u20ac" if agent.template == "opencode" else label
 
 
@@ -165,19 +167,25 @@ def _plugin_agents(home: Path) -> list[AgentInfo]:
     try:
         data: Any = json.loads((home / ".claude" / "plugins" / "installed_plugins.json").read_text(encoding="utf-8"))
         entries = data["plugins"][_CODEX_PLUGIN_KEY]
-        install_paths = [Path(e["installPath"]) for e in entries if isinstance(e, dict) and e.get("installPath")]
+        usable = [e for e in entries if isinstance(e, dict) and e.get("installPath")]
+        usable.sort(key=lambda e: e.get("scope") != "user")  # stable: user scope first
+        install_paths = [Path(e["installPath"]) for e in usable]
     except (OSError, ValueError, KeyError, TypeError):
         return []
     if not install_paths:
         return []
     codex_model = codex_default_model(home)
     found: list[AgentInfo] = []
+    seen: set[str] = set()
     for install in install_paths:
         try:
             files = sorted((install / "agents").glob("*.md"))
         except OSError:
             continue
         for file in files:
+            if file.stem in seen:
+                continue
+            seen.add(file.stem)
             found.append(AgentInfo(f"codex:{file.stem}", file, "plugin", None, "no", codex_model, None, False))
     return found
 

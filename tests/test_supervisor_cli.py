@@ -159,3 +159,35 @@ def test_no_textual_import(fake_home):
     env = dict(os.environ, HOME=str(fake_home), USERPROFILE=str(fake_home))
     proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_new_with_malformed_config_json_error_envelope(fake_home, empty_path, tmp_path, monkeypatch):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("a: [unclosed\n")
+    monkeypatch.setenv("SCCS_CONFIG", str(bad))
+    result = _run("new", "agy", "w", "--model", "gemini-x", "--json")
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.output)["success"] is False
+    assert not (fake_home / ".claude" / "agents" / "w.md").exists()
+
+
+def test_new_opencode_free_model_warns(fake_home, empty_path):
+    result = _run("new", "opencode", "w", "--model", "opencode/big-free", "--json")
+    assert result.exit_code == 0, result.output
+    assert "unclear data policy" in json.loads(result.output)["warning"]
+    plain = _run("new", "opencode", "w2", "--model", "opencode/big-free")
+    assert "unclear data policy" in _plain(plain.output)
+
+
+def test_set_model_free_opencode_model_warns(fake_home, empty_path):
+    write_agent(fake_home, "ocw", FIX("opencode-worker.md"))
+    assert _run("adopt", "ocw", "--yes").exit_code == 0
+    result = _run("set-model", "ocw", "opencode/big-free", "--json")
+    assert result.exit_code == 0, result.output
+    assert "unclear data policy" in json.loads(result.output)["warning"]
+
+
+def test_tools_table_escapes_markup(fake_home, fake_bin):
+    fake_bin("agy", "[bold]9.9[/bold]")
+    out = _plain(_run("tools").output)
+    assert "[bold]9.9[/bold]" in out

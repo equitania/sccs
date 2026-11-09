@@ -9,7 +9,9 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal
 
-from sccs.config.loader import add_supervisor_excludes
+import yaml
+
+from sccs.config.loader import add_supervisor_excludes, load_raw_user_data
 from sccs.convert.frontmatter import parse_frontmatter_ex
 from sccs.supervisor import SupervisorError
 from sccs.supervisor.models import check_model, list_models
@@ -25,6 +27,24 @@ DEFAULT_MODELS: dict[str, str] = {
 }
 _TOOL_FOR_TEMPLATE: dict[str, ToolId] = {"agy": "agy", "opencode": "opencode", "codex": "codex"}
 _DESCRIPTION_LINE = re.compile(r"^description: .*$", re.MULTILINE)
+
+
+def preflight_config(config_path: Path | None = None) -> None:
+    """Fail early (before any agent file is written) when config.yaml cannot be edited."""
+    try:
+        raw = load_raw_user_data(config_path)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise SupervisorError(f"config.yaml cannot be read, nothing was written: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise SupervisorError("config.yaml is not a mapping, nothing was written.")
+
+
+def add_excludes(name: str, config_path: Path | None = None) -> bool:
+    """``add_supervisor_excludes`` with every config failure turned into a SupervisorError."""
+    try:
+        return add_supervisor_excludes(name, config_path)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise SupervisorError(f"Could not record the export excludes in config.yaml: {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -83,9 +103,14 @@ def new_agent(
     if not check.ok:
         raise SupervisorError(f"Model '{chosen}' refused: {check.reason}")
 
+    preflight_config(config_path)
     content = render_template(template, name, chosen)  # type: ignore[arg-type]
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(target, content)
-    added = add_supervisor_excludes(name, config_path)
+    try:
+        added = add_excludes(name, config_path)
+    except SupervisorError as exc:
+        target.unlink(missing_ok=True)  # roll back the file this call just created
+        raise SupervisorError(f"{exc} The new agent file was removed again.") from exc
     status: Literal["verified", "unverified"] = "verified" if check.status == "verified" else "unverified"
     return NewResult(path=target, model_status=status, excludes_added=added)

@@ -186,3 +186,30 @@ def test_find_model_token_in_raw_crlf_file_text():
     s, e = find_model_token_in_file_text(lf, "agy")  # type: ignore[misc]
     assert lf[s:e] == "gemini-4-argon-high"
     assert find_model_token_in_file_text("no frontmatter\n", "agy") is None
+
+
+def test_codex_plugin_with_two_install_paths_yields_one_agent(tmp_path):
+    import json
+
+    for scope in ("a", "b"):
+        (tmp_path / "plug" / scope / "agents").mkdir(parents=True)
+        agent_file = tmp_path / "plug" / scope / "agents" / "codex-rescue.md"
+        agent_file.write_text("---\nname: x\n---\nb\n", encoding="utf-8")
+    index = tmp_path / ".claude" / "plugins" / "installed_plugins.json"
+    index.parent.mkdir(parents=True)
+    entries = [
+        {"scope": "project", "installPath": str(tmp_path / "plug" / "a")},
+        {"scope": "user", "installPath": str(tmp_path / "plug" / "b")},
+    ]
+    index.write_text(json.dumps({"plugins": {"codex@openai-codex": entries}}), encoding="utf-8")
+    found = [a for a in scan_agents(tmp_path, None) if a.source == "plugin"]
+    assert [a.name for a in found] == ["codex:codex-rescue"]
+    assert found[0].path == tmp_path / "plug" / "b" / "agents" / "codex-rescue.md"
+
+
+def test_mode_label_marks_edited_managed_agents():
+    from sccs.supervisor.wrappers import AgentInfo, mode_label
+
+    base = {"name": "w", "path": None, "source": "user", "template": "agy", "cli_model": "m", "excluded": False}
+    assert mode_label(AgentInfo(managed="new", hash_ok=False, **base)) == "read-only (edited)"
+    assert mode_label(AgentInfo(managed="new", hash_ok=True, **base)) == "read-only"

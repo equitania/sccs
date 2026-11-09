@@ -37,7 +37,7 @@ class ModelCheck:
 
 def _parse_lines(raw: str) -> tuple[str, ...]:
     lines = (_ANSI.sub("", line).strip() for line in raw.splitlines())
-    return tuple(line for line in lines if line)
+    return tuple(dict.fromkeys(line for line in lines if line))
 
 
 def _pi_models(home: Path) -> tuple[str, ...] | None:
@@ -87,3 +87,13 @@ def check_model(template: str, model: str, available: ModelList) -> ModelCheck:
     if model not in available.models:
         return ModelCheck(False, "rejected", "model is not offered by the tool")
     return ModelCheck(True, "verified", None)
+
+
+FREE_MODEL_WARNING = "Free opencode/* models have an unclear data policy \u2014 not for code with customer data."
+
+
+def model_warning(template: str, model: str) -> str | None:
+    """Warning text for models with an unclear data policy (free ``opencode/*``), else None."""
+    if template == "opencode" and model.startswith("opencode/"):
+        return FREE_MODEL_WARNING
+    return None

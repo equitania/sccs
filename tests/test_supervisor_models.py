@@ -95,3 +95,17 @@ def test_agy_nonzero_exit_gives_unreadable_list(fake_home, fake_bin):
     fake_bin("agy", stdout="Error: not logged in", exit_code=1)
     ml = list_models("agy", fake_home)
     assert ml.readable is False and ml.models == ()
+
+
+def test_parse_lines_deduplicates_preserving_order():
+    from sccs.supervisor.models import _parse_lines
+
+    assert _parse_lines("b\na\nb\n\na\nc\n") == ("b", "a", "c")
+
+
+def test_model_warning_only_for_free_opencode_models():
+    from sccs.supervisor.models import model_warning
+
+    assert "unclear data policy" in model_warning("opencode", "opencode/big-free")
+    assert model_warning("opencode", "openrouter/x") is None
+    assert model_warning("agy", "opencode/x") is None

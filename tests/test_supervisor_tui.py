@@ -201,3 +201,40 @@ async def test_closing_picker_while_models_load_does_not_crash(fake_home, monkey
         assert app.is_running
         assert not isinstance(app.screen, ModelScreen)
     assert before == {p: p.read_bytes() for p in (fake_home / ".claude" / "agents").glob("*.md")}
+
+
+@arun
+async def test_two_plugin_install_paths_do_not_crash_tui(fake_home):
+    other = fake_home / "plugins" / "codex2"
+    (other / "agents").mkdir(parents=True)
+    (other / "agents" / "codex-rescue.md").write_text("---\nname: codex-rescue\n---\nbody\n", encoding="utf-8")
+    index = fake_home / ".claude" / "plugins" / "installed_plugins.json"
+    data = json.loads(index.read_text())
+    data["plugins"]["codex@openai-codex"].append({"scope": "project", "installPath": str(other)})
+    index.write_text(json.dumps(data), encoding="utf-8")
+    app = AgentsApp(home=fake_home)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await _ready(app, pilot)
+        assert _names(app).count("codex:codex-rescue") == 1
+
+
+@arun
+async def test_help_screen_switches_to_approach_document(fake_home):
+    app = AgentsApp(home=fake_home)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await _ready(app, pilot)
+        await pilot.press("question_mark")
+        await pilot.pause()
+        usage = app.screen.text
+        await pilot.press("tab")
+        await pilot.pause()
+        assert app.screen.current == "Approach"
+        assert app.screen.text != usage and "not available" not in app.screen.text
+
+
+def test_explain_text_for_codex_and_opencode_does_not_claim_inline_material():
+    from sccs.supervisor.tui import _EXPLAIN
+
+    assert "material inline" not in _EXPLAIN["codex"]
+    assert "material inline" not in _EXPLAIN["opencode"]
+    assert "material inline" in _EXPLAIN["agy"]

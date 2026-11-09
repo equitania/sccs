@@ -33,7 +33,7 @@ sccs agents set-model <name> <modell>    # Modell eines verwalteten Wrappers än
 | Enter oder `m` | Modell wählen (aus der echten Modellliste des Werkzeugs) bzw. einen nicht übernommenen Wrapper übernehmen |
 | `n` | neuen Wrapper anlegen |
 | `w` | Werkzeug-Ansicht: Version, Login, Standardmodell, Config-Pfad, Hinweis auf `sccs doctor` |
-| `?` | diese Anleitung |
+| `?` | diese Anleitung; mit `Tab` wechselt die Hilfe zwischen „Anleitung“ und „Vorgehen“ |
 | `r` | neu einlesen |
 | `q` | beenden |
 
@@ -76,10 +76,10 @@ Neu angelegte Agenten sieht eine bereits laufende Claude-Code-Sitzung nicht: ein
 - **Codex' eigene Sandbox ist nicht nono.** Ein `EPERM` auf `/tmp/xcrun_db…` in einem Codex-Lauf ist Codex' `read-only`-Sandbox bei der Arbeit. Weglassen, mit lesenden Mitteln weitermachen; keinen Neustart der nono-Sitzung verlangen.
 - **Gemini braucht das Material im Prompt.** Headless kann Antigravity keine Rückfrage stellen; jeder Befehl außerhalb der Erlaubnisliste wird abgelehnt, und der Lauf endet mit `jetski: no output produced`. Der Wrapper legt deshalb den Diff oder die Auszüge in den Prompt. Taucht diese Meldung auf, fehlte Material.
 - **OpenCode kostet OpenRouter-Guthaben** pro Aufruf (Markierung `€`). Ein Fehler zu Guthaben oder Anmeldung wird gemeldet, nicht mit einem anderen Anbieter wiederholt.
-- **Kostenlose `opencode/*`-Modelle nicht für Kundendaten.** Die Datenrichtlinie ist unklar; der Wrapper reicht es auf Wunsch durch, sagt das aber in seiner Antwort.
+- **Kostenlose `opencode/*`-Modelle nicht für Kundendaten.** Die Datenrichtlinie ist unklar; der Wrapper reicht es auf Wunsch durch, sagt das aber in seiner Antwort. `new` und `set-model` (CLI und Ansicht) warnen bei einem solchen Modell: „Free opencode/* models have an unclear data policy — not for code with customer data.“
 - **Ein Gemini-Wrapper bleibt bei Gemini.** Antigravity verkauft auch Claude- und GPT-Modelle weiter; auf eines davon auszuweichen wäre Selbstreview. Geht kein Gemini-Modell, meldet der Wrapper das und hört auf. Dieselbe Regel steht hinter `sccs capacity`.
 - **Ein neuer Agent braucht einen Neustart von Claude Code** (siehe oben).
-- **Anmelden** muss man in jedem Werkzeug selbst (`agy`, `codex login`, `opencode auth login`); die Ansicht zeigt nur den Zustand. Auth-Dateien werden auf Vorhandensein geprüft, nie gelesen.
+- **Anmelden** muss man in jedem Werkzeug selbst (`agy`, `codex login`, `opencode auth login`); die Ansicht zeigt nur den Zustand. Auth-Dateien werden auf Vorhandensein geprüft, nie gelesen: eine vorhandene Datei ergibt `yes`, eine fehlende `unknown` (die Anmeldung kann auch im Schlüsselbund oder in Umgebungsvariablen liegen).
 
 ---
 
@@ -110,7 +110,7 @@ sccs agents set-model <name> <model>     # change a managed wrapper's model
 | Enter or `m` | pick a model (from the tool's real model list), or adopt a wrapper that is not adopted yet |
 | `n` | create a new wrapper |
 | `w` | tools view: version, login, default model, config path, pointer to `sccs doctor` |
-| `?` | this guide |
+| `?` | this guide; `Tab` switches the help between “Usage” and “Approach” |
 | `r` | reload |
 | `q` | quit |
 
@@ -153,7 +153,7 @@ A Claude Code session that was already running does not see newly created agents
 - **Codex' own sandbox is not nono.** An `EPERM` on `/tmp/xcrun_db…` inside a Codex run is Codex' `read-only` sandbox doing its job. Skip it and carry on with reading tools; do not ask for a restart of the nono session.
 - **Gemini needs the material in the prompt.** Headless, Antigravity cannot ask for permission; every command outside the allowlist is denied and the run ends with `jetski: no output produced`. The wrapper therefore puts the diff or the excerpts into the prompt. If you see that message, material was missing.
 - **OpenCode costs OpenRouter credit** per call (marked `€`). An error about credit or login is reported, not retried with another provider.
-- **Free `opencode/*` models are not for customer data.** Their data policy is unclear; the wrapper passes it on if asked, but says so in its answer.
+- **Free `opencode/*` models are not for customer data.** Their data policy is unclear; the wrapper passes it on if asked, but says so in its answer. `new` and `set-model` (CLI and view) warn about such a model: “Free opencode/* models have an unclear data policy — not for code with customer data.”
 - **A Gemini wrapper stays on Gemini.** Antigravity also resells Claude and GPT models; falling back to one of them would be a self-review. If no Gemini model works, the wrapper says so and stops. The same rule stands behind `sccs capacity`.
 - **A new agent needs a Claude Code restart** (see above).
-- **Logging in** is done in each tool itself (`agy`, `codex login`, `opencode auth login`); the view only shows the state. Auth files are checked for presence and never read.
+- **Logging in** is done in each tool itself (`agy`, `codex login`, `opencode auth login`); the view only shows the state. Auth files are checked for presence and never read: a present file gives `yes`, an absent one `unknown` (credentials may also live in a keyring or environment variables).

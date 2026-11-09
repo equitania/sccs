@@ -10,10 +10,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from sccs.config.loader import add_supervisor_excludes
 from sccs.convert.frontmatter import parse_frontmatter_ex
 from sccs.supervisor import SupervisorError
 from sccs.supervisor.models import ModelCheck, check_model, list_models
+from sccs.supervisor.render import add_excludes, preflight_config
 from sccs.supervisor.tools import ToolId
 from sccs.supervisor.wrappers import AgentInfo, TemplateId, body_hash, find_model_token_in_file_text, scan_agents
 from sccs.utils.paths import atomic_write
@@ -111,6 +111,7 @@ def adopt(name: str, home: Path | None = None, config_path: Path | None = None) 
     if close is None:
         raise SupervisorError(f"'{name}' has no frontmatter; cannot adopt.")
     offset, eol = close
+    preflight_config(config_path)
     digest = body_hash(_body_of(text), info.template)
     marker = eol.join(
         [
@@ -123,5 +124,9 @@ def adopt(name: str, home: Path | None = None, config_path: Path | None = None) 
         ]
     )
     _write_raw(info.path, text[:offset] + marker + eol + text[offset:])
-    add_supervisor_excludes(name, config_path)
+    try:
+        add_excludes(name, config_path)
+    except SupervisorError as exc:
+        _write_raw(info.path, text)  # restore the original bytes
+        raise SupervisorError(f"{exc} The agent file was restored.") from exc
     return True

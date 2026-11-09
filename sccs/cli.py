@@ -633,6 +633,7 @@ def agents_tools(ctx: click.Context, output_json: bool) -> None:
     if output_json:
         emit_json({"tools": tools})
         return
+    from rich.markup import escape
     from rich.table import Table
 
     table = Table(title="Agent CLIs", show_header=True, header_style="bold")
@@ -642,9 +643,9 @@ def agents_tools(ctx: click.Context, output_json: bool) -> None:
         table.add_row(
             t.label,
             "yes" if t.installed else "no",
-            t.version or "unknown",
+            escape(t.version or "unknown"),
             t.login,
-            t.default_model or "unknown",
+            escape(t.default_model or "unknown"),
         )
     ctx.obj["console"].print(table)
 
@@ -685,19 +686,24 @@ def _print_model_status(console, status: str, reason: str | None = None) -> None
 @click.pass_context
 def agents_set_model(ctx: click.Context, name: str, model: str, output_json: bool) -> None:
     """Change the model of a managed wrapper agent."""
-    from sccs.supervisor import SupervisorError, set_model
+    from sccs.supervisor import SupervisorError, scan_agents, set_model
+    from sccs.supervisor.models import model_warning
 
     try:
+        template = next((a.template for a in scan_agents() if a.name == name), None)
         check = set_model(name, model)
     except SupervisorError as exc:
         _agents_fail(str(exc), output_json)
         return
+    warning = model_warning(template, model) if template else None
     if output_json:
-        emit_json({"success": True, "name": name, "model": model, "status": check.status})
+        emit_json({"success": True, "name": name, "model": model, "status": check.status, "warning": warning})
         return
     console = ctx.obj["console"]
     console.print_success(f"{name}: model set to {model}")
     _print_model_status(console, check.status)
+    if warning:
+        console.print_warning(warning)
 
 
 @agents.command("new")
@@ -709,6 +715,7 @@ def agents_set_model(ctx: click.Context, name: str, model: str, output_json: boo
 def agents_new(ctx: click.Context, tool: str, name: str, model: str | None, output_json: bool) -> None:
     """Create a read-only wrapper agent for an agent CLI in ~/.claude/agents."""
     from sccs.supervisor import SupervisorError
+    from sccs.supervisor.models import model_warning
     from sccs.supervisor.render import new_agent
 
     try:
@@ -716,6 +723,7 @@ def agents_new(ctx: click.Context, tool: str, name: str, model: str | None, outp
     except SupervisorError as exc:
         _agents_fail(str(exc), output_json)
         return
+    warning = model_warning(tool, model) if model else None
     if output_json:
         emit_json(
             {
@@ -724,12 +732,15 @@ def agents_new(ctx: click.Context, tool: str, name: str, model: str | None, outp
                 "path": result.path,
                 "model_status": result.model_status,
                 "excludes_added": result.excludes_added,
+                "warning": warning,
             }
         )
         return
     console = ctx.obj["console"]
     console.print_success(f"Created {result.path}")
     _print_model_status(console, result.model_status)
+    if warning:
+        console.print_warning(warning)
 
 
 @agents.command("adopt")

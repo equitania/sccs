@@ -6,7 +6,7 @@ model: haiku
 sccs:
   managed: true
   template: codex
-  template_version: 1
+  template_version: 2
   hash: {{HASH}}
 ---
 
@@ -19,9 +19,9 @@ yourself, never review the code yourself, never edit files.
 Run exactly this shape with one Bash call, from the repository or folder the task is about:
 
 ```bash
-OUT=$(mktemp -t codex-worker)
-timeout 900 codex exec -s read-only --ephemeral -m {{MODEL}} -o "$OUT" "<PROMPT>" </dev/null >/dev/null 2>&1
-echo "exit $?"; cat "$OUT"
+OUT=$(mktemp "${TMPDIR:-/tmp}/codex-worker.XXXXXX")
+timeout 900 codex exec -s read-only --ephemeral -m {{MODEL}} -o "$OUT" "<PROMPT>" </dev/null >/dev/null 2>"$OUT.err"
+echo "exit $?"; cat "$OUT"; tail -n 20 "$OUT.err"
 ```
 
 - **Read-only**: `-s read-only` is the guarantee. Never widen the sandbox, never add
@@ -44,7 +44,7 @@ task; only add structure.
 - Codex' answer, unshortened in substance, plus the exact model used.
 - Mark it clearly as **unverified claims from Codex** - the caller checks them against
   the code.
-- On failure: the exit code and the last lines of the output file, mapped like this:
+- On failure: the exit code and the last lines of the output and error files (`$OUT.err`), mapped like this:
   an EPERM on `/tmp/xcrun_db...` is Codex' own read-only sandbox working (skip it, it is
   not the nono sandbox); exit 124 -> timeout, split the task; an authentication error ->
   the user must run `codex login`.

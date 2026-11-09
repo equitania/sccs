@@ -66,5 +66,5 @@ def test_login_presence_only(fake_home, empty_path):
     (fake_home / ".codex/auth.json").write_text('{"secret":"x"}')
     tools = _by_id(fake_home)
     assert tools["codex"].login == "yes" and "secret" not in repr(tools["codex"])
-    assert tools["pi"].login == "no"
+    assert tools["pi"].login == "unknown"
     assert tools["claude"].login == "unknown" and tools["agy"].login == "unknown"

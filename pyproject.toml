@@ -78,6 +78,7 @@ packages = ["sccs"]
 [tool.hatch.build.targets.wheel.force-include]
 "usage/AGENT.md" = "sccs/data/AGENT.md"
 "docs/usage/agents.md" = "sccs/data/agents.md"
+"docs/architecture.md" = "sccs/data/architecture.md"
 
 [tool.ruff]
 line-length = 120

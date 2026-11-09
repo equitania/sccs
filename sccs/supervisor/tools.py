@@ -15,7 +15,7 @@ from typing import Any, Literal
 from sccs.doctor.runner import run_tool_version, which
 
 ToolId = Literal["claude", "codex", "opencode", "agy", "pi"]
-Login = Literal["yes", "no", "unknown"]
+Login = Literal["yes", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -89,7 +89,8 @@ def detect_tools(home: Path | None = None) -> list[ToolInfo]:
         if spec.auth is None:
             login: Login = "unknown"
         else:
-            login = "yes" if (base / spec.auth).exists() else "no"
+            # Credentials may also live in a keyring or env vars: an absent file proves nothing.
+            login = "yes" if (base / spec.auth).exists() else "unknown"
         result.append(
             ToolInfo(
                 id=spec.id,

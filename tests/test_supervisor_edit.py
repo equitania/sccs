@@ -169,3 +169,30 @@ def test_crlf_bom_preserved(fake_home, cfg, opencode_models_readable, bom):
     info = scan(fake_home, "opencode-worker")
     assert info.cli_model == NEW and info.hash_ok is True
     assert after.count(NEW.encode()) == 1  # only the command's token changed
+
+
+def test_adopt_with_malformed_config_leaves_file_byte_identical(fake_home, tmp_path):
+    write_agent(fake_home, "ocw", FIX("opencode-worker.md"))
+    path = fake_home / ".claude" / "agents" / "ocw.md"
+    before = path.read_bytes()
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("a: [unclosed\n")
+    with pytest.raises(SupervisorError):
+        adopt("ocw", fake_home, bad)
+    assert path.read_bytes() == before
+
+
+def test_adopt_restores_file_when_exclude_write_fails(fake_home, cfg, monkeypatch):
+    from sccs.config.loader import ConfigWriteError
+
+    write_agent(fake_home, "ocw", FIX("opencode-worker.md"))
+    path = fake_home / ".claude" / "agents" / "ocw.md"
+    before = path.read_bytes()
+
+    def boom(*_a, **_k):
+        raise ConfigWriteError("disk full")
+
+    monkeypatch.setattr("sccs.supervisor.render.add_supervisor_excludes", boom)
+    with pytest.raises(SupervisorError, match="disk full"):
+        adopt("ocw", fake_home, cfg)
+    assert path.read_bytes() == before
