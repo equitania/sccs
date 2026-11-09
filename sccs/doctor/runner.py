@@ -342,6 +342,15 @@ def run_opencode_models() -> str:
     return proc.stdout or ""
 
 
+def run_agy_models() -> str:
+    """Return raw stdout of `agy models`. Empty on failure."""
+    try:
+        proc = _run(["agy", "models"], timeout=30, check=False)
+    except DoctorError:
+        return ""
+    return proc.stdout or ""
+
+
 def parse_node_major(version: str | None) -> int | None:
     """Extract the major version integer from a 'X.Y.Z' string."""
     if not version:
