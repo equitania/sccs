@@ -7,6 +7,7 @@ class SupervisorError(Exception):
     """Raised for refused or impossible supervisor operations."""
 
 
+from sccs.supervisor.edit import adopt, set_model  # noqa: E402
 from sccs.supervisor.models import MODEL_PATTERN, ModelCheck, ModelList, check_model, list_models  # noqa: E402
 from sccs.supervisor.tools import ToolId, ToolInfo, codex_default_model, detect_tools  # noqa: E402
 from sccs.supervisor.wrappers import (  # noqa: E402
@@ -28,6 +29,7 @@ __all__ = [
     "TemplateId",
     "ToolId",
     "ToolInfo",
+    "adopt",
     "body_hash",
     "check_model",
     "codex_default_model",
@@ -37,4 +39,5 @@ __all__ = [
     "find_model_token_in_file_text",
     "list_models",
     "scan_agents",
+    "set_model",
 ]
