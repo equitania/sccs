@@ -8,6 +8,8 @@
 
 ## Deutsch
 
+Einrichtung Schritt für Schritt mit mehreren Anbietern: [usage/multi-provider-agents.de.md](../../usage/multi-provider-agents.de.md)
+
 Ein interaktives Claude-Code-Fenster arbeitet als **Supervisor**: Es gibt Reviews, zweite Meinungen und begrenzte Analysen an andere KI-CLIs ab (Codex, Antigravity/Gemini, OpenCode/Kimi) und prüft jeden zurückgekommenen Befund selbst am Code. Die Brücke sind kleine **Wrapper-Agenten** in `~/.claude/agents/`, die nur einen CLI-Aufruf weiterreichen. `sccs agents` richtet diese Wrapper ein und hält sie in Ordnung.
 
 **`sccs agents` ist reine Konfiguration.** Es startet, verteilt oder überwacht keine Agentenarbeit, installiert keine CLIs (das macht `sccs doctor`) und meldet nirgends an (das macht jedes Werkzeug selbst).
@@ -84,6 +86,8 @@ Neu angelegte Agenten sieht eine bereits laufende Claude-Code-Sitzung nicht: ein
 ---
 
 ## English
+
+Step-by-step setup with several providers: [usage/multi-provider-agents.en.md](../../usage/multi-provider-agents.en.md)
 
 One interactive Claude Code window acts as the **supervisor**: it hands reviews, second opinions and bounded analyses to other AI CLIs (Codex, Antigravity/Gemini, OpenCode/Kimi) and then checks every returned finding against the code itself. The bridge is a set of small **wrapper agents** in `~/.claude/agents/` that only forward one CLI call. `sccs agents` sets those wrappers up and keeps them tidy.
 

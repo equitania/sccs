@@ -401,6 +401,7 @@ sccs config show               # current config; also: validate | edit | init [-
 - `docs/usage/transfer.md` — export/import (ZIP) use cases.
 - `docs/usage/deploy.md` — deploy profiles, bundle contents, ownership & revoke rules (DE/EN).
 - `docs/usage/agents.md` — `sccs agents`: supervisor wrappers, models, adopt, traps (DE/EN).
+- `usage/multi-provider-agents.en.md` / `.de.md` — numbered setup steps: install, log in, adopt/new, models, export exclusion, sync, first tasks.
 - `docs/usage/opencode.md` — model mapping & conversion rules.
 - `docs/usage/categories.md` · `docs/usage/platforms.md` · `docs/usage/cli-reference.md` — full reference.
 - Config: `~/.config/sccs/config.yaml` · env: `SCCS_CONFIG` (config path), `EDITOR`/`VISUAL` (merge/edit).
