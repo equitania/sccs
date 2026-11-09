@@ -170,3 +170,34 @@ def test_mode_label_values(fake_home):
     assert labels["codex:codex-rescue"] == "plugin"
     assert labels["opencode-worker"] == "read-only (not adopted) €"
     assert labels["antigravity-worker"] == "read-only (not adopted)"
+
+
+@arun
+async def test_closing_picker_while_models_load_does_not_crash(fake_home, monkeypatch):
+    import time
+
+    import sccs.supervisor.tui as tui
+
+    real = tui.list_models
+
+    def slow(*args, **kwargs):
+        time.sleep(0.3)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tui, "list_models", slow)
+    before = {p: p.read_bytes() for p in (fake_home / ".claude" / "agents").glob("*.md")}
+    app = AgentsApp(home=fake_home)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await _ready(app, pilot)
+        _select(app, "agent:opencode-worker")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ModelScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await asyncio.sleep(0.5)
+        await pilot.pause()
+        assert app.is_running
+        assert not isinstance(app.screen, ModelScreen)
+    assert before == {p: p.read_bytes() for p in (fake_home / ".claude" / "agents").glob("*.md")}

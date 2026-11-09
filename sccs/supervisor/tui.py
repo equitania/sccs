@@ -154,12 +154,17 @@ class ModelScreen(ModalScreen["tuple[str, str] | None"]):
         self.query_one("#model-input", Input).display = False
         self._load()
 
-    @work(thread=True, exclusive=True, group="models")
+    @work(thread=True, exclusive=True, group="models", exit_on_error=False)
     def _load(self) -> None:
         result = list_models(self.tool, self.home)  # type: ignore[arg-type]
-        self.app.call_from_thread(self._fill, result.models, result.readable)
+        try:
+            self.app.call_from_thread(self._fill, result.models, result.readable)
+        except RuntimeError:  # app already closed
+            pass
 
     def _fill(self, models: tuple[str, ...], readable: bool) -> None:
+        if not self.is_attached:  # picker was closed while the list was loading
+            return
         options = self.query_one("#models", OptionList)
         options.add_options([Option(Text(m), id=m) for m in models])
         if readable:
@@ -400,7 +405,7 @@ class AgentsApp(App[None]):
     # -- actions --------------------------------------------------------
     def notice(self, message: str, error: bool = False) -> None:
         self.last_notice = message
-        self.notify(message, severity="error" if error else "information")
+        self.notify(message, severity="error" if error else "information", markup=False)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         self.action_edit()
