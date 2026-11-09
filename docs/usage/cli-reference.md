@@ -20,6 +20,7 @@ finden sich themenspezifisch in den anderen Usage-Docs:
 - Profile & Statusline → [profiles.md](profiles.md)
 - OpenCode-Integration → [opencode.md](opencode.md)
 - Kapazitätssonde → [capacity.md](capacity.md)
+- Agent-Supervisor einrichten → [agents.md](agents.md)
 
 ```bash
 # Synchronisierung
@@ -158,6 +159,7 @@ in the other usage docs:
 - Profiles & statusline → [profiles.md](profiles.md)
 - OpenCode integration → [opencode.md](opencode.md)
 - Capacity probe → [capacity.md](capacity.md)
+- Agent supervisor setup → [agents.md](agents.md)
 
 ```bash
 # Synchronization

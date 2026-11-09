@@ -60,6 +60,14 @@ sccs/
 │   ├── zsh_templates.py  # zshrc/conveniences/README templates
 │   ├── claude_to_codex.py # CC → Codex conversion rules (model/effort map, sandbox_mode)
 │   └── toml_write.py     # Minimal TOML emitter for Codex agent files
+├── supervisor/           # `sccs agents`: configure supervisor wrappers (configuration only)
+│   ├── tools.py          # Detect claude/codex/opencode/agy/pi: installed, version, login presence, default model
+│   ├── models.py         # Per-tool model lists, MODEL_PATTERN validation (gemini-* for agy)
+│   ├── wrappers.py       # Scan ~/.claude/agents, recognise the thin wrapper shapes (agy, opencode, codex)
+│   ├── render.py         # Create new wrapper agents from templates/ (agy.md, opencode.md, codex.md; read-only)
+│   ├── edit.py           # Textual set-model and adopt (BOM/CRLF kept byte for byte)
+│   ├── tui.py            # Full-screen view (Textual; tool calls run in thread workers)
+│   └── templates/        # Wrapper templates (no Pi template yet)
 ├── docs/
 │   └── generator.py      # Hub README auto-generation
 ├── git/

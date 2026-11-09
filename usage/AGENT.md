@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.71.2  ·  **Python:** ≥3.11
+- **Version:** 2.73.0  ·  **Python:** ≥3.11
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -25,6 +25,9 @@
 - Ship a named, scenario-scoped bundle (skills/agents/commands/framework files/shell config) to a
   foreign host and later remove it again with verification (`sccs deploy`) — the bundle carries its
   own removal policy in the manifest, so the target needs no SCCS config at all.
+- Set up Claude Code as a supervisor that hands reviews to other agent CLIs (`sccs agents`): list the
+  CLIs and the wrapper agents in `~/.claude/agents`, pick models, create read-only wrappers, adopt
+  hand-written ones. Configuration only — it never starts or monitors agent work.
 - Report how much plan quota each orchestrated agent CLI has left (`sccs capacity`), with the
   provenance of every number, so a supervisor routes by remaining capacity instead of guessing.
 - "Doctor": inspect & repair a Claude Code environment (Node, `claude` CLI, plugins, npx tools,
@@ -46,6 +49,13 @@
 
 | Command | Purpose | Args / Flags |
 |---|---|---|
+| `sccs agents` | On a terminal: full-screen view (Textual: Enter/`m` model, `n` new, `w` tools, `?` help, `r` reload, `q` quit). Piped/scripted: prints the agent table. Configuration only. | — |
+| `sccs agents adopt` | Mark a hand-written wrapper as sccs-managed: asks once, inserts only an `sccs:` block into the frontmatter, rest of the file byte for byte; adds the name to `opencode.exclude`/`pi.exclude`/`codex.exclude`. | NAME, -y/--yes (required with --json), --json |
+| `sccs agents list` | The agent CLIs and the agents in `~/.claude/agents` with tool state, model and mode (`read-only`, `read-only (not adopted)`, `unmanaged`, `plugin`; `€` = costs OpenRouter credit). | --json |
+| `sccs agents models` | Models a tool itself reports (empty list when it cannot be read). | TOOL = claude\|codex\|opencode\|agy\|pi, --json |
+| `sccs agents new` | Create a read-only wrapper agent `~/.claude/agents/NAME.md` from the bundled template; never overwrites a file; restart Claude Code afterwards. | TOOL = agy\|opencode\|codex, NAME, --model TEXT, --json |
+| `sccs agents set-model` | Change the model of a managed wrapper (only the model in its command line; the wrapper's own `model:` stays). | NAME, MODEL, --json |
+| `sccs agents tools` | Which agent CLIs are installed, version, login presence, default model, config path. | --json |
 | `sccs capacity` | Remaining plan quota per agent CLI (codex from its session rollout, antigravity live via `agy -p "/usage"`, claude_code assumed), plus derived routing advice: image-generation target, independent reviewer, parallel-worker gate. | --json, --offline |
 | `sccs capability-card` | Print this capability card to stdout (raw Markdown, live version injected) — primary self-description surface for agents. | — |
 | `sccs categories disable` | Disable a category. | CATEGORY_NAME |
@@ -355,11 +365,20 @@ sccs config show               # current config; also: validate | edit | init [-
   (`item_pattern`, `include`, `exclude`) come from the user's `config.yaml` unchanged and need a
   one-off manual alignment; only the `settings_ensure` half catches up on its own.
 - **Platforms:** categories can be platform-gated (e.g. `fish_config` is macOS-only by default).
+- **`sccs agents` guardrails:** only reads, templates are read-only (no write/edit tools for the reviewer);
+  never starts agent work, installs CLIs (that is `doctor`) or logs in (each tool does that itself; auth
+  files are checked for presence, never read). Model names must match `[A-Za-z0-9._:/~][A-Za-z0-9._:/~-]*`
+  (no leading `-`, no newline) and are checked against the tool's own list; if the list cannot be read, a
+  well-formed name is accepted with a warning and shown as `unverified`. `agy` (Antigravity) accepts only
+  `gemini-*` — it also resells Claude/GPT models and a fallback to those would be a self-review. Free
+  `opencode/*` models warn: unclear data policy, not for customer code. Pi has no tested template
+  (`new pi` aborts with "Pi has no tested wrapper template yet."). Names: lowercase letters, digits, `-`.
+  Wrappers are kept out of the codex/opencode/pi exports (else they would call themselves there).
 
 ## Machine-readable outputs
 - **`--json`** (Core-First commands, single-line JSON on stdout via `click.echo`, never the ANSI Rich
   console): `status`, `categories list`, `config show`, `config validate`, `sync` (incl. `--dry-run`),
-  `diff`, `doctor check|install|update`, `profile on|off|list|status`, `statusline list|show|use`.
+  `diff`, `doctor check|install|update`, `profile on|off|list|status`, `statusline list|show|use`, `agents list|tools|models|set-model|new|adopt`.
   Implementation: `sccs/output/json_emit.py`. Use these for GUI/automation consumption instead of
   scraping the Rich text. `doctor check --json` carries `statusline_presets` (every known preset with
   `installed`/`is_active`/`is_configured`/`version`) next to the `status_lines` integrity check.
@@ -381,6 +400,7 @@ sccs config show               # current config; also: validate | edit | init [-
 - `docs/usage/profiles.md` — profiles, statusline presets, install safety (DE/EN).
 - `docs/usage/transfer.md` — export/import (ZIP) use cases.
 - `docs/usage/deploy.md` — deploy profiles, bundle contents, ownership & revoke rules (DE/EN).
+- `docs/usage/agents.md` — `sccs agents`: supervisor wrappers, models, adopt, traps (DE/EN).
 - `docs/usage/opencode.md` — model mapping & conversion rules.
 - `docs/usage/categories.md` · `docs/usage/platforms.md` · `docs/usage/cli-reference.md` — full reference.
 - Config: `~/.config/sccs/config.yaml` · env: `SCCS_CONFIG` (config path), `EDITOR`/`VISUAL` (merge/edit).
