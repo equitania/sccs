@@ -1,5 +1,15 @@
 # Release Notes
 
+## Version 2.73.0 (09.11.2026)
+
+### Added
+
+- **`sccs agents`: set up the multi-CLI reviewers from sccs.** A Claude Code session delegates reviews and second opinions to Codex, Antigravity (Gemini) and OpenCode (Kimi) through thin wrapper agents in `~/.claude/agents/`. `sccs agents` opens a full-screen view (Textual, now a regular dependency) with one row per agent: tool, version, login state, model and mode; `list`, `tools`, `models`, `set-model`, `new` and `adopt` do the same on the command line, each with `--json`. It is configuration only: nothing here starts, dispatches or monitors agent work.
+- **New wrappers are read-only.** Three bundled templates (Antigravity, OpenCode, Codex), each with that tool's read-only mechanism; there is no write-capable variant. Pi has no tested template yet and is refused with a hint. A model name is validated before it is written, because the wrapper runs its command line verbatim: a restricted character set, no leading `-`, and the `gemini-` prefix for Antigravity, so a Gemini reviewer never ends up on a Claude or GPT model.
+- **Adopt the hand-written wrappers once.** `sccs agents adopt` adds a small marker to the frontmatter and leaves the rest of the file byte for byte unchanged (CRLF and BOM included); `set-model` then edits only the model in the command line. Plugin agents and agents matching no template are shown and never written.
+- **Wrappers stay out of the other tools' export.** Creating or adopting a wrapper adds its name to `opencode.exclude`, `pi.exclude` and `codex.exclude` once, with a backup of `config.yaml`.
+- **Usage guide and approach.** [docs/usage/agents.md](docs/usage/agents.md) (German and English, also reachable with `?` in the view) covers setup, working with the supervisor, timeouts and the known traps; the reasoning is in the new architecture section „Supervisor and wrapper agents“.
+
 ## Version 2.72.3 (09.11.2026)
 
 ### Security

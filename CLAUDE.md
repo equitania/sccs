@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.72.3
+**Version**: 2.73.0
 
 ### Key Features
 
@@ -35,6 +35,7 @@ history lives in `RELEASE_NOTES.md`.
 - **Deployment profiles** (`sccs/deploy/`): `pre_existing` is sticky, foreign targets are never written or removed, ownership is keyed on the resolved target path, `RECEIPT_VERSION` is 2. → [Deploy](docs/development/maintainer-notes.md#deploy)
 - **Codex / Pi / OpenCode** (`sccs/integrations/`, `convert/`): skills go to `~/.agents/skills/`, hooks to `~/.codex/hooks.json` and never into `export-all`; `--replace-foreign` is not implied by `--overwrite`; the two frontmatter parsers stay different. → [Integrations](docs/development/maintainer-notes.md#integrations-codex-pi-opencode)
 - **Capacity probe** (`sccs/capacity/`): never invent a number; `unknown` ≠ `tight`; Gemini tight → Codex, never Antigravity on Claude. → [Capacity](docs/development/maintainer-notes.md#capacity)
+- **Supervisor wrappers** (`sccs/supervisor/`): the model is the only editable token and is validated (pattern, no leading `-`, `gemini-` for Antigravity); templates are read-only only; adoption inserts marker lines textually; `set-model` refreshes the hash only when it matched; plugin and unrecognised agents are never written; auth files presence-only; the core never imports Textual. → [Supervisor wrappers](docs/development/maintainer-notes.md#supervisor-wrappers-v2730)
 - **Converter literals** (`convert/`): fish single-quoted values stay literal; escape backticks and `$(` in double-quoted targets. → [Converters](docs/development/maintainer-notes.md#converters)
 
 ## Commands
