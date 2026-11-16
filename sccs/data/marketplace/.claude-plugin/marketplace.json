@@ -1,0 +1,12 @@
+{
+  "name": "sccs-mods",
+  "owner": { "name": "sccs" },
+  "metadata": { "description": "Claude Code mods bundled with sccs. Installed by `sccs doctor install` when listed under doctor.bundled_mods." },
+  "plugins": [
+    {
+      "name": "paste-lens",
+      "source": "./paste-lens",
+      "description": "Puts a long paste straight back into the prompt box instead of the collapsed [Pasted text #N] placeholder, so it can be read and edited before it is sent."
+    }
+  ]
+}

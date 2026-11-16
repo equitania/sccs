@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import questionary
 
 from sccs.doctor import scope_patch
+from sccs.doctor.bundled_mods import BundledModStatus, bundled_mod_actions
 from sccs.doctor.detectors import (
     BrowserBundleStatus,
     BundledSkillStatus,
@@ -1800,6 +1801,7 @@ def build_install_plan(
     cao_providers: list | None = None,
     statusline_presets: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
+    bundled_mods: list[BundledModStatus] | None = None,
     mirror: MirrorReport | None = None,
     include_optional: bool = False,
 ) -> InstallPlan:
@@ -1829,6 +1831,7 @@ def build_install_plan(
     # Orphan cleanup runs after the npx install rewrites the tool manifest.
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
     actions.extend(skill_package_install_actions(skill_packages, install_deps=install_deps))
+    actions.extend(bundled_mod_actions(bundled_mods))
     if bundled_skills:
         actions.extend(_bundled_skill_repair_actions(bundled_skills, npx_tools))
     if browser_bundles:
@@ -1869,6 +1872,7 @@ def build_update_plan(
     cli_tools: list[CliToolStatus] | None = None,
     cao_providers: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
+    bundled_mods: list[BundledModStatus] | None = None,
     mirror: MirrorReport | None = None,
 ) -> InstallPlan:
     """Plan an update pass: refresh installed plugins + npx tools, plus install missing ones.
@@ -1898,6 +1902,7 @@ def build_update_plan(
     # Orphan cleanup runs after the npx refresh rewrites the tool manifest.
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
     actions.extend(skill_package_update_actions(skill_packages, install_deps=install_deps))
+    actions.extend(bundled_mod_actions(bundled_mods))
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     actions.extend(_cli_tool_install_actions(cli_tools))
@@ -1931,6 +1936,7 @@ def build_optimize_plan(
     cli_tools: list[CliToolStatus] | None = None,
     cao_providers: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
+    bundled_mods: list[BundledModStatus] | None = None,
     mirror: MirrorReport | None = None,
     registered_marketplaces: list[str] | None = None,
     plugin_project_paths: dict[tuple[str, str], list[Path]] | None = None,
@@ -2050,6 +2056,7 @@ def build_optimize_plan(
     # Orphan cleanup runs after the npx refresh rewrites the tool manifest.
     actions.extend(_managed_orphan_cleanup_actions(npx_tools, gsd_orphans))
     actions.extend(skill_package_update_actions(skill_packages, install_deps=install_deps))
+    actions.extend(bundled_mod_actions(bundled_mods))
 
     # Spec'd-but-missing MCP servers get a manual_block (no auto-add).
     actions.extend(_mcp_server_install_warnings(mcp_servers))

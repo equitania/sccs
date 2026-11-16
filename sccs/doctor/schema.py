@@ -1032,6 +1032,15 @@ class DoctorConfig(BaseModel):
             "Unknown names are ignored. See sccs/doctor/skill_packages.py."
         ),
     )
+    bundled_mods: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Opt-in list of Claude Code mods that ship inside sccs (e.g. "
+            "['paste-lens']). `sccs doctor install` installs them from the "
+            "package, `update` keeps them at the bundled version. Unknown names "
+            "are ignored. See sccs/doctor/bundled_mods.py."
+        ),
+    )
     retired_skill_packages: list[str] = Field(
         default_factory=list,
         description=(
@@ -1118,7 +1127,27 @@ class DoctorConfig(BaseModel):
         A retired `allowlist_only` default drops out here, so the installed copy
         is no longer excused as known and `optimize` can remove it.
         """
-        return [s for s in self._declared_plugins() if not self.is_retired(s.name, s.marketplace)]
+        declared = [s for s in self._declared_plugins() if not self.is_retired(s.name, s.marketplace)]
+        return declared + self._bundled_mod_plugins()
+
+    def effective_bundled_mods(self) -> list[str]:
+        """Configured mod names that the bundled marketplace really has."""
+        from sccs.doctor.bundled_mods import resolve_bundled_mods
+
+        return resolve_bundled_mods(self.bundled_mods)
+
+    def _bundled_mod_plugins(self) -> list[PluginSpec]:
+        """Enabled bundled mods as known plugins, so they are never listed as foreign.
+
+        `allowlist_only`: installing and updating them is bundled_mods.py's job,
+        through its own marketplace, not the generic plugin path's.
+        """
+        from sccs.doctor.bundled_mods import BUNDLED_MARKETPLACE
+
+        return [
+            PluginSpec(name=name, marketplace=BUNDLED_MARKETPLACE, allowlist_only=True)
+            for name in self.effective_bundled_mods()
+        ]
 
     def checkable_plugins(self) -> list[PluginSpec]:
         """Plugins to install-/marketplace-check on this host.

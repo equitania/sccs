@@ -297,6 +297,21 @@ def _mirror_rows(report: MirrorReport | None) -> list[tuple[str, str, str, str]]
     return rows
 
 
+def _bundled_mod_row(status) -> tuple[str, str, str, str]:
+    """One row per opt-in mod that ships inside sccs (e.g. paste-lens)."""
+    label = f"mod: {status.name}"
+    if status.state == "ok":
+        return (label, _OK, f"v{status.installed_version}", "bundled with sccs")
+    if status.state == "missing":
+        return (label, _MISSING, "", f"v{status.bundled_version} bundled — run `sccs doctor install`")
+    return (
+        label,
+        _OUTDATED,
+        f"v{status.installed_version}",
+        f"v{status.bundled_version} bundled — run `sccs doctor update`",
+    )
+
+
 def _skill_package_row(status) -> tuple[str, str, str, str]:
     """One row per opt-in skill package (e.g. HyperFrames).
 
@@ -386,6 +401,7 @@ def render_doctor_report(
     powershell: PowerShellStatus | None = None,
     min_pwsh_major: int = 7,
     skill_packages: list | None = None,
+    bundled_mods: list | None = None,
     mirror: MirrorReport | None = None,
     shared_config: SharedConfigStatus | None = None,
 ) -> None:
@@ -412,6 +428,8 @@ def render_doctor_report(
         table.add_row(*_plugin_row(plugin_st))
     for npx_st in npx_tools:
         table.add_row(*_npx_row(npx_st))
+    for mod_st in bundled_mods or []:
+        table.add_row(*_bundled_mod_row(mod_st))
     for pkg_st in skill_packages or []:
         table.add_row(*_skill_package_row(pkg_st))
     if bundled_skills:
@@ -688,6 +706,7 @@ def has_problems(
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cao_providers: list | None = None,
     skill_packages: list | None = None,
+    bundled_mods: list | None = None,
     mirror: MirrorReport | None = None,
 ) -> bool:
     """Return True if any component is missing/outdated or has a permission issue."""
@@ -718,6 +737,8 @@ def has_problems(
     # An opted-in package that is missing is a defect SCCS can fix. A SKILL.md
     # that will not load is upstream's to fix — shown, but not a failure.
     if skill_packages and any(s.needs_install for s in skill_packages):
+        return True
+    if bundled_mods and any(m.needs_action for m in bundled_mods):
         return True
     if browser_bundles and any(not b.all_present for b in browser_bundles):
         return True

@@ -247,6 +247,21 @@ doctor:
 - Nach dem Entfernen prüft ein zweiter Schritt, ob die Ordner wirklich weg sind; die `skills`-CLI meldet auch dann Erfolg, wenn sie nichts gefunden hat.
 - Gleichnamige Kopien in `~/.agents/skills/` (Codex-Export) entfernt die `skills`-CLI mit. Per `sccs profile off` geparkte Skills bleiben im Parkbereich.
 - Ein Paket darf nicht gleichzeitig in beiden Listen stehen – `config validate` lehnt das ab.
+
+### Mitgelieferte Mods (v2.75.0)
+
+sccs bringt Claude-Code-Mods mit – kleine Erweiterungen, die die Oberfläche von Claude Code verändern. Sie sind abgeschaltet, bis du sie einträgst:
+
+```yaml
+doctor:
+  bundled_mods:
+  - paste-lens
+```
+
+- **`paste-lens`**: Claude Code faltet eine lange Einfügung zu `[Pasted text #1 +42 lines]` zusammen; lesen oder ändern kannst du sie dann nicht mehr. Mit `paste-lens` steht der volle Text einen Moment später wieder im Eingabefeld. Ab 400 Zeilen bleibt der Platzhalter stehen und über dem Eingabefeld erscheint ein Schalter „Unfold“. Der Text kommt aus der Zwischenablage und wird nur übernommen, wenn seine Zeilenzahl zum Platzhalter passt.
+- `sccs doctor install` richtet die Mods ein, `sccs doctor update` hebt sie auf den Stand der installierten sccs-Version. `sccs doctor check` zeigt je Mod eine Zeile.
+- Die Dateien kommen ausschließlich aus dem sccs-Paket; sie werden nach `~/.local/share/sccs/mods` kopiert und von dort bei Claude Code als Marktplatz `sccs-mods` angemeldet.
+- Eine Änderung wirkt ab der nächsten Claude-Code-Sitzung. Mods sind bei Claude Code noch im Vorabzugang; ein Claude-Code-Update kann ihr Verhalten ändern.
 - Ältere sccs-Versionen ignorieren den Schlüssel.
 
 ### Beispiel-Tabelle (`sccs doctor check`)
@@ -666,6 +681,21 @@ doctor:
 - After the removal a second step checks that the folders are really gone; the `skills` CLI reports success even when it matched nothing.
 - Same-named copies in `~/.agents/skills/` (Codex export) are removed by the `skills` CLI as well. Skills parked with `sccs profile off` stay in the parking area.
 - A package cannot be in both lists at once — `config validate` rejects it.
+
+### Bundled mods (v2.75.0)
+
+sccs ships Claude Code mods — small extensions that change Claude Code's interface. They stay off until you list them:
+
+```yaml
+doctor:
+  bundled_mods:
+  - paste-lens
+```
+
+- **`paste-lens`**: Claude Code folds a long paste into `[Pasted text #1 +42 lines]`, which you can then neither read nor change. With `paste-lens` the full text is back in the prompt box a moment later. From 400 lines on the placeholder stays and an `Unfold` button appears above the prompt. The text comes from the clipboard and is used only when its line count fits the placeholder's.
+- `sccs doctor install` sets the mods up, `sccs doctor update` brings them to the version your installed sccs carries. `sccs doctor check` shows one row per mod.
+- The files come from the sccs package only; they are copied to `~/.local/share/sccs/mods` and registered with Claude Code from there as the marketplace `sccs-mods`.
+- A change takes effect in the next Claude Code session. Mods are an early-access part of Claude Code; a Claude Code update can change how they behave.
 - Older sccs versions ignore the key.
 
 ### Sample `sccs doctor check` table

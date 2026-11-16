@@ -4,7 +4,7 @@
 
 > **Language / Sprache**: [Deutsch](#deutsche-dokumentation) | [English](#english-documentation)
 
-**Version:** 2.74.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.11
+**Version:** 2.75.0 · **Lizenz / License:** AGPL-3.0 · **Python:** ≥ 3.11
 
 ---
 
@@ -16,6 +16,8 @@ SCCS ist ein YAML-konfiguriertes, bidirektionales Synchronisierungswerkzeug für
 
 ### Was kann SCCS?
 
+- 📋 **Lange Einfügungen bleiben lesbar** *(v2.75.0)* — Claude Code faltet einen langen eingefügten Text zu `[Pasted text #1 +42 lines]` zusammen. Mit `doctor.bundled_mods: [paste-lens]` installiert `sccs doctor install` eine mitgelieferte Claude-Code-Mod, die den vollen Text sofort wieder ins Eingabefeld setzt – zum Lesen und Ändern vor dem Absenden → [docs/usage/doctor.md](docs/usage/doctor.md)
+- 🧹 **Skill-Pakete wieder loswerden** *(v2.74.0)* — `doctor.retired_skill_packages: [hyperframes]` lässt `sccs doctor optimize` die Skills eines abgelösten Pakets auf jedem Rechner nach Rückfrage entfernen → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🔄 **Bidirektionale Synchronisierung** zwischen `~/.claude/` und Git-Repository, mit interaktiver Konfliktauflösung und automatischen Backups → [docs/usage/sync.md](docs/usage/sync.md)
 - 🎚️ **Profile: Artefakt-Gruppen ein-/ausschalten** *(v2.57.0)* — `sccs profile off gsd` parkt Skills, Agents, `settings.json`-Hooks und Statusline **einer** Extension unter `~/.config/sccs/profiles/`; `sccs profile on gsd` holt alles zurück. Nichts wird gelöscht, der Doctor installiert ein abgeschaltetes Profil nicht zurück, und die Sync-Excludes bleiben intakt. Auf einem typischen Setup nimmt das mitgelieferte `gsd`-Profil 71 Skills, 34 Agents und 19 Hook-Einträge aus dem Weg → [docs/usage/profiles.md](docs/usage/profiles.md)
 - 🎬 **HyperFrames-Skills über den Doctor** *(v2.67.0)* — mit `doctor.skill_packages: [hyperframes]` installiert `sccs doctor install` die 20 Video-Skills aus `heygen-com/hyperframes` als Kopie nach `~/.claude/skills/`, `sccs doctor update` aktualisiert sie, und `sccs doctor check` prüft, ob alle vorhanden und ladbar sind. Welche Skills dazugehören, liest SCCS aus der Lock-Datei der `skills`-CLI, denn die Namen haben kein gemeinsames Präfix. Die Skills synchronisieren nie — jeder Rechner holt sie von upstream —, und `sccs profile off hyperframes` schaltet sie ab wie GSD → [docs/usage/doctor.md](docs/usage/doctor.md#skill-pakete-hyperframes--ab-v2670)
@@ -126,6 +128,8 @@ SCCS is a YAML-configured, bidirectional synchronization tool for Claude Code fi
 
 ### What can SCCS do?
 
+- 📋 **Long pastes stay readable** *(v2.75.0)* — Claude Code folds a long paste into `[Pasted text #1 +42 lines]`. With `doctor.bundled_mods: [paste-lens]`, `sccs doctor install` sets up a bundled Claude Code mod that puts the full text straight back into the prompt box, to read and change before sending → [docs/usage/doctor.md](docs/usage/doctor.md)
+- 🧹 **Drop a skill package again** *(v2.74.0)* — `doctor.retired_skill_packages: [hyperframes]` makes `sccs doctor optimize` remove a retired package's skills on every host, each removal confirmed → [docs/usage/doctor.md](docs/usage/doctor.md)
 - 🔄 **Bidirectional sync** between `~/.claude/` and a Git repository, with interactive conflict resolution and automatic backups → [docs/usage/sync.md](docs/usage/sync.md)
 - 🎚️ **Profiles: switch artefact groups on and off** *(v2.57.0)* — `sccs profile off gsd` parks the skills, agents, `settings.json` hooks and statusline of **one** extension under `~/.config/sccs/profiles/`; `sccs profile on gsd` brings it all back. Nothing is deleted, the doctor will not reinstall a switched-off profile, and sync excludes stay intact. On a typical setup the bundled `gsd` profile takes 71 skills, 34 agents and 19 hook entries out of the way → [docs/usage/profiles.md](docs/usage/profiles.md)
 - 🎬 **HyperFrames skills through the doctor** *(v2.67.0)* — with `doctor.skill_packages: [hyperframes]`, `sccs doctor install` copies the 20 video skills from `heygen-com/hyperframes` into `~/.claude/skills/`, `sccs doctor update` refreshes them, and `sccs doctor check` verifies that all are present and loadable. SCCS reads which skills belong to the package from the `skills` CLI lock file, because the names share no prefix. The skills never sync — each machine fetches them from upstream — and `sccs profile off hyperframes` switches them off like GSD → [docs/usage/doctor.md](docs/usage/doctor.md#skill-packages-hyperframes--since-v2670)

@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.74.0  ·  **Python:** ≥3.11
+- **Version:** 2.75.0  ·  **Python:** ≥3.11
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -79,7 +79,7 @@
 | `sccs docs generate` | Generate hub README for the sync repository. | -n/--dry-run, --commit, --push |
 | `sccs doctor check` | Status table of Node.js, claude CLI, plugins, npx tools (+ opt-in CLI tools zoxide/coreutils); live-checks for newer plugin/npx-tool versions (OUTDATED, informational, exit unchanged); shows Node + CLI-tool install commands inline. | --update-check/--no-update-check, --json |
 | `sccs doctor install` | Install missing system components after a confirm prompt per action; also pins scope boundaries in externally-delivered `gsd-*` prompts (idempotent, directive-prepend). | --yes, --with-optional, --json |
-| `sccs doctor optimize` | Bring the local Claude environment in line with the spec. | --strict, --yes, --with-optional |
+| `sccs doctor optimize` | Bring the local Claude environment in line with the spec. Also removes `doctor.retired_plugins` and the lock-named skills of `doctor.retired_skill_packages` (each confirmed), and installs/updates `doctor.bundled_mods` (mods shipped inside sccs, e.g. `paste-lens`). | --strict, --yes, --with-optional |
 | `sccs doctor update` | Update Claude plugins and refresh npx helper tools; re-pins scope boundaries in `gsd-*` prompts after the refresh. | --yes, --json |
 | `sccs export` | Export selected items as ZIP archive. | -o/--output PATH, --all, -c/--category TEXT, --include-managed |
 | `sccs import` | Import items from an SCCS export archive. | ZIP_PATH, -n/--dry-run, --overwrite, --no-backup, --all, --include-managed |

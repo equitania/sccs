@@ -3426,6 +3426,7 @@ def _collect_doctor_statuses(
     update and optimize pass True explicitly so they fetch even though they
     don't also want the plugin/npx-tool registry lookups `check_updates` implies.
     """
+    from sccs.doctor.bundled_mods import BundledModDetector
     from sccs.doctor.cao import CaoDetector
     from sccs.doctor.defaults import MIN_PWSH_MAJOR
     from sccs.doctor.detectors import (
@@ -3499,6 +3500,7 @@ def _collect_doctor_statuses(
         "cli_tools": CliToolDetector().get_statuses(cli_tool_specs),
         # Retired packages ride along as `retired=True` statuses: a yellow row
         # in check, a confirmed removal in optimize, skipped by install/update.
+        "bundled_mods": BundledModDetector().get_statuses(doctor_cfg.effective_bundled_mods()),
         "skill_packages": SkillPackageDetector().get_statuses(skill_package_specs)
         + SkillPackageDetector().get_retired_statuses(doctor_cfg.retired_skill_package_specs()),
         # Silent unless BOTH an installed CAO and the synced provider
@@ -3617,6 +3619,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
             gsd_orphans=statuses.get("gsd_orphans"),
             cao_providers=statuses.get("cao_providers"),
             skill_packages=statuses.get("skill_packages"),
+            bundled_mods=statuses.get("bundled_mods"),
             mirror=statuses.get("mirror"),
         )
         updates = has_updates(plugins=statuses["plugins"], npx_tools=statuses["npx_tools"])
@@ -3643,6 +3646,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
                 "gsd_orphans": statuses.get("gsd_orphans"),
                 "cli_tools": statuses.get("cli_tools"),
                 "skill_packages": statuses.get("skill_packages"),
+                "bundled_mods": statuses.get("bundled_mods"),
                 "cao_providers": statuses.get("cao_providers"),
                 "mirror": statuses.get("mirror"),
                 "shared_config": statuses.get("shared_config"),
@@ -3669,6 +3673,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         statusline_presets=statuses.get("statusline_presets"),
         powershell=statuses.get("powershell"),
         skill_packages=statuses.get("skill_packages"),
+        bundled_mods=statuses.get("bundled_mods"),
         mirror=statuses.get("mirror"),
         shared_config=statuses.get("shared_config"),
     )
@@ -3693,6 +3698,7 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         gsd_orphans=statuses.get("gsd_orphans"),
         cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
+        bundled_mods=statuses.get("bundled_mods"),
         mirror=statuses.get("mirror"),
     ):
         console.print()
@@ -3752,6 +3758,7 @@ def doctor_install(ctx: click.Context, yes: bool, include_optional: bool, output
         cao_providers=statuses.get("cao_providers"),
         statusline_presets=statuses.get("statusline_presets"),
         skill_packages=statuses.get("skill_packages"),
+        bundled_mods=statuses.get("bundled_mods"),
         mirror=statuses.get("mirror"),
         include_optional=include_optional,
     )
@@ -3820,6 +3827,7 @@ def doctor_update(ctx: click.Context, yes: bool, output_json: bool) -> None:
         cli_tools=statuses.get("cli_tools"),
         cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
+        bundled_mods=statuses.get("bundled_mods"),
         mirror=statuses.get("mirror"),
     )
 
@@ -3910,6 +3918,7 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool, include_optiona
         cli_tools=statuses.get("cli_tools"),
         cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
+        bundled_mods=statuses.get("bundled_mods"),
         mirror=statuses.get("mirror"),
         registered_marketplaces=list(_load_known_marketplace_locations()),
         plugin_project_paths=load_plugin_project_paths(),

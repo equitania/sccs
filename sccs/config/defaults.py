@@ -589,6 +589,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # lock-named skills on every host, each removal confirmed.
         #   retired_skill_packages: [hyperframes]
         "retired_skill_packages": [],
+        # Claude Code mods that ship inside sccs; `doctor install` sets them
+        # up, `doctor update` keeps them at the bundled version.
+        #   bundled_mods: [paste-lens]   # a long paste stays readable and editable
+        "bundled_mods": [],
     },
 }
 

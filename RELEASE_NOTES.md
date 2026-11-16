@@ -1,5 +1,12 @@
 # Release Notes
 
+## Version 2.75.0 (16.11.2026)
+
+### Added
+
+- **`paste-lens`: a long paste stays readable and editable.** Claude Code folds a long paste into `[Pasted text #1 +42 lines]`; it can then neither be read nor changed before it is sent, and the built-in way out (paste the same text again) does not work for dictation tools. sccs now ships a Claude Code mod that puts the full text straight back into the prompt box in place of the placeholder. Pastes of 400 lines or more keep the placeholder and get an `Unfold` button above the prompt. Claude Code hands a mod only the placeholder, so the text is read from the clipboard (`pbpaste`, `wl-paste`, `xclip`) and used only when its line count fits the placeholder's.
+- **`doctor.bundled_mods`: mods that ship inside sccs.** Opt-in, like skill packages: list `paste-lens` under `doctor.bundled_mods`, and `sccs doctor install` copies the bundled marketplace to `~/.local/share/sccs/mods`, registers it with Claude Code as `sccs-mods` and installs the mod; `doctor update` and `optimize` bring it to the version the installed sccs carries. `doctor check` shows one row per mod (`OK`, `MISSING`, `OUTDATED`), also in `--json`. An enabled mod is not listed as a foreign plugin. Mods are an early-access part of Claude Code; nothing is installed unless it is listed.
+
 ## Version 2.74.0 (16.11.2026)
 
 ### Added
