@@ -229,6 +229,24 @@ doctor:
 - Danach wird der Marktplatz entfernt, sobald ihn nichts mehr braucht: kein Plugin aus `plugins`/`extra_plugins` nennt ihn, und kein anderes installiertes Plugin stammt daher. Das greift auch, wenn das Plugin schon von Hand entfernt wurde.
 - Ein Plugin im **Projekt-Scope** wird in seinem Projektordner deinstalliert (aus `~/.claude/plugins/installed_plugins.json`), anderswo meldet Claude „nicht installiert“. Das gilt jetzt auch für `optimize --strict`.
 - Ein Plugin darf nicht gleichzeitig ausgemustert und in `plugins`/`extra_plugins` stehen – `config validate` lehnt das ab. Ein nur geduldeter Eintrag der Baseline (`allowlist_only`, etwa `frontend-design@claude-code-plugins`) darf ausgemustert werden.
+
+### Ausgemusterte Skill-Pakete (v2.74.0)
+
+Ein Skill-Paket, das du nicht mehr willst (mitgeliefert: `hyperframes`), wandert von `doctor.skill_packages` nach `doctor.retired_skill_packages`:
+
+```yaml
+doctor:
+  skill_packages: []
+  retired_skill_packages:
+  - hyperframes
+```
+
+- `sccs doctor check` zeigt eine gelbe Zeile mit der Zahl der noch vorhandenen Skills; ein aufgeräumter Rechner zeigt keine Zeile mehr.
+- `sccs doctor optimize` entfernt sie nach Rückfrage (Standard: Nein) – ohne `--strict`. `install` und `update` fassen das Paket nicht an.
+- Entfernt wird nur, was die Lock-Datei der `skills`-CLI (`~/.agents/.skill-lock.json`) dem Paket zuordnet. Ohne Lock-Datei passiert nichts – ein eigener Skill, der zufällig `figma` heißt, bleibt.
+- Nach dem Entfernen prüft ein zweiter Schritt, ob die Ordner wirklich weg sind; die `skills`-CLI meldet auch dann Erfolg, wenn sie nichts gefunden hat.
+- Gleichnamige Kopien in `~/.agents/skills/` (Codex-Export) entfernt die `skills`-CLI mit. Per `sccs profile off` geparkte Skills bleiben im Parkbereich.
+- Ein Paket darf nicht gleichzeitig in beiden Listen stehen – `config validate` lehnt das ab.
 - Ältere sccs-Versionen ignorieren den Schlüssel.
 
 ### Beispiel-Tabelle (`sccs doctor check`)
@@ -630,6 +648,24 @@ doctor:
 - The marketplace goes afterwards once nothing needs it: no plugin in `plugins`/`extra_plugins` names it and no other installed plugin comes from it. This also applies when the plugin was already removed by hand.
 - A **project-scope** plugin is uninstalled inside its project folder (read from `~/.claude/plugins/installed_plugins.json`); anywhere else Claude answers "not installed". `optimize --strict` now does the same.
 - A plugin cannot be retired and listed in `plugins`/`extra_plugins` at once — `config validate` rejects it. A tolerated baseline entry (`allowlist_only`, e.g. `frontend-design@claude-code-plugins`) may be retired.
+
+### Retired skill packages (v2.74.0)
+
+A skill package you no longer want (bundled: `hyperframes`) moves from `doctor.skill_packages` to `doctor.retired_skill_packages`:
+
+```yaml
+doctor:
+  skill_packages: []
+  retired_skill_packages:
+  - hyperframes
+```
+
+- `sccs doctor check` shows a yellow row with the number of skills still present; a cleaned host shows no row.
+- `sccs doctor optimize` removes them after a confirm prompt (default: No) — without `--strict`. `install` and `update` leave the package alone.
+- Only what the `skills` CLI lock file (`~/.agents/.skill-lock.json`) attributes to the package is removed. Without a lock file nothing happens — a skill of your own that happens to be called `figma` stays.
+- After the removal a second step checks that the folders are really gone; the `skills` CLI reports success even when it matched nothing.
+- Same-named copies in `~/.agents/skills/` (Codex export) are removed by the `skills` CLI as well. Skills parked with `sccs profile off` stay in the parking area.
+- A package cannot be in both lists at once — `config validate` rejects it.
 - Older sccs versions ignore the key.
 
 ### Sample `sccs doctor check` table

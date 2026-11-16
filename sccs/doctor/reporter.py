@@ -308,6 +308,13 @@ def _skill_package_row(status) -> tuple[str, str, str, str]:
     label = f"skills: {spec.name}"
     version = status.updated_at or ""
     total = len(status.expected)
+    if status.retired:
+        return (
+            label,
+            _STALE,
+            version,
+            f"retired — {len(status.present)} skills still in {spec.target_dir}, `sccs doctor optimize` removes them",
+        )
     if status.state == "ok":
         return (label, _OK, version, f"{total} skills in {spec.target_dir}")
     if status.state == "missing":

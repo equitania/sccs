@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 2.74.0 (16.11.2026)
+
+### Added
+
+- **`doctor.retired_skill_packages`: drop a skill package on every host.** A package installed through the `skills` CLI (bundled: `hyperframes`) could be installed and refreshed, but never removed again. Listing it under `doctor.retired_skill_packages` makes `sccs doctor check` show a yellow row with the number of skills still present, and a plain `sccs doctor optimize` removes them after a confirm prompt — no `--strict` needed, as with `retired_plugins`. `install` and `update` leave a retired package alone. Only skills the `skills` lock file (`~/.agents/.skill-lock.json`) attributes to the package are removed; without a lock nothing is touched, so a private skill that shares a name with a package skill stays. Because `skills remove` reports success even when it matched nothing, a second step checks that the folders are gone and fails otherwise. A package cannot be listed in `skill_packages` and `retired_skill_packages` at once. Skills parked by `sccs profile off` are not on disk in `~/.claude/skills` and stay in the parking area.
+
 ## Version 2.73.0 (09.11.2026)
 
 ### Added

@@ -22,6 +22,11 @@
 #   4. There is no cheap upstream version query (the lock stores a folder hash,
 #      not a release), so `doctor check` shows the lock date and `doctor update`
 #      refreshes unconditionally — no invented "update available" signal.
+#   5. Retiring a package (`doctor.retired_skill_packages`, v2.74.0) removes
+#      only what the lock attributes to its source — never the `known_skills`
+#      fallback, which would delete a private skill that merely shares a name.
+#      `skills remove` exits 0 whatever happened (verified against skills
+#      1.9.0), so a second action checks the folders afterwards.
 
 from __future__ import annotations
 
@@ -98,6 +103,20 @@ class SkillPackageSpec(BaseModel):
             "--yes",
             "--copy",
         ]
+
+    def removal(self, names: list[str]) -> list[str]:
+        """argv removing `names` for this agent and from the lock file.
+
+        `--skill` once per name is load-bearing: positional names combined
+        with `--agent` match nothing in skills 1.9.0 ("No matching skills
+        found") and still exit 0.
+        """
+        argv = ["npx", "-y", "skills", "remove", "--global", "--agent", self.agent, "--yes"]
+        for name in names:
+            if not _SKILL_NAME_RE.match(name):
+                raise ValueError(f"skill name contains invalid characters: {name!r}")
+            argv += ["--skill", name]
+        return argv
 
 
 # Opt-in only: enabled by listing the key in `doctor.skill_packages`.
@@ -205,6 +224,8 @@ class SkillPackageStatus:
     #   "missing"  — none of the expected skills is present for the agent
     #   "partial"  — some are missing, or present only as a symlink
     #   "invalid"  — all present, but at least one SKILL.md will not load
+    #   "retired"  — package is in doctor.retired_skill_packages and `present`
+    #                lists the lock-attributed skills still on disk
     state: str
     expected: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
@@ -212,10 +233,12 @@ class SkillPackageStatus:
     invalid: dict[str, list[str]] = field(default_factory=dict)
     lock_found: bool = False
     updated_at: str | None = None
+    retired: bool = False
+    present: list[str] = field(default_factory=list)
 
     @property
     def needs_install(self) -> bool:
-        return self.state in ("missing", "partial")
+        return not self.retired and self.state in ("missing", "partial")
 
 
 class SkillPackageDetector:
@@ -269,6 +292,79 @@ class SkillPackageDetector:
             )
         return out
 
+    def get_retired_statuses(self, specs: list[SkillPackageSpec]) -> list[SkillPackageStatus]:
+        """One status per retired package that still has skills on disk.
+
+        Membership is the lock file only (design rule 5). A package with
+        nothing left produces no status, so a cleaned host shows no row.
+        """
+        out: list[SkillPackageStatus] = []
+        for spec in specs:
+            entries = _lock_entries(spec) or {}
+            root = Path(spec.target_dir).expanduser()
+            present = [n for n in sorted(entries) if (root / n).is_symlink() or (root / n).exists()]
+            if not present:
+                continue
+            stamps = [str(e.get("updatedAt")) for e in entries.values() if e.get("updatedAt")]
+            out.append(
+                SkillPackageStatus(
+                    spec=spec,
+                    state="retired",
+                    expected=sorted(entries),
+                    lock_found=True,
+                    updated_at=max(stamps)[:10] if stamps else None,
+                    retired=True,
+                    present=present,
+                )
+            )
+        return out
+
+
+def skill_package_remove_actions(statuses: list[SkillPackageStatus] | None) -> list[DoctorAction]:
+    """Remove the skills of a retired package, then verify they are gone.
+
+    The removal always asks (delete-safety rule). The verify step exists
+    because `skills remove` reports success even when it matched nothing.
+    """
+    from sccs.doctor.installer import DoctorAction
+    from sccs.doctor.runner import DoctorError
+
+    actions: list[DoctorAction] = []
+    for st in statuses or []:
+        if not st.retired or not st.present:
+            continue
+        spec = st.spec
+        names = list(st.present)
+        root = Path(spec.target_dir).expanduser()
+        component = f"retired-skill-package:{spec.name}"
+
+        def _verify(root: Path = root, names: list[str] = names, pkg: str = spec.name) -> None:
+            left = [n for n in names if (root / n).is_symlink() or (root / n).exists()]
+            if left:
+                raise DoctorError(f"skill package {pkg}: still present after `skills remove`: {', '.join(left)}")
+
+        actions.append(
+            DoctorAction(
+                label=f"remove retired skill package {spec.name} ({len(names)} skills from {spec.target_dir})",
+                cmd=spec.removal(names),
+                runnable=True,
+                component=component,
+                auto_confirm=False,
+            )
+        )
+        actions.append(
+            DoctorAction(
+                label=f"verify skill package {spec.name} is gone",
+                python_callable=_verify,
+                runnable=True,
+                component=f"{component}:verified",
+                depends_on_components=(component,),
+                requires_dependencies_executed=True,
+                auto_confirm=True,
+            )
+        )
+    return actions
+
 
 def skill_package_install_actions(
     statuses: list[SkillPackageStatus] | None,
@@ -305,6 +401,8 @@ def skill_package_update_actions(
 
     actions: list[DoctorAction] = []
     for st in statuses or []:
+        if st.retired:
+            continue
         verb = "install" if st.needs_install else "refresh"
         actions.append(
             DoctorAction(

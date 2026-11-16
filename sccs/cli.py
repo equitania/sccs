@@ -3497,7 +3497,10 @@ def _collect_doctor_statuses(
         "settings_path": settings_hook_detector.settings_path,
         "gsd_orphans": GsdOrphanDetector().get_statuses(npx_specs),
         "cli_tools": CliToolDetector().get_statuses(cli_tool_specs),
-        "skill_packages": SkillPackageDetector().get_statuses(skill_package_specs),
+        # Retired packages ride along as `retired=True` statuses: a yellow row
+        # in check, a confirmed removal in optimize, skipped by install/update.
+        "skill_packages": SkillPackageDetector().get_statuses(skill_package_specs)
+        + SkillPackageDetector().get_retired_statuses(doctor_cfg.retired_skill_package_specs()),
         # Silent unless BOTH an installed CAO and the synced provider
         # source exist — that pairing is the opt-in.
         "cao_providers": CaoDetector().get_statuses(cao_provider_specs),

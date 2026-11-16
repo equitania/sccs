@@ -1032,6 +1032,15 @@ class DoctorConfig(BaseModel):
             "Unknown names are ignored. See sccs/doctor/skill_packages.py."
         ),
     )
+    retired_skill_packages: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Built-in skill packages dropped on purpose (e.g. ['hyperframes']). "
+            "`sccs doctor optimize` removes the skills the `skills` lock file "
+            "attributes to them, after a confirm prompt. A package cannot be "
+            "listed here and in skill_packages at once."
+        ),
+    )
     cao_providers: list[CaoProviderSpec] | None = Field(
         default=None,
         description=(
@@ -1068,6 +1077,17 @@ class DoctorConfig(BaseModel):
                 "doctor.retired_plugins names a plugin that doctor also installs: "
                 + ", ".join(clash)
                 + " — drop it from plugins/extra_plugins or from retired_plugins"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _retired_skill_package_is_not_enabled_too(self) -> DoctorConfig:
+        clash = sorted(set(self.skill_packages) & set(self.retired_skill_packages))
+        if clash:
+            raise ValueError(
+                "doctor.retired_skill_packages names a package that doctor also installs: "
+                + ", ".join(clash)
+                + " — drop it from skill_packages or from retired_skill_packages"
             )
         return self
 
@@ -1232,6 +1252,12 @@ class DoctorConfig(BaseModel):
         from sccs.doctor.skill_packages import resolve_skill_packages
 
         return resolve_skill_packages(self.skill_packages)
+
+    def retired_skill_package_specs(self) -> list[Any]:
+        """Specs of `retired_skill_packages` — unknown names ignored, like the opt-in list."""
+        from sccs.doctor.skill_packages import resolve_skill_packages
+
+        return resolve_skill_packages(self.retired_skill_packages)
 
     def installable_skill_packages(
         self,

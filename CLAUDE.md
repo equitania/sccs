@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.73.0
+**Version**: 2.74.0
 
 ### Key Features
 
@@ -28,7 +28,7 @@ history lives in `RELEASE_NOTES.md`.
 - **Mirror parity** (`doctor/mirror.py`): macOS only — any other platform resolves to `off`; the source never receives install/remove actions, a mirror never writes `inventory.yaml`; removals only under `optimize --strict` + `cleanup: true`; never `brew bundle cleanup` or bare `fisher update`. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Shared config** (`doctor/shared_config.py`): `sccs_config` is bundled; adoption always asks (`always_confirm`, skipped without a terminal), pulls, backs up, validates, rolls back; never merges; `~/.config/sccs` is never a deploy root. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Host-local repo path** (`config/loader.py`): `local.yaml` carries `repository.path` only and is never synced; `save_config` never writes the effective path back; adoption pins the current path before replacing `config.yaml`. → [Doctor](docs/development/maintainer-notes.md#doctor)
-- **Skill packages** (`doctor/skill_packages.py`): membership comes from `~/.agents/.skill-lock.json`, not a glob; `--copy` is load-bearing. → [Doctor](docs/development/maintainer-notes.md#doctor)
+- **Skill packages** (`doctor/skill_packages.py`): membership comes from `~/.agents/.skill-lock.json`, not a glob; `--copy` is load-bearing; a retired package loses only lock-named skills, each removal confirmed and verified afterwards (`skills remove` always exits 0). → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **CAO provider patches** (`doctor/cao.py`): no provider source is ever bundled; `anchor_lost` is reported, never repaired; edits accumulate per file. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Profiles / statusline presets** (`doctor/profiles.py`, `doctor/statusline.py`): `installable_npx_tools()` is profile-aware, `effective_npx_tools()` stays blind; installers run as `bash <file>`, never `curl | bash`. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Fish coverage / statusline sync** (`config/defaults.py`, `sync/settings.py`): every fish file in exactly one enabled category; `item_pattern` is `statusline*` without the dot; `superseded_patterns` match by pattern. → [Sync categories](docs/development/maintainer-notes.md#sync-categories)

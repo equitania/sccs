@@ -86,7 +86,7 @@ sccs doctor update               # Plugins + npx-Tools aktualisieren
 sccs doctor check                # … zeigt auf einem Spiegel `mirror: …`-Zeilen (v2.68.0)
 sccs doctor update               # auf der Quelle: Brewfile + inventory.yaml neu schreiben
 sccs doctor optimize --strict    # auf einem Spiegel: Überzähliges einzeln zur Bestätigung
-sccs doctor optimize             # entfernt doctor.retired_plugins + leere Marktplätze (je mit Rückfrage)
+sccs doctor optimize             # entfernt doctor.retired_plugins, leere Marktplätze + doctor.retired_skill_packages (je mit Rückfrage)
 
 # Profile (LOKALE Artefakt-Gruppen parken, um den System-Prompt zu verkleinern — ungleich den Deployment-Profilen oben, siehe profiles.md)
 sccs profile list                # Profile + Zustand anzeigen
@@ -224,7 +224,7 @@ sccs doctor update               # Update plugins + refresh npx tools
 sccs doctor check                # … shows `mirror: …` rows on a mirror (v2.68.0)
 sccs doctor update               # on the source: rewrite Brewfile + inventory.yaml
 sccs doctor optimize --strict    # on a mirror: confirm each extra individually
-sccs doctor optimize             # removes doctor.retired_plugins + emptied marketplaces (each confirmed)
+sccs doctor optimize             # removes doctor.retired_plugins, emptied marketplaces + doctor.retired_skill_packages (each confirmed)
 
 # Profiles (park LOCAL artefact groups to shrink the system prompt — unrelated to the deployment profiles above, see profiles.md)
 sccs profile list                # Show profiles + their state

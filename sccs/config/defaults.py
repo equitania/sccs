@@ -585,6 +585,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # refreshes them. Their skills never sync — each host fetches them from
         # upstream. Switch them off with `sccs profile off hyperframes`.
         "skill_packages": [],
+        # Packages dropped on purpose: `doctor optimize` removes their
+        # lock-named skills on every host, each removal confirmed.
+        #   retired_skill_packages: [hyperframes]
+        "retired_skill_packages": [],
     },
 }
 

@@ -25,6 +25,7 @@ from sccs.doctor.skill_packages import (
     lock_skill_names,
     package_skill_names,
     skill_package_install_actions,
+    skill_package_remove_actions,
     skill_package_update_actions,
 )
 
@@ -287,6 +288,139 @@ class TestProfile:
 
 
 # --------------------------------------------------------------------- #
+# Retired packages (v2.74.0)                                             #
+# --------------------------------------------------------------------- #
+
+
+def _retired(spec, skills_root, present=("figma", "slideshow")):
+    _write_lock(Path(spec.lock_file), dict.fromkeys(present, SOURCE))
+    for name in present:
+        _make_skill(skills_root, name)
+    return SkillPackageDetector().get_retired_statuses([spec])
+
+
+class TestRetired:
+    def test_config_resolves_builtin_names(self):
+        cfg = DoctorConfig(retired_skill_packages=["hyperframes", "does-not-exist"])
+        assert [p.name for p in cfg.retired_skill_package_specs()] == ["hyperframes"]
+        assert cfg.effective_skill_packages() == []
+
+    def test_a_package_cannot_be_enabled_and_retired(self):
+        with pytest.raises(ValueError, match="retired_skill_packages"):
+            DoctorConfig(skill_packages=["hyperframes"], retired_skill_packages=["hyperframes"])
+
+    def test_only_lock_named_skills_on_disk_count(self, spec, skills_root):
+        _write_lock(Path(spec.lock_file), {"figma": SOURCE, "slideshow": SOURCE, "find-skills": "vercel-labs/skills"})
+        for name in ("figma", "find-skills", "my-own-skill"):
+            _make_skill(skills_root, name)
+        (st,) = SkillPackageDetector().get_retired_statuses([spec])
+        assert st.retired is True and st.state == "retired"
+        assert st.present == ["figma"]
+        assert st.needs_install is False
+
+    def test_without_a_lock_nothing_is_ever_removed(self, spec, skills_root):
+        # `known_skills` names a `figma`; a private skill of that name must survive.
+        _make_skill(skills_root, "figma")
+        assert SkillPackageDetector().get_retired_statuses([spec]) == []
+
+    def test_cleaned_host_has_no_status(self, spec, skills_root):
+        _write_lock(Path(spec.lock_file), {"figma": SOURCE})
+        assert SkillPackageDetector().get_retired_statuses([spec]) == []
+
+    def test_removal_asks_and_names_each_skill(self, spec, skills_root):
+        remove, verify = skill_package_remove_actions(_retired(spec, skills_root))
+        assert remove.cmd == [
+            "npx", "-y", "skills", "remove", "--global", "--agent", "claude-code", "--yes",
+            "--skill", "figma", "--skill", "slideshow",
+        ]  # fmt: skip
+        validate_command_head(remove.cmd[0])
+        assert remove.auto_confirm is False
+        assert verify.depends_on_components == (remove.component,)
+        assert verify.requires_dependencies_executed is True
+
+    def test_install_and_update_leave_a_retired_package_alone(self, spec, skills_root):
+        statuses = _retired(spec, skills_root)
+        assert skill_package_install_actions(statuses) == []
+        assert skill_package_update_actions(statuses) == []
+        assert skill_package_remove_actions([_status(spec, "ok")]) == []
+
+    def test_optimize_plan_removes_without_strict(self, spec, skills_root):
+        from sccs.doctor.detectors import ClaudeCliStatus, NodeStatus
+        from sccs.doctor.installer import build_optimize_plan
+        from sccs.doctor.schema import NodeInstallSpec
+
+        node = NodeStatus(
+            installed=True,
+            version="22.0.0",
+            major=22,
+            meets_minimum=True,
+            install_hint=NodeInstallSpec(runnable=False, label="x"),
+            platform="macos",
+        )
+        plan = build_optimize_plan(
+            DoctorConfig(retired_skill_packages=["hyperframes"]),
+            node=node,
+            claude_cli=ClaudeCliStatus(installed=True, binary_path="/x/claude"),
+            plugins=[],
+            foreign_plugins=[],
+            mcp_servers=[],
+            foreign_mcp_servers=[],
+            npx_tools=[],
+            skill_packages=_retired(spec, skills_root),
+        )
+        labels = [a.label for a in plan.actions]
+        assert any(label.startswith("remove retired skill package hyperframes (2 skills") for label in labels)
+        assert not any(label.startswith(("refresh", "install skill")) for label in labels)
+
+    def _run_plan(self, spec, skills_root, monkeypatch, *, cli_deletes: bool, assume_yes: bool = True):
+        import shutil
+        import subprocess
+
+        from sccs.doctor import installer
+        from sccs.doctor.installer import InstallPlan, execute_plan
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(list(cmd))
+            if cli_deletes:
+                for name in ("figma", "slideshow"):
+                    shutil.rmtree(skills_root / name)
+            return subprocess.CompletedProcess(cmd, 0, stdout="Done!\n", stderr="")
+
+        monkeypatch.setattr(installer, "_run", fake_run)
+        monkeypatch.setattr(installer, "_interactive", lambda: True)
+        monkeypatch.setattr(installer, "_confirm", lambda label, *, assume_yes: assume_yes)
+        plan = InstallPlan(actions=skill_package_remove_actions(_retired(spec, skills_root)))
+        result = execute_plan(plan, assume_yes=assume_yes, print_fn=lambda _: None)
+        return calls, [o.status for o in result.outcomes]
+
+    def test_execute_removes_and_verifies(self, spec, skills_root, monkeypatch):
+        calls, statuses = self._run_plan(spec, skills_root, monkeypatch, cli_deletes=True)
+        assert len(calls) == 1
+        assert statuses == ["executed", "executed"]
+
+    def test_cli_that_reports_success_but_removes_nothing_fails(self, spec, skills_root, monkeypatch):
+        # `skills remove` exits 0 even when nothing matched (skills 1.9.0).
+        _calls, statuses = self._run_plan(spec, skills_root, monkeypatch, cli_deletes=False)
+        assert statuses == ["executed", "failed"]
+
+    def test_declined_removal_runs_nothing(self, spec, skills_root, monkeypatch):
+        calls, statuses = self._run_plan(spec, skills_root, monkeypatch, cli_deletes=True, assume_yes=False)
+        assert calls == []
+        assert statuses[0] == "skipped" and "executed" not in statuses
+        assert (skills_root / "figma").is_dir()
+
+    def test_row_is_yellow_and_no_problem(self, spec, skills_root):
+        from sccs.doctor.reporter import _STALE, _skill_package_row
+
+        (st,) = _retired(spec, skills_root)
+        row = _skill_package_row(st)
+        assert row[1] == _STALE
+        assert "2 skills" in row[3] and "sccs doctor optimize" in row[3]
+
+
+# --------------------------------------------------------------------- #
 # Reporter                                                               #
 # --------------------------------------------------------------------- #
 
@@ -321,3 +455,5 @@ class TestReporter:
         assert has_problems(**base, skill_packages=[_status(spec, "missing")]) is True
         assert has_problems(**base, skill_packages=[_status(spec, "invalid")]) is False
         assert has_problems(**base, skill_packages=[_status(spec, "ok")]) is False
+        retired = SkillPackageStatus(spec=spec, state="retired", retired=True, present=["figma"])
+        assert has_problems(**base, skill_packages=[retired]) is False

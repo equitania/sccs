@@ -44,6 +44,7 @@ from sccs.doctor.schema import BundledSkillSpec, DoctorConfig, NpxToolSpec, _val
 from sccs.doctor.skill_packages import (
     SkillPackageStatus,
     skill_package_install_actions,
+    skill_package_remove_actions,
     skill_package_update_actions,
 )
 from sccs.doctor.state import DoctorStateManager
@@ -1940,7 +1941,9 @@ def build_optimize_plan(
 
     `doctor.retired_plugins` are uninstalled with or without `strict`, and
     their marketplace goes once nothing uses it (`registered_marketplaces`:
-    the names in known_marketplaces.json).
+    the names in known_marketplaces.json). `doctor.retired_skill_packages`
+    arrive as `skill_packages` statuses with `retired=True` and are removed
+    the same way, each after a confirm prompt.
 
     Combines `build_update_plan`'s install+update behaviour with two new
     concerns:
@@ -1982,6 +1985,8 @@ def build_optimize_plan(
             config, retired, foreign_plugins, plugins, registered_marketplaces, plugin_project_paths
         )
     )
+    # Retired skill packages go with or without `strict`, like retired plugins.
+    actions.extend(skill_package_remove_actions(skill_packages))
 
     # Strict cleanup happens first so subsequent install/update steps don't
     # race against foreign entries we're about to remove.
