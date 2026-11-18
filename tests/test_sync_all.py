@@ -36,10 +36,10 @@ class FakeTarget:
         assert self.plan_result is not None
         return self.plan_result
 
-    def apply(self, *, dry_run: bool, replace_foreign: bool) -> TargetOutcome:
+    def apply(self, *, dry_run: bool) -> TargetOutcome:
         if self.apply_raises:
             raise self.apply_raises
-        self.applied.append({"dry_run": dry_run, "replace_foreign": replace_foreign})
+        self.applied.append({"dry_run": dry_run})
         return TargetOutcome(key=self.key, label=self.label, created=1)
 
 
@@ -73,17 +73,17 @@ class TestTargetPlan:
 class TestCollectPlans:
     def test_one_broken_target_does_not_hide_the_others(self):
         good = FakeTarget("pi", "Pi", plan_result=_plan("pi", pending=3))
-        broken = FakeTarget("codex", "Codex", plan_raises=RuntimeError("boom"))
+        broken = FakeTarget("opencode", "OpenCode", plan_raises=RuntimeError("boom"))
 
         plans = collect_plans([good, broken])
-        assert [p.key for p in plans] == ["pi", "codex"]
+        assert [p.key for p in plans] == ["pi", "opencode"]
         assert plans[0].pending == 3
         assert plans[1].error is not None and "boom" in plans[1].error
 
     def test_a_broken_target_is_never_reported_as_absent(self):
         """`installed=False` means 'not on this machine'; an inspection failure
         is a different thing and must not be presented as the same."""
-        plans = collect_plans([FakeTarget("codex", "Codex", plan_raises=OSError("denied"))])
+        plans = collect_plans([FakeTarget("opencode", "OpenCode", plan_raises=OSError("denied"))])
         assert plans[0].installed is True
         assert plans[0].error
 
@@ -91,31 +91,31 @@ class TestCollectPlans:
 class TestApplyPlans:
     def test_only_targets_with_work_are_applied(self):
         busy = FakeTarget("pi", "Pi", plan_result=_plan("pi", pending=2))
-        idle = FakeTarget("codex", "Codex", plan_result=_plan("codex"))
+        idle = FakeTarget("opencode", "OpenCode", plan_result=_plan("opencode"))
         absent = FakeTarget("opencode", "Opencode", plan_result=_plan("opencode", installed=False))
 
         targets = [busy, idle, absent]
-        outcomes = apply_plans(targets, collect_plans(targets), dry_run=False, replace_foreign=False)
+        outcomes = apply_plans(targets, collect_plans(targets), dry_run=False)
 
         assert [o.key for o in outcomes] == ["pi"]
         assert busy.applied and not idle.applied and not absent.applied
 
     def test_a_target_that_failed_to_plan_is_not_applied(self):
-        broken = FakeTarget("codex", "Codex", plan_raises=RuntimeError("boom"))
-        outcomes = apply_plans([broken], collect_plans([broken]), dry_run=False, replace_foreign=False)
+        broken = FakeTarget("opencode", "OpenCode", plan_raises=RuntimeError("boom"))
+        outcomes = apply_plans([broken], collect_plans([broken]), dry_run=False)
         assert outcomes == []
 
     def test_flags_reach_the_target(self):
         busy = FakeTarget("pi", "Pi", plan_result=_plan("pi", pending=1))
-        apply_plans([busy], collect_plans([busy]), dry_run=True, replace_foreign=True)
-        assert busy.applied == [{"dry_run": True, "replace_foreign": True}]
+        apply_plans([busy], collect_plans([busy]), dry_run=True)
+        assert busy.applied == [{"dry_run": True}]
 
     def test_an_export_failure_is_reported_and_the_pass_continues(self):
         failing = FakeTarget("pi", "Pi", plan_result=_plan("pi", pending=1), apply_raises=OSError("disk full"))
-        later = FakeTarget("codex", "Codex", plan_result=_plan("codex", pending=1))
+        later = FakeTarget("opencode", "OpenCode", plan_result=_plan("opencode", pending=1))
 
         targets = [failing, later]
-        outcomes = apply_plans(targets, collect_plans(targets), dry_run=False, replace_foreign=False)
+        outcomes = apply_plans(targets, collect_plans(targets), dry_run=False)
 
         assert has_errors(outcomes)
         assert "disk full" in outcomes[0].errors["pi"]
@@ -124,25 +124,23 @@ class TestApplyPlans:
 
     def test_no_errors_when_everything_worked(self):
         busy = FakeTarget("pi", "Pi", plan_result=_plan("pi", pending=1))
-        assert not has_errors(apply_plans([busy], collect_plans([busy]), dry_run=False, replace_foreign=False))
+        assert not has_errors(apply_plans([busy], collect_plans([busy]), dry_run=False))
 
 
 class TestJsonShape:
     def test_plan_payload_carries_the_decision_fields(self):
         plan = TargetPlan(
-            key="codex",
-            label="Codex",
+            key="pi",
+            label="Pi",
             installed=True,
-            location="/home/u/.agents/skills",
+            location="/home/u/.pi/agent",
             counts={"skills": 2},
-            foreign=["afterwork"],
-            notes=["hooks excluded"],
+            notes=["one note"],
         )
         payload = plans_to_dict([plan])[0]
-        assert payload["target"] == "codex"
+        assert payload["target"] == "pi"
         assert payload["pending"] == 2
-        assert payload["foreign"] == ["afterwork"]
-        assert payload["notes"] == ["hooks excluded"]
+        assert payload["notes"] == ["one note"]
 
     def test_outcome_payload(self):
         payload = outcomes_to_dict([TargetOutcome(key="pi", label="Pi", created=3, updated=1)])[0]
@@ -168,9 +166,8 @@ class TestJsonShape:
 
 from pathlib import Path  # noqa: E402
 
-from sccs.integrations.codex import CodexDetector, CodexExportState  # noqa: E402
 from sccs.integrations.pi import PiDetector  # noqa: E402
-from sccs.integrations.sync_all import CodexTarget, PiTarget  # noqa: E402
+from sccs.integrations.sync_all import PiTarget  # noqa: E402
 
 SKILL_MD = "---\nname: my-skill\ndescription: A skill.\n---\nBody.\n"
 
@@ -188,41 +185,11 @@ def _pi_detector(tmp_path: Path) -> PiDetector:
     )
 
 
-def _codex_detector(tmp_path: Path) -> CodexDetector:
-    codex = tmp_path / ".codex"
-    skills = tmp_path / ".agents" / "skills"
-    for path in (codex, skills):
-        path.mkdir(parents=True)
-    for sub in ("skills", "agents", "commands"):
-        (tmp_path / ".claude" / sub).mkdir(parents=True)
-    return CodexDetector(
-        codex_dir=codex,
-        skills_dir=skills,
-        cc_skills_dir=tmp_path / ".claude" / "skills",
-        cc_agents_dir=tmp_path / ".claude" / "agents",
-        cc_commands_dir=tmp_path / ".claude" / "commands",
-    )
-
-
 def _write_skill(cc_skills_dir: Path, name: str, body: str = SKILL_MD) -> Path:
     d = cc_skills_dir / name
     d.mkdir(parents=True, exist_ok=True)
     (d / "SKILL.md").write_text(body, encoding="utf-8")
     return d
-
-
-class _FakeCodexState:
-    """Minimal stand-in for CodexExportStateManager."""
-
-    def __init__(self):
-        self.state = CodexExportState()
-        self.saved = 0
-
-    def load(self):
-        return self.state
-
-    def save(self, state):
-        self.saved += 1
 
 
 class TestPiTargetWiring:
@@ -237,7 +204,7 @@ class TestPiTargetWiring:
         detector = _pi_detector(tmp_path)
         _write_skill(detector._cc_skills_dir, "one")
 
-        outcome = PiTarget(detector=detector).apply(dry_run=False, replace_foreign=False)
+        outcome = PiTarget(detector=detector).apply(dry_run=False)
         assert outcome.created == 1
         assert (detector.skills_dir / "one" / "SKILL.md").is_file()
 
@@ -245,7 +212,7 @@ class TestPiTargetWiring:
         detector = _pi_detector(tmp_path)
         _write_skill(detector._cc_skills_dir, "one")
 
-        PiTarget(detector=detector).apply(dry_run=True, replace_foreign=False)
+        PiTarget(detector=detector).apply(dry_run=True)
         assert not (detector.skills_dir / "one").exists()
 
     def test_over_long_description_is_named_in_the_plan(self, tmp_path):
@@ -265,61 +232,6 @@ class TestPiTargetWiring:
             cc_commands_dir=tmp_path / ".claude" / "commands",
         )
         assert PiTarget(detector=detector).plan().installed is False
-
-
-class TestCodexTargetWiring:
-    def _target(self, detector, state) -> CodexTarget:
-        return CodexTarget(detector=detector, model_map={}, reasoning_map={}, state_manager=state)
-
-    def test_apply_writes_and_persists_ownership(self, tmp_path):
-        detector = _codex_detector(tmp_path)
-        _write_skill(detector._cc_skills_dir, "one")
-        state = _FakeCodexState()
-
-        outcome = self._target(detector, state).apply(dry_run=False, replace_foreign=False)
-        assert outcome.created == 1
-        assert (detector.skills_dir / "one" / "SKILL.md").is_file()
-        # Without this the next run would see its own target as foreign.
-        assert state.saved == 1
-
-    def test_dry_run_neither_writes_nor_persists(self, tmp_path):
-        detector = _codex_detector(tmp_path)
-        _write_skill(detector._cc_skills_dir, "one")
-        state = _FakeCodexState()
-
-        self._target(detector, state).apply(dry_run=True, replace_foreign=False)
-        assert not (detector.skills_dir / "one").exists()
-        assert state.saved == 0
-
-    def test_foreign_target_is_named_in_the_plan_and_kept(self, tmp_path):
-        detector = _codex_detector(tmp_path)
-        _write_skill(detector._cc_skills_dir, "one")
-        foreign = detector.skills_dir / "one"
-        foreign.mkdir(parents=True)
-        (foreign / "SKILL.md").write_text("hand written", encoding="utf-8")
-        state = _FakeCodexState()
-
-        plan = self._target(detector, state).plan()
-        assert plan.foreign == ["one"]
-
-        self._target(detector, state).apply(dry_run=False, replace_foreign=False)
-        assert (foreign / "SKILL.md").read_text(encoding="utf-8") == "hand written"
-
-    def test_replace_foreign_reaches_the_writer(self, tmp_path):
-        detector = _codex_detector(tmp_path)
-        _write_skill(detector._cc_skills_dir, "one")
-        foreign = detector.skills_dir / "one"
-        foreign.mkdir(parents=True)
-        (foreign / "SKILL.md").write_text("hand written", encoding="utf-8")
-        state = _FakeCodexState()
-
-        self._target(detector, state).apply(dry_run=False, replace_foreign=True)
-        assert (foreign / "SKILL.md").read_text(encoding="utf-8") != "hand written"
-
-    def test_plan_warns_that_hooks_are_excluded(self, tmp_path):
-        detector = _codex_detector(tmp_path)
-        state = _FakeCodexState()
-        assert any("hooks excluded" in note for note in self._target(detector, state).plan().notes)
 
 
 # --------------------------------------------------------------------------- #
@@ -367,22 +279,7 @@ class TestSyncAllCli:
 
         result = CliRunner().invoke(cli, ["integrations", "sync-all", "--yes"], obj={})
         assert result.exit_code == 0
-        assert target.applied == [{"dry_run": False, "replace_foreign": False}]
-
-    def test_replace_foreign_is_off_unless_asked(self, monkeypatch):
-        """The convenience command must not discard hand edits by default."""
-        target = FakeTarget("pi", "Pi", plan_result=_plan("pi", pending=1))
-        _install_fake_targets(monkeypatch, [target])
-
-        CliRunner().invoke(cli, ["integrations", "sync-all", "--yes"], obj={})
-        assert target.applied[0]["replace_foreign"] is False
-
-    def test_replace_foreign_reaches_the_target(self, monkeypatch):
-        target = FakeTarget("pi", "Pi", plan_result=_plan("pi", pending=1))
-        _install_fake_targets(monkeypatch, [target])
-
-        CliRunner().invoke(cli, ["integrations", "sync-all", "--yes", "--replace-foreign"], obj={})
-        assert target.applied[0]["replace_foreign"] is True
+        assert target.applied == [{"dry_run": False}]
 
     def test_nothing_to_do_exits_clean_without_asking(self, monkeypatch):
         target = FakeTarget("pi", "Pi", plan_result=_plan("pi"))

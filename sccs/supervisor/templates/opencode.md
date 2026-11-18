@@ -1,6 +1,6 @@
 ---
 name: {{NAME}}
-description: Forwards a review, a second opinion or a bounded analysis to a third model family (default Kimi via OpenRouter) through the OpenCode CLI (`opencode run`) and returns its answer. Use when the main Claude session acts as supervisor and wants a perspective that is neither Anthropic, Google nor OpenAI — e.g. a third independent review next to antigravity-worker (Gemini) and codex:codex-rescue (Codex), or a check by a specifically named OpenRouter model. Read-only, enforced by an inline OpenCode agent. Costs OpenRouter credit per call. NOT for Gemini (antigravity-worker), NOT for Codex, NOT for tasks the main session can finish quickly itself.
+description: Forwards a review, a second opinion or a bounded analysis to a third model family (default Kimi via OpenRouter) through the OpenCode CLI (`opencode run`) and returns its answer. Use when the main Claude session acts as supervisor and wants a perspective that is neither Anthropic nor Google — e.g. a third independent review next to antigravity-worker (Gemini), or a check by a specifically named OpenRouter model. Read-only, enforced by an inline OpenCode agent. Costs OpenRouter credit per call. NOT for Gemini (antigravity-worker), NOT for tasks the main session can finish quickly itself.
 tools: Bash, Read
 model: haiku
 sccs:

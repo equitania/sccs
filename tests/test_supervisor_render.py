@@ -10,7 +10,7 @@ from sccs.supervisor.render import new_agent, render_template
 from sccs.supervisor.wrappers import body_hash, detect_shape, find_model_token
 from tests.conftest import FIX, write_agent
 
-MODEL = {"agy": "gemini-4-argon-high", "opencode": "openrouter/~moonshotai/kimi-latest", "codex": "gpt-5.5"}
+MODEL = {"agy": "gemini-4-argon-high", "opencode": "openrouter/~moonshotai/kimi-latest"}
 CFG_BEFORE = "repository:\n  path: ~/x\n"
 
 
@@ -27,15 +27,14 @@ def cfg(tmp_path):
     return path
 
 
-@pytest.mark.parametrize("t", ["agy", "opencode", "codex"])
+@pytest.mark.parametrize("t", ["agy", "opencode"])
 def test_rendered_template_round_trips(t):
     text = render_template(t, "x-worker", MODEL[t])
     parsed = parse_frontmatter_ex(text)
     meta, body = parsed.metadata, parsed.body
     assert detect_shape(body) == t and meta["model"] == "haiku" and meta["tools"] == "Bash, Read"
     assert meta["name"] == "x-worker"
-    version = 2 if t == "codex" else 1
-    assert meta["sccs"] == {"managed": True, "template": t, "template_version": version, "hash": body_hash(body, t)}
+    assert meta["sccs"] == {"managed": True, "template": t, "template_version": 1, "hash": body_hash(body, t)}
     s, e = find_model_token(body, t)
     assert body[s:e] == MODEL[t]
     assert "{{" not in text
@@ -52,21 +51,12 @@ def test_rendered_opencode_matches_fixture_body():
 
 
 def test_description_override_is_valid_yaml():
-    text = render_template("codex", "c", "m", description='Has: a colon and "quotes"')
+    text = render_template("opencode", "c", "m", description='Has: a colon and "quotes"')
     assert parse_frontmatter_ex(text).metadata["description"] == 'Has: a colon and "quotes"'
 
 
-def test_codex_command_block_exact():
-    assert command_block(render_template("codex", "c", "gpt-5.5")) == (
-        'OUT=$(mktemp "${TMPDIR:-/tmp}/codex-worker.XXXXXX")\n'
-        "timeout 900 codex exec -s read-only --ephemeral -m gpt-5.5 "
-        '-o "$OUT" "<PROMPT>" </dev/null >/dev/null 2>"$OUT.err"\n'
-        'echo "exit $?"; cat "$OUT"; tail -n 20 "$OUT.err"'
-    )
-
-
 def test_no_template_contains_forbidden_flags():
-    for t in ("agy", "opencode", "codex"):
+    for t in ("agy", "opencode"):
         block = command_block(render_template(t, "x", MODEL[t]))
         for flag in ("--dangerously-skip-permissions", "--auto", "accept-edits"):
             assert flag not in block
@@ -110,17 +100,7 @@ def test_new_agent_writes_file_and_excludes(fake_home, empty_path, cfg):
     assert result.model_status == "unverified" and result.excludes_added is True
     assert result.path.read_text() == render_template("opencode", "kimi-w", MODEL["opencode"])
     raw = yaml.safe_load(cfg.read_text())
-    assert raw["codex"]["exclude"] == ["kimi-w"]
-
-
-def test_new_codex_default_model_from_config(fake_home, empty_path, cfg):
-    with pytest.raises(SupervisorError, match="No default Codex model"):
-        new_agent("codex", "c", home=fake_home, config_path=cfg)
-    assert cfg.read_text() == CFG_BEFORE
-    (fake_home / ".codex").mkdir()
-    (fake_home / ".codex/config.toml").write_text('model = "gpt-5.5"\n')
-    result = new_agent("codex", "c", home=fake_home, config_path=cfg)
-    assert "-m gpt-5.5 " in result.path.read_text()
+    assert raw["opencode"]["exclude"] == ["kimi-w"] == raw["pi"]["exclude"]
 
 
 def test_excludes_created_and_idempotent(tmp_path):
@@ -129,18 +109,18 @@ def test_excludes_created_and_idempotent(tmp_path):
     assert add_supervisor_excludes("w", cfg) is True
     assert add_supervisor_excludes("w", cfg) is False
     raw = yaml.safe_load(cfg.read_text())
-    assert raw["opencode"]["exclude"] == ["w"] == raw["pi"]["exclude"] == raw["codex"]["exclude"]
+    assert raw["opencode"]["exclude"] == ["w"] == raw["pi"]["exclude"]
     assert raw["repository"] == {"path": "~/x"}
 
 
 def test_excludes_keep_other_keys_and_write_backup(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     cfg = tmp_path / "config.yaml"
-    cfg.write_text("opencode:\n  model_map: {a: b}\n  exclude: [old]\ncodex:\n  exclude: [w]\n")
+    cfg.write_text("opencode:\n  model_map: {a: b}\n  exclude: [old]\n")
     assert add_supervisor_excludes("w", cfg) is True
     raw = yaml.safe_load(cfg.read_text())
     assert raw["opencode"] == {"model_map": {"a": "b"}, "exclude": ["old", "w"]}
-    assert raw["codex"]["exclude"] == ["w"] and raw["pi"]["exclude"] == ["w"]
+    assert raw["pi"]["exclude"] == ["w"]
 
 
 def test_new_with_malformed_config_raises_and_writes_no_agent(fake_home, empty_path, tmp_path):

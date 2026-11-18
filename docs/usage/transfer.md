@@ -38,7 +38,7 @@ selbst installiert — die `gsd-*`-Skills/Agents/Hooks aus `@opengsd/gsd-core` s
 erscheint weder in der Auswahlliste noch im Archiv. Der Zielrechner erzeugt diese Dateien mit seinem
 eigenen `sccs doctor install` in der jeweils aktuellen Version; ein eingefrorener Schnappschuss im
 ZIP würde nur veralten. Dieselbe Registry (`sccs/doctor/managed.py`) filtert bereits den Sync und die
-OpenCode-/Pi-/Codex-Exporte. Erweitern lässt sie sich über `doctor.managed_excludes` in der
+OpenCode-/Pi-Exporte. Erweitern lässt sie sich über `doctor.managed_excludes` in der
 `config.yaml`; `--include-managed` schaltet den Filter für einen Lauf komplett ab.
 
 Der Filter greift auf **Item**-Ebene: eine eigene Datei namens `gsd-notizen.md` *innerhalb* eines
@@ -146,7 +146,7 @@ sccs export --include-managed
 itself — the `gsd-*` skills/agents/hooks from `@opengsd/gsd-core` plus `playwright-cli` — appears
 neither in the selection list nor in the archive. The target machine reproduces those files with its
 own `sccs doctor install` at the then-current version; a frozen snapshot inside the ZIP would only
-go stale. The same registry (`sccs/doctor/managed.py`) already filters sync and the OpenCode/Pi/Codex
+go stale. The same registry (`sccs/doctor/managed.py`) already filters sync and the OpenCode/Pi
 exports. Extend it via `doctor.managed_excludes` in `config.yaml`; `--include-managed` disables the
 filter for a single run.
 

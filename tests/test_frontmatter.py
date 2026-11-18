@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 
 from sccs.convert.frontmatter import (
@@ -136,31 +135,6 @@ class TestConvertersRejectStackedFrontmatter:
         path.write_text(content, encoding="utf-8")
         return path
 
-    def test_codex_command_wrap_emits_one_block(self, tmp_path):
-        from sccs.integrations.codex import _render_command
-
-        path = self._write(tmp_path, "s.md", REAL_WORLD_BROKEN)
-        document, warnings = _render_command("s", path)
-
-        assert document.count("\n---\n") == 1, f"stacked frontmatter:\n{document}"
-        assert document.startswith("---\nname: s\n")
-        assert "Strict Project Rules" in document
-        assert any("invalid YAML in frontmatter" in w for w in warnings)
-        # The misleading warning must be gone — the description exists.
-        assert not any("has no 'description'" in w for w in warnings)
-
-    def test_codex_agent_body_has_no_leftover_fence(self, tmp_path):
-        from sccs.integrations.codex import _render_agent
-
-        path = self._write(tmp_path, "broken.md", REAL_WORLD_BROKEN)
-        document, warnings = _render_agent(path)
-
-        parsed = tomllib.loads(document)
-        assert not parsed["developer_instructions"].lstrip().startswith("---")
-        assert "Strict Project Rules" in parsed["developer_instructions"]
-        assert any("invalid YAML in frontmatter" in w for w in warnings)
-        assert not any("has no 'description'" in w for w in warnings)
-
     def test_opencode_agent_emits_one_block(self, tmp_path):
         from sccs.integrations.opencode import _render_agent as oc_render_agent
 
@@ -173,16 +147,14 @@ class TestConvertersRejectStackedFrontmatter:
 
     def test_quoted_argument_hint_parses_normally(self, tmp_path):
         """The fix on the source side: quoting makes it valid YAML again."""
-        from sccs.integrations.codex import _render_command
+        from sccs.integrations.opencode import _render_agent as oc_render_agent
 
         fixed = REAL_WORLD_BROKEN.replace(
             "argument-hint: [skill-name] [optional-additional-skills...]",
             'argument-hint: "[skill-name] [optional-additional-skills...]"',
         )
         path = self._write(tmp_path, "s.md", fixed)
-        document, warnings = _render_command("s", path)
+        document, warnings = oc_render_agent(path)
 
-        assert "description: Enforce strict adherence" in document
+        assert document.count("\n---\n") == 1
         assert not any("invalid YAML" in w for w in warnings)
-        # argument-hint is dropped on purpose (Codex skills carry name/description).
-        assert any("dropped" in w and "argument-hint" in w for w in warnings)

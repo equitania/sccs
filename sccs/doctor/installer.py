@@ -724,65 +724,6 @@ def _winget_links_path_block(name: str) -> str:
     )
 
 
-def _cao_provider_actions(statuses: list | None) -> list[DoctorAction]:
-    """Re-apply the CAO provider patches that a `cao update` wiped.
-
-    In-process (`python_callable`), like the statusline auto-fix: the work is
-    reading and rewriting files, so there is nothing to whitelist in the runner
-    and no shell to reason about.
-
-    `anchor_lost` is deliberately NOT runnable. It means CAO's own layout moved
-    under the patch definition, and a half-applied patch leaves a package that
-    still imports but fails at launch — the user gets a report and a pointer,
-    not a guess.
-    """
-    if not statuses:
-        return []
-
-    from sccs.doctor.cao import apply_provider_patch
-
-    actions: list[DoctorAction] = []
-    for st in statuses:
-        if st.state == "patched":
-            continue
-        component = f"cao-provider:{st.spec.name}"
-        if st.state == "anchor_lost":
-            problems = "\n".join(f"#   {p}" for p in st.problems)
-            actions.append(
-                DoctorAction(
-                    label=f"CAO provider {st.spec.name}: patch sites no longer match",
-                    cmd=None,
-                    manual_block=(
-                        f"# CAO's layout has changed — SCCS will not guess where to patch.\n"
-                        f"# Package: {st.package_path}\n"
-                        f"{problems}\n"
-                        f"# Re-derive the anchors in the provider declaration "
-                        f"(doctor.cao_providers) against the installed package."
-                    ),
-                    runnable=False,
-                    component=component,
-                )
-            )
-            continue
-
-        spec, package = st.spec, st.package_path
-
-        def _patch(spec=spec, package=package) -> None:
-            apply_provider_patch(spec, package)
-
-        verb = "install" if st.state == "missing" else "restore"
-        actions.append(
-            DoctorAction(
-                label=f"{verb} CAO provider {st.spec.name} ({len(st.pending)} file(s) in {st.package_path})",
-                cmd=None,
-                python_callable=_patch,
-                runnable=True,
-                component=component,
-            )
-        )
-    return actions
-
-
 def _cli_tool_install_actions(
     statuses: list[CliToolStatus] | None,
     *,
@@ -1798,7 +1739,6 @@ def build_install_plan(
     settings_path: Path | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
-    cao_providers: list | None = None,
     statusline_presets: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
     bundled_mods: list[BundledModStatus] | None = None,
@@ -1839,7 +1779,6 @@ def build_install_plan(
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     actions.extend(_cli_tool_install_actions(cli_tools))
-    actions.extend(_cao_provider_actions(cao_providers))
     actions.extend(_statusline_preset_install_actions(statusline_presets))
     # Settings.json sanitisation runs LAST so that third-party tools
     # (@opengsd/gsd-core, etc.) which overwrite settings.json during their
@@ -1870,7 +1809,6 @@ def build_update_plan(
     settings_path: Path | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
-    cao_providers: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
     bundled_mods: list[BundledModStatus] | None = None,
     mirror: MirrorReport | None = None,
@@ -1906,7 +1844,6 @@ def build_update_plan(
     if status_lines:
         actions.extend(_status_line_actions(status_lines))
     actions.extend(_cli_tool_install_actions(cli_tools))
-    actions.extend(_cao_provider_actions(cao_providers))
     if settings_hook_violations and settings_path is not None:
         actions.extend(_settings_hook_cleanup_actions(settings_hook_violations, settings_path=settings_path))
 
@@ -1934,7 +1871,6 @@ def build_optimize_plan(
     settings_path: Path | None = None,
     gsd_orphans: list[GsdOrphanStatus] | None = None,
     cli_tools: list[CliToolStatus] | None = None,
-    cao_providers: list | None = None,
     skill_packages: list[SkillPackageStatus] | None = None,
     bundled_mods: list[BundledModStatus] | None = None,
     mirror: MirrorReport | None = None,
@@ -2062,7 +1998,6 @@ def build_optimize_plan(
     actions.extend(_mcp_server_install_warnings(mcp_servers))
 
     actions.extend(_cli_tool_install_actions(cli_tools))
-    actions.extend(_cao_provider_actions(cao_providers))
 
     if status_lines:
         actions.extend(_status_line_actions(status_lines))

@@ -1,5 +1,23 @@
 # Release Notes
 
+## Version 2.76.0 (18.11.2026)
+
+### Removed
+
+- **OpenAI Codex integration.** `sccs integrations codex …` (`status`, `export-skills`, `export-agents`, `export-commands`, `export-all`, `export-hooks`) is gone, together with the Codex target of `sccs integrations sync-all`, the Codex probe of `sccs capacity`, the Codex wrapper template of `sccs agents` and the `codex:` configuration block. Skills, agents, commands and hooks that were already exported to `~/.agents/skills/`, `~/.codex/agents/` and `~/.codex/hooks.json` stay where they are; sccs no longer touches them.
+- **`sccs integrations sync-all --replace-foreign`.** The option only ever applied to Codex targets, so it is removed with them.
+- **CAO provider check in `sccs doctor`.** The check that re-applied extra providers to an installed `cao` after a `cao update` is removed, with the `doctor.cao_providers` and `doctor.extra_cao_providers` configuration keys. `sccs capacity` stays and now describes itself as input for any supervising agent.
+- **Codex plugin agents in `sccs agents`.** Agents shipped by the `codex@openai-codex` plugin are no longer listed; the agent table shows only the files in `~/.claude/agents`.
+
+### Changed
+
+- **`sccs capacity` routing without Codex.** `image_generation` is now `antigravity` or `paid-api`, and `independent_reviewer` is `antigravity` or `none`. When Gemini is tight there is no independent reviewer: Antigravity on a Claude model never counts, because that would be self-review.
+- **Wrapper agents are excluded from fewer lists.** Creating or adopting a wrapper adds its name to `opencode.exclude` and `pi.exclude` only. An existing `codex.exclude` entry is left untouched and ignored.
+
+### Compatibility
+
+- **Old configuration files still load.** A `codex:` block and the `doctor.cao_providers` / `doctor.extra_cao_providers` keys in `~/.config/sccs/config.yaml` are ignored silently; nothing needs to be edited. The `doctor.retired_plugins` mechanism is unchanged.
+
 ## Version 2.75.0 (16.11.2026)
 
 ### Added

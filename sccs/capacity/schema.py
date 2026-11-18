@@ -19,8 +19,8 @@ LOW_REMAINING_PERCENT = 20.0
 class QuotaWindow:
     """One rolling quota window of one provider scope.
 
-    Providers disagree on which half of the fraction they report — Codex emits
-    ``used_percent``, Antigravity emits remaining — so both fields are carried
+    Providers may disagree on which half of the fraction they report
+    (used or remaining), so both fields are carried
     and whichever is missing is derived. ``expired`` means ``resets_at`` already
     passed, i.e. the window rolled over since the value was observed and the
     real remaining share is 100%.
@@ -46,7 +46,7 @@ class QuotaWindow:
 class QuotaScope:
     """A group of windows sharing one limit pool.
 
-    Codex has a single pool. Antigravity bills Gemini models and the Claude/GPT
+    Antigravity bills Gemini models and the Claude/GPT
     models it resells against *separate* pools, which is why scopes are a list
     and not a flat field — routing must be able to see that Gemini is exhausted
     while the Claude pool is untouched.
@@ -77,10 +77,9 @@ class ProviderCapacity:
     observed_at: str | None = None
     scopes: list[QuotaScope] = field(default_factory=list)
     # Affirmative evidence that the plan quota is spent — NOT the same as having
-    # no data. Codex reports exhaustion by replacing its two windows with null
-    # and switching limit_id, so an empty scope can mean either "nothing known"
-    # or "nothing left"; conflating them once made this tool recommend a
-    # provider that was rate-limited for another three hours.
+    # no data. A provider can report exhaustion by dropping its windows, so an
+    # empty scope can mean either "nothing known" or "nothing left"; conflating
+    # them once made this tool recommend a provider that was still rate-limited.
     exhausted: bool = False
     note: str | None = None
     error: str | None = None
@@ -90,8 +89,8 @@ class ProviderCapacity:
 class RoutingAdvice:
     """Capacity-derived hints a supervisor can act on without re-deriving them."""
 
-    image_generation: str  # "codex" | "antigravity" | "paid-api"
-    independent_reviewer: str  # "antigravity" | "codex" | "none"
+    image_generation: str  # "antigravity" | "paid-api"
+    independent_reviewer: str  # "antigravity" | "none"
     parallel_workers_ok: bool
     constraints: list[str] = field(default_factory=list)
 

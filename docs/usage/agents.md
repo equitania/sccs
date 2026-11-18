@@ -10,7 +10,7 @@
 
 Einrichtung Schritt für Schritt mit mehreren Anbietern: [usage/multi-provider-agents.de.md](../../usage/multi-provider-agents.de.md)
 
-Ein interaktives Claude-Code-Fenster arbeitet als **Supervisor**: Es gibt Reviews, zweite Meinungen und begrenzte Analysen an andere KI-CLIs ab (Codex, Antigravity/Gemini, OpenCode/Kimi) und prüft jeden zurückgekommenen Befund selbst am Code. Die Brücke sind kleine **Wrapper-Agenten** in `~/.claude/agents/`, die nur einen CLI-Aufruf weiterreichen. `sccs agents` richtet diese Wrapper ein und hält sie in Ordnung.
+Ein interaktives Claude-Code-Fenster arbeitet als **Supervisor**: Es gibt Reviews, zweite Meinungen und begrenzte Analysen an andere KI-CLIs ab (Antigravity/Gemini, OpenCode/Kimi) und prüft jeden zurückgekommenen Befund selbst am Code. Die Brücke sind kleine **Wrapper-Agenten** in `~/.claude/agents/`, die nur einen CLI-Aufruf weiterreichen. `sccs agents` richtet diese Wrapper ein und hält sie in Ordnung.
 
 **`sccs agents` ist reine Konfiguration.** Es startet, verteilt oder überwacht keine Agentenarbeit, installiert keine CLIs (das macht `sccs doctor`) und meldet nirgends an (das macht jedes Werkzeug selbst).
 
@@ -26,7 +26,7 @@ sccs agents new <tool> <name> [--model M]    # neuen schreibgeschützten Wrapper
 sccs agents set-model <name> <modell>    # Modell eines verwalteten Wrappers ändern
 ```
 
-`<tool>` ist `agy` (Antigravity, immer ein Gemini-Modell), `opencode` oder `codex`. Für Pi gibt es noch keine getestete Vorlage; `sccs agents new pi …` bricht mit „Pi has no tested wrapper template yet.“ ab. Ohne Terminal (Pipe, Skript) gibt `sccs agents` die Tabelle aus statt der Vollbild-Ansicht.
+`<tool>` ist `agy` (Antigravity, immer ein Gemini-Modell), oder `opencode`. Für Pi gibt es noch keine getestete Vorlage; `sccs agents new pi …` bricht mit „Pi has no tested wrapper template yet.“ ab. Ohne Terminal (Pipe, Skript) gibt `sccs agents` die Tabelle aus statt der Vollbild-Ansicht.
 
 **Vollbild-Ansicht.** Oben der Supervisor (Claude Code, Sitzungsmodell, Agentenordner), darunter eine Zeile je Agent mit dem Zustand seines Werkzeugs, sodass ein kaputtes Werkzeug genau an dem Agenten auftaucht, den es lahmlegt. Werkzeuge ohne Agent erscheinen als gedimmte Zeile. Die Zeile darunter erklärt den gewählten Agenten (wie Read-only erzwungen wird, ob der Export aus ist).
 
@@ -39,7 +39,7 @@ sccs agents set-model <name> <modell>    # Modell eines verwalteten Wrappers än
 | `r` | neu einlesen |
 | `q` | beenden |
 
-**Die Spalte „Mode“** zeigt `read-only` für Wrapper, die sccs verwaltet; `read-only (not adopted)` für einen handgeschriebenen Wrapper, dessen Aufrufform sccs erkennt, den es aber noch nicht übernommen hat; `unmanaged` für einen Agenten, dessen Form zu keiner Vorlage passt (sccs schreibt ihn nie); `plugin` für Agenten aus Plugins (zum Beispiel `codex:codex-rescue`, nur lesbar). Ein angehängtes `€` heißt: jeder Aufruf kostet OpenRouter-Guthaben.
+**Die Spalte „Mode“** zeigt `read-only` für Wrapper, die sccs verwaltet; `read-only (not adopted)` für einen handgeschriebenen Wrapper, dessen Aufrufform sccs erkennt, den es aber noch nicht übernommen hat; `unmanaged` für einen Agenten, dessen Form zu keiner Vorlage passt (sccs schreibt ihn nie). Ein angehängtes `€` heißt: jeder Aufruf kostet OpenRouter-Guthaben.
 
 **Bestehende Wrapper übernehmen.** `sccs agents adopt antigravity-worker` (oder Enter in der Ansicht) fragt einmal nach, fügt dann nur einen `sccs:`-Block in den Frontmatter ein und lässt den Rest der Datei Byte für Byte unverändert (auch CRLF und BOM bleiben). Danach funktioniert `set-model`. Mit `--yes` entfällt die Rückfrage; mit `--json` ist `--yes` Pflicht.
 
@@ -47,7 +47,7 @@ sccs agents set-model <name> <modell>    # Modell eines verwalteten Wrappers än
 
 **Neuer Wrapper.** `sccs agents new opencode review-worker --model openrouter/some-model` legt `~/.claude/agents/review-worker.md` aus der mitgelieferten Vorlage an, immer schreibgeschützt. Der Name besteht aus Kleinbuchstaben, Ziffern und `-`, ohne `/` und ohne `.md`. Eine vorhandene Datei wird nie überschrieben. **Danach Claude Code neu starten**, sonst kennt die laufende Sitzung den Agenten nicht.
 
-**Warum `Export: off`.** `~/.claude/agents` wird von sccs synchronisiert, und `sccs integrations codex|opencode|pi` exportiert Agenten in andere Werkzeuge. Ein Wrapper, der „Rufe `opencode run` auf“ sagt, hat dort nichts verloren: Er würde in OpenCode oder Codex wieder als Agent auftauchen und sich dort selbst aufrufen. Beim Anlegen und Übernehmen trägt sccs den Namen deshalb in `opencode.exclude`, `pi.exclude` und `codex.exclude` der `config.yaml` ein (einmalig, mit Backup). Stehen alle drei Einträge, zeigt die Ansicht `Export: off`. Der Wrapper selbst wird weiter zwischen Ihren Rechnern synchronisiert; auf einem Host ohne das Werkzeug zeigt die Zeile dann den fehlenden CLI-Zustand.
+**Warum `Export: off`.** `~/.claude/agents` wird von sccs synchronisiert, und `sccs integrations opencode|pi` exportiert Agenten in andere Werkzeuge. Ein Wrapper, der „Rufe `opencode run` auf“ sagt, hat dort nichts verloren: Er würde in OpenCode wieder als Agent auftauchen und sich dort selbst aufrufen. Beim Anlegen und Übernehmen trägt sccs den Namen deshalb in `opencode.exclude` und `pi.exclude` der `config.yaml` ein (einmalig, mit Backup). Stehen beide Einträge, zeigt die Ansicht `Export: off`. Der Wrapper selbst wird weiter zwischen Ihren Rechnern synchronisiert; auf einem Host ohne das Werkzeug zeigt die Zeile dann den fehlenden CLI-Zustand.
 
 ### 2. Arbeiten
 
@@ -60,7 +60,7 @@ sccs agents set-model <name> <modell>    # Modell eines verwalteten Wrappers än
 
 2. Aufgaben so stellen, wie man sie sagt:
 
-   - „Lass den Diff von Codex, Gemini und Kimi prüfen und gleiche die Befunde am Code ab“
+   - „Lass den Diff von Gemini und Kimi prüfen und gleiche die Befunde am Code ab“
    - „Hol eine zweite Meinung von Gemini zu diesem Entwurf“
 
 3. Der Supervisor startet die Wrapper **im Hintergrund**, arbeitet weiter und wird benachrichtigt, wenn ein Worker fertig ist. Er kennzeichnet jeden Befund als **ungeprüfte Behauptung** des jeweiligen Modells, prüft ihn einzeln am Code und berichtet, welche Befunde standgehalten haben und welche nicht.
@@ -75,13 +75,12 @@ Neu angelegte Agenten sieht eine bereits laufende Claude-Code-Sitzung nicht: ein
 
 ### 4. Fallen
 
-- **Codex' eigene Sandbox ist nicht nono.** Ein `EPERM` auf `/tmp/xcrun_db…` in einem Codex-Lauf ist Codex' `read-only`-Sandbox bei der Arbeit. Weglassen, mit lesenden Mitteln weitermachen; keinen Neustart der nono-Sitzung verlangen.
 - **Gemini braucht das Material im Prompt.** Headless kann Antigravity keine Rückfrage stellen; jeder Befehl außerhalb der Erlaubnisliste wird abgelehnt, und der Lauf endet mit `jetski: no output produced`. Der Wrapper legt deshalb den Diff oder die Auszüge in den Prompt. Taucht diese Meldung auf, fehlte Material.
 - **OpenCode kostet OpenRouter-Guthaben** pro Aufruf (Markierung `€`). Ein Fehler zu Guthaben oder Anmeldung wird gemeldet, nicht mit einem anderen Anbieter wiederholt.
 - **Kostenlose `opencode/*`-Modelle nicht für Kundendaten.** Die Datenrichtlinie ist unklar; der Wrapper reicht es auf Wunsch durch, sagt das aber in seiner Antwort. `new` und `set-model` (CLI und Ansicht) warnen bei einem solchen Modell: „Free opencode/* models have an unclear data policy — not for code with customer data.“
 - **Ein Gemini-Wrapper bleibt bei Gemini.** Antigravity verkauft auch Claude- und GPT-Modelle weiter; auf eines davon auszuweichen wäre Selbstreview. Geht kein Gemini-Modell, meldet der Wrapper das und hört auf. Dieselbe Regel steht hinter `sccs capacity`.
 - **Ein neuer Agent braucht einen Neustart von Claude Code** (siehe oben).
-- **Anmelden** muss man in jedem Werkzeug selbst (`agy`, `codex login`, `opencode auth login`); die Ansicht zeigt nur den Zustand. Auth-Dateien werden auf Vorhandensein geprüft, nie gelesen: eine vorhandene Datei ergibt `yes`, eine fehlende `unknown` (die Anmeldung kann auch im Schlüsselbund oder in Umgebungsvariablen liegen).
+- **Anmelden** muss man in jedem Werkzeug selbst (`agy`, `opencode auth login`); die Ansicht zeigt nur den Zustand. Auth-Dateien werden auf Vorhandensein geprüft, nie gelesen: eine vorhandene Datei ergibt `yes`, eine fehlende `unknown` (die Anmeldung kann auch im Schlüsselbund oder in Umgebungsvariablen liegen).
 
 ---
 
@@ -89,7 +88,7 @@ Neu angelegte Agenten sieht eine bereits laufende Claude-Code-Sitzung nicht: ein
 
 Step-by-step setup with several providers: [usage/multi-provider-agents.en.md](../../usage/multi-provider-agents.en.md)
 
-One interactive Claude Code window acts as the **supervisor**: it hands reviews, second opinions and bounded analyses to other AI CLIs (Codex, Antigravity/Gemini, OpenCode/Kimi) and then checks every returned finding against the code itself. The bridge is a set of small **wrapper agents** in `~/.claude/agents/` that only forward one CLI call. `sccs agents` sets those wrappers up and keeps them tidy.
+One interactive Claude Code window acts as the **supervisor**: it hands reviews, second opinions and bounded analyses to other AI CLIs (Antigravity/Gemini, OpenCode/Kimi) and then checks every returned finding against the code itself. The bridge is a set of small **wrapper agents** in `~/.claude/agents/` that only forward one CLI call. `sccs agents` sets those wrappers up and keeps them tidy.
 
 **`sccs agents` is configuration only.** It never starts, dispatches or monitors agent work, never installs the CLIs (that is `sccs doctor`) and never logs in (each tool does that itself).
 
@@ -105,7 +104,7 @@ sccs agents new <tool> <name> [--model M]    # create a new read-only wrapper
 sccs agents set-model <name> <model>     # change a managed wrapper's model
 ```
 
-`<tool>` is `agy` (Antigravity, always a Gemini model), `opencode` or `codex`. Pi has no tested template yet; `sccs agents new pi …` exits with „Pi has no tested wrapper template yet.“. Without a terminal (pipe, script) `sccs agents` prints the table instead of the full-screen view.
+`<tool>` is `agy` (Antigravity, always a Gemini model), or `opencode`. Pi has no tested template yet; `sccs agents new pi …` exits with „Pi has no tested wrapper template yet.“. Without a terminal (pipe, script) `sccs agents` prints the table instead of the full-screen view.
 
 **Full-screen view.** The supervisor on top (Claude Code, session model, agent folder), then one row per agent carrying the state of its tool, so a broken tool shows up at the agent it disables. Tools without an agent appear as a dimmed row. The line below explains the selected agent (how read-only is enforced, whether export is off).
 
@@ -118,7 +117,7 @@ sccs agents set-model <name> <model>     # change a managed wrapper's model
 | `r` | reload |
 | `q` | quit |
 
-**The Mode column** reads `read-only` for wrappers sccs manages; `read-only (not adopted)` for a hand-written wrapper whose command shape sccs recognises but has not adopted yet; `unmanaged` for an agent matching no template (sccs never writes it); `plugin` for agents shipped by plugins (for example `codex:codex-rescue`, display only). A trailing `€` means every call costs OpenRouter credit.
+**The Mode column** reads `read-only` for wrappers sccs manages; `read-only (not adopted)` for a hand-written wrapper whose command shape sccs recognises but has not adopted yet; `unmanaged` for an agent matching no template (sccs never writes it). A trailing `€` means every call costs OpenRouter credit.
 
 **Adopt existing wrappers.** `sccs agents adopt antigravity-worker` (or Enter in the view) asks once, then inserts only an `sccs:` block into the frontmatter and leaves the rest of the file byte for byte as it was (CRLF and BOM included). Afterwards `set-model` works. `--yes` skips the question; with `--json`, `--yes` is required.
 
@@ -126,7 +125,7 @@ sccs agents set-model <name> <model>     # change a managed wrapper's model
 
 **New wrapper.** `sccs agents new opencode review-worker --model openrouter/some-model` creates `~/.claude/agents/review-worker.md` from the bundled template, always read-only. The name is lowercase letters, digits and `-`, no `/`, no `.md`. An existing file is never overwritten. **Restart Claude Code afterwards**, or the running session does not know the agent.
 
-**Why `Export: off`.** `~/.claude/agents` is synced by sccs, and `sccs integrations codex|opencode|pi` exports agents into other tools. A wrapper that says „call `opencode run`“ does not belong there: it would reappear as an agent inside OpenCode or Codex and call itself. On create and adopt, sccs therefore adds the name to `opencode.exclude`, `pi.exclude` and `codex.exclude` in `config.yaml` (once, with a backup). When all three hold the name, the view shows `Export: off`. The wrapper itself still syncs between your machines; on a host without the tool, the row shows the missing CLI.
+**Why `Export: off`.** `~/.claude/agents` is synced by sccs, and `sccs integrations opencode|pi` exports agents into other tools. A wrapper that says „call `opencode run`“ does not belong there: it would reappear as an agent inside OpenCode and call itself. On create and adopt, sccs therefore adds the name to `opencode.exclude` and `pi.exclude` in `config.yaml` (once, with a backup). When both hold the name, the view shows `Export: off`. The wrapper itself still syncs between your machines; on a host without the tool, the row shows the missing CLI.
 
 ### 2. Work
 
@@ -139,7 +138,7 @@ sccs agents set-model <name> <model>     # change a managed wrapper's model
 
 2. Ask for work the way you would say it:
 
-   - „Lass den Diff von Codex, Gemini und Kimi prüfen und gleiche die Befunde am Code ab“ (have Codex, Gemini and Kimi review the diff and reconcile the findings against the code)
+   - „Lass den Diff von Gemini und Kimi prüfen und gleiche die Befunde am Code ab“ (have Gemini and Kimi review the diff and reconcile the findings against the code)
    - „Hol eine zweite Meinung von Gemini zu diesem Entwurf“ (get a second opinion from Gemini on this draft)
 
 3. The supervisor starts the wrappers **in the background**, keeps working, and is notified when a worker finishes. It marks every finding as an **unverified claim** of the model that made it, checks each one against the code and reports which held and which did not.
@@ -154,10 +153,9 @@ A Claude Code session that was already running does not see newly created agents
 
 ### 4. Traps
 
-- **Codex' own sandbox is not nono.** An `EPERM` on `/tmp/xcrun_db…` inside a Codex run is Codex' `read-only` sandbox doing its job. Skip it and carry on with reading tools; do not ask for a restart of the nono session.
 - **Gemini needs the material in the prompt.** Headless, Antigravity cannot ask for permission; every command outside the allowlist is denied and the run ends with `jetski: no output produced`. The wrapper therefore puts the diff or the excerpts into the prompt. If you see that message, material was missing.
 - **OpenCode costs OpenRouter credit** per call (marked `€`). An error about credit or login is reported, not retried with another provider.
 - **Free `opencode/*` models are not for customer data.** Their data policy is unclear; the wrapper passes it on if asked, but says so in its answer. `new` and `set-model` (CLI and view) warn about such a model: “Free opencode/* models have an unclear data policy — not for code with customer data.”
 - **A Gemini wrapper stays on Gemini.** Antigravity also resells Claude and GPT models; falling back to one of them would be a self-review. If no Gemini model works, the wrapper says so and stops. The same rule stands behind `sccs capacity`.
 - **A new agent needs a Claude Code restart** (see above).
-- **Logging in** is done in each tool itself (`agy`, `codex login`, `opencode auth login`); the view only shows the state. Auth files are checked for presence and never read: a present file gives `yes`, an absent one `unknown` (credentials may also live in a keyring or environment variables).
+- **Logging in** is done in each tool itself (`agy`, `opencode auth login`); the view only shows the state. Auth files are checked for presence and never read: a present file gives `yes`, an absent one `unknown` (credentials may also live in a keyring or environment variables).

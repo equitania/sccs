@@ -44,8 +44,7 @@ class ReceiptEntry:
     # True when something already existed at `target` before SCCS ever wrote
     # there. Such an entry is NEVER written over by install and NEVER removed
     # by revoke — "written by us" and "was already here" are different facts,
-    # and only the first justifies displacing or deleting anything. Same line
-    # as the foreign_target guard in the Codex export.
+    # and only the first justifies displacing or deleting anything.
     #
     # The value is STICKY: it is established at the first install and carried
     # forward by every later one (see install.py::_sticky_pre_existing).

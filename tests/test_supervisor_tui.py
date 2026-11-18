@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import json
 
 import pytest
 from textual.widgets import DataTable, MarkdownViewer, OptionList, Static
@@ -32,12 +31,6 @@ def _env(fake_home, empty_path, monkeypatch, tmp_path):
     monkeypatch.setenv("SCCS_CONFIG", str(cfg / "config.yaml"))
     write_agent(fake_home, "antigravity-worker", FIX("antigravity-worker.md"))
     write_agent(fake_home, "opencode-worker", FIX("opencode-worker.md"))
-    plugin = fake_home / "plugins" / "codex"
-    (plugin / "agents").mkdir(parents=True)
-    (plugin / "agents" / "codex-rescue.md").write_text("---\nname: codex-rescue\n---\nbody\n", encoding="utf-8")
-    index = fake_home / ".claude" / "plugins" / "installed_plugins.json"
-    index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text(json.dumps({"plugins": {"codex@openai-codex": [{"installPath": str(plugin)}]}}), encoding="utf-8")
     return fake_home
 
 
@@ -61,22 +54,23 @@ async def test_rows_and_free_row(fake_home):
     app = AgentsApp(home=fake_home)
     async with app.run_test(size=(120, 30)) as pilot:
         await _ready(app, pilot)
-        assert _names(app) == ["antigravity-worker", "opencode-worker", "codex:codex-rescue", "(free)"]
+        assert _names(app) == ["antigravity-worker", "opencode-worker", "(free)"]
         table = app.query_one("#agents", DataTable)
-        assert "pi" in str(table.get_row_at(3)[1]) and "missing" in str(table.get_row_at(3)[1])
+        assert "pi" in str(table.get_row_at(2)[1]) and "missing" in str(table.get_row_at(2)[1])
         assert "€" in str(table.get_row_at(1)[3])
 
 
 @arun
-async def test_edit_key_on_plugin_row_notifies_and_writes_nothing(fake_home):
+async def test_edit_key_on_unmanaged_row_notifies_and_writes_nothing(fake_home):
+    write_agent(fake_home, "helper", "---\nname: helper\n---\nJust prose.\n")
     before = {p: p.read_bytes() for p in (fake_home / ".claude" / "agents").glob("*.md")}
     app = AgentsApp(home=fake_home)
     async with app.run_test(size=(120, 30)) as pilot:
         await _ready(app, pilot)
-        _select(app, "agent:codex:codex-rescue")
+        _select(app, "agent:helper")
         await pilot.press("m")
         await pilot.pause()
-        assert "Plugin agents" in app.last_notice
+        assert "Unmanaged" in app.last_notice
         assert not isinstance(app.screen, ModelScreen)
     assert before == {p: p.read_bytes() for p in (fake_home / ".claude" / "agents").glob("*.md")}
 
@@ -167,7 +161,6 @@ async def test_set_model_free_text_when_list_unreadable(fake_home):
 
 def test_mode_label_values(fake_home):
     labels = {a.name: mode_label(a) for a in scan_agents(fake_home)}
-    assert labels["codex:codex-rescue"] == "plugin"
     assert labels["opencode-worker"] == "read-only (not adopted) €"
     assert labels["antigravity-worker"] == "read-only (not adopted)"
 
@@ -204,21 +197,6 @@ async def test_closing_picker_while_models_load_does_not_crash(fake_home, monkey
 
 
 @arun
-async def test_two_plugin_install_paths_do_not_crash_tui(fake_home):
-    other = fake_home / "plugins" / "codex2"
-    (other / "agents").mkdir(parents=True)
-    (other / "agents" / "codex-rescue.md").write_text("---\nname: codex-rescue\n---\nbody\n", encoding="utf-8")
-    index = fake_home / ".claude" / "plugins" / "installed_plugins.json"
-    data = json.loads(index.read_text())
-    data["plugins"]["codex@openai-codex"].append({"scope": "project", "installPath": str(other)})
-    index.write_text(json.dumps(data), encoding="utf-8")
-    app = AgentsApp(home=fake_home)
-    async with app.run_test(size=(120, 30)) as pilot:
-        await _ready(app, pilot)
-        assert _names(app).count("codex:codex-rescue") == 1
-
-
-@arun
 async def test_help_screen_switches_to_approach_document(fake_home):
     app = AgentsApp(home=fake_home)
     async with app.run_test(size=(120, 30)) as pilot:
@@ -232,9 +210,8 @@ async def test_help_screen_switches_to_approach_document(fake_home):
         assert app.screen.text != usage and "not available" not in app.screen.text
 
 
-def test_explain_text_for_codex_and_opencode_does_not_claim_inline_material():
+def test_explain_text_for_opencode_does_not_claim_inline_material():
     from sccs.supervisor.tui import _EXPLAIN
 
-    assert "material inline" not in _EXPLAIN["codex"]
     assert "material inline" not in _EXPLAIN["opencode"]
     assert "material inline" in _EXPLAIN["agy"]

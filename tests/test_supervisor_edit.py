@@ -133,12 +133,10 @@ def test_set_model_rejected_changes_nothing(fake_home, cfg, opencode_models_read
     assert p.read_bytes() == before
 
 
-def test_set_model_refuses_plugin_and_unmanaged(fake_home, cfg, empty_path):
+def test_set_model_refuses_unmanaged_and_unknown(fake_home, cfg, empty_path):
     write_agent(fake_home, "opencode-worker", FIX("opencode-worker.md"))
     with pytest.raises(SupervisorError):
         set_model("opencode-worker", NEW, fake_home)
-    with pytest.raises(SupervisorError):
-        set_model("codex:rescue", NEW, fake_home)
     with pytest.raises(SupervisorError):
         set_model("nothing", NEW, fake_home)
 

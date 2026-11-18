@@ -490,8 +490,8 @@ class Console:
         footnotes: list[str] = []
 
         for provider in report.providers:
-            # A provider with no windows must still get a row. Codex reports an
-            # exhausted plan by nulling both windows, and a scope-only loop
+            # A provider with no windows must still get a row. A provider can report an
+            # exhausted plan by nulling its windows, and a scope-only loop
             # silently dropped it from the table — the one moment the reader
             # most needs to see it.
             windowless = not any(scope.windows for scope in provider.scopes)

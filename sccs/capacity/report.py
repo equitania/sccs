@@ -1,22 +1,20 @@
 # SCCS Capacity Report
 #
 # Assembles the per-provider probes into one report and derives the routing
-# hints a CAO supervisor acts on. The derivation lives here rather than in a
+# hints a supervising agent acts on. The derivation lives here rather than in a
 # prompt so it is testable and identical on every host — a supervisor that has
-# to re-derive "is Codex tight?" from raw percentages gets it wrong differently
+# to re-derive "is Gemini tight?" from raw percentages gets it wrong differently
 # every session.
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 from sccs.capacity.probes import (
     _iso,
     _utc_now,
     probe_antigravity,
     probe_claude,
-    probe_codex,
 )
 from sccs.capacity.schema import (
     LOW_REMAINING_PERCENT,
@@ -25,10 +23,6 @@ from sccs.capacity.schema import (
     QuotaScope,
     RoutingAdvice,
 )
-
-# Codex snapshots come from its session records. Older than one 5h window and
-# the 5h figure describes a window that has since rolled over.
-_CODEX_STALE_AFTER_MINUTES = 300
 
 FREE = "free"
 TIGHT = "tight"
@@ -112,39 +106,26 @@ def derive_routing(
 ) -> RoutingAdvice:
     """Turn observed quota into the three decisions a supervisor actually makes."""
     now = now or _utc_now()
-    codex = _find(providers, "codex")
     antigravity = _find(providers, "antigravity")
 
-    codex_status = _status(_provider_remaining(codex))
     gemini = _gemini_scope(antigravity)
     gemini_status = _status(_scope_remaining(gemini)) if gemini else UNKNOWN
 
-    codex_usable = _usable(codex, codex_status)
     gemini_usable = _usable(antigravity, gemini_status) and gemini is not None
 
-    # Image work is free inside both plans; the billed API is the last resort.
-    if codex_usable:
-        image_generation = "codex"
-    elif gemini_usable:
-        image_generation = "antigravity"
-    else:
-        image_generation = "paid-api"
+    # Image work is free inside the Antigravity plan; the billed API is the last resort.
+    image_generation = "antigravity" if gemini_usable else "paid-api"
 
     # Antigravity earns the reviewer slot because a Google model is behind it.
-    # When Gemini is exhausted the answer is Codex — NOT Antigravity running a
-    # Claude model, which would make Anthropic review its own work.
-    if gemini_usable:
-        independent_reviewer = "antigravity"
-    elif codex_usable:
-        independent_reviewer = "codex"
-    else:
-        independent_reviewer = "none"
+    # When Gemini is exhausted there is no independent reviewer - NOT Antigravity
+    # running a Claude model, which would make Anthropic review its own work.
+    independent_reviewer = "antigravity" if gemini_usable else "none"
 
-    codex_weekly = _window(codex, "", "weekly")
     gemini_weekly = _window(antigravity, "gemini", "weekly")
-    weekly_tight = any(
-        w is not None and w.effective_remaining is not None and w.effective_remaining < LOW_REMAINING_PERCENT
-        for w in (codex_weekly, gemini_weekly)
+    weekly_tight = (
+        gemini_weekly is not None
+        and gemini_weekly.effective_remaining is not None
+        and gemini_weekly.effective_remaining < LOW_REMAINING_PERCENT
     ) or any(p.exhausted for p in providers)
 
     constraints: list[str] = []
@@ -156,33 +137,11 @@ def derive_routing(
                 "window resets. Route elsewhere; do not retry."
             )
 
-    codex_5h = _window(codex, "", "5h")
-    if codex_5h and codex_5h.effective_remaining is not None and codex_5h.effective_remaining < LOW_REMAINING_PERCENT:
-        constraints.append(
-            f"Codex 5h window at {codex_5h.effective_remaining:.0f}% remaining"
-            f"{_reset_hint(codex_5h.resets_in_minutes)} - send only short, tightly scoped tasks."
-        )
-    if (
-        codex_weekly
-        and codex_weekly.effective_remaining is not None
-        and codex_weekly.effective_remaining < LOW_REMAINING_PERCENT
-    ):
-        constraints.append(
-            f"Codex weekly window at {codex_weekly.effective_remaining:.0f}% remaining"
-            f"{_reset_hint(codex_weekly.resets_in_minutes)} - do not start parallel Codex workers."
-        )
     if gemini and gemini_status == TIGHT:
         constraints.append(
-            "Gemini quota is tight - fall back to Codex for independent review. "
+            "Gemini quota is tight - no independent reviewer is available. "
             "Do NOT switch Antigravity to a Claude model: that turns cross-review into self-review."
         )
-    if codex and codex.source == "session-cache":
-        age = _stale_minutes(codex.observed_at, now)
-        if age is not None and age > _CODEX_STALE_AFTER_MINUTES:
-            constraints.append(
-                f"Codex figures are {age // 60}h old (read from its last session record); "
-                "run Codex once to refresh before relying on the 5h window."
-            )
     claude = _find(providers, "claude_code")
     if claude and claude.installed:
         constraints.append("Claude Code quota is not machine-readable; treated as the fallback reserve.")
@@ -197,18 +156,9 @@ def derive_routing(
     )
 
 
-def _reset_hint(minutes: int | None) -> str:
-    if minutes is None or minutes <= 0:
-        return ""
-    if minutes < 60:
-        return f" (resets in {minutes}min)"
-    return f" (resets in {minutes // 60}h)"
-
-
 def build_report(
     *,
     offline: bool = False,
-    home: Path | None = None,
     now: datetime | None = None,
     runner=None,
 ) -> CapacityReport:
@@ -216,7 +166,6 @@ def build_report(
     now = now or _utc_now()
     providers = [
         probe_claude(now=now),
-        probe_codex(home=home, now=now),
         probe_antigravity(offline=offline, now=now, runner=runner),
     ]
     return CapacityReport(

@@ -39,15 +39,12 @@ _EXPLAIN: dict[str, str] = {
         "Read-only via --agent claude-ro (inline config) · reads files itself"
         " · free opencode/* models: unclear data policy"
     ),
-    "codex": "Read-only via codex exec -s read-only --ephemeral · reads files itself",
 }
 _NEW_TOOLS: tuple[tuple[str, str], ...] = (
     ("agy", "Antigravity (Gemini)"),
     ("opencode", "OpenCode"),
-    ("codex", "Codex"),
     ("pi", "Pi (no template yet)"),
 )
-_PLUGIN_NOTICE = "Plugin agents are managed by their plugin; nothing is written."
 _UNMANAGED_NOTICE = "Unmanaged agent: no wrapper template recognised; nothing is written."
 _FREE_NOTICE = "No agent uses this tool. Press n to create one."
 
@@ -92,7 +89,7 @@ def _clip(value: str, width: int) -> str:
 
 
 def _tool_id(agent: AgentInfo) -> str | None:
-    return "codex" if agent.source == "plugin" else agent.template
+    return agent.template
 
 
 class HelpScreen(Screen[None]):
@@ -422,9 +419,7 @@ class AgentsApp(App[None]):
     def _explain(self) -> None:
         agent, free = self._selected()
         if agent is not None:
-            if agent.source == "plugin":
-                text = "Plugin agent: managed by the Codex plugin, never written here."
-            elif agent.template is None:
+            if agent.template is None:
                 text = "Unmanaged: no wrapper template recognised; sccs never writes this file."
             else:
                 text = _EXPLAIN[agent.template]
@@ -459,9 +454,7 @@ class AgentsApp(App[None]):
             if free:
                 self.notice(_FREE_NOTICE)
             return
-        if agent.source == "plugin":
-            self.notice(_PLUGIN_NOTICE)
-        elif agent.template is None:
+        if agent.template is None:
             self.notice(_UNMANAGED_NOTICE)
         else:
             self.push_screen(ModelScreen(agent, agent.template, self.home), lambda r: self._edited(agent.name, r))

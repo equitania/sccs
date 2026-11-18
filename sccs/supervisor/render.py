@@ -15,7 +15,7 @@ from sccs.config.loader import add_supervisor_excludes, load_raw_user_data
 from sccs.convert.frontmatter import parse_frontmatter_ex
 from sccs.supervisor import SupervisorError
 from sccs.supervisor.models import check_model, list_models
-from sccs.supervisor.tools import ToolId, codex_default_model
+from sccs.supervisor.tools import ToolId
 from sccs.supervisor.wrappers import TemplateId, body_hash
 from sccs.utils.paths import atomic_write
 
@@ -25,7 +25,7 @@ DEFAULT_MODELS: dict[str, str] = {
     "agy": "gemini-4-argon-high",
     "opencode": "openrouter/~moonshotai/kimi-latest",
 }
-_TOOL_FOR_TEMPLATE: dict[str, ToolId] = {"agy": "agy", "opencode": "opencode", "codex": "codex"}
+_TOOL_FOR_TEMPLATE: dict[str, ToolId] = {"agy": "agy", "opencode": "opencode"}
 _DESCRIPTION_LINE = re.compile(r"^description: .*$", re.MULTILINE)
 
 
@@ -86,7 +86,7 @@ def new_agent(
     if template == "pi":
         raise SupervisorError(PI_REFUSAL)
     if template not in _TOOL_FOR_TEMPLATE:
-        raise SupervisorError(f"Unknown template '{template}'. Choose one of: agy, opencode, codex.")
+        raise SupervisorError(f"Unknown template '{template}'. Choose one of: agy, opencode.")
     if not NAME_PATTERN.match(name):
         raise SupervisorError(f"Invalid agent name '{name}': use lowercase letters, digits and '-' (no path, no .md).")
     base = home if home is not None else Path.home()
@@ -94,11 +94,7 @@ def new_agent(
     if target.exists():
         raise SupervisorError(f"Agent '{name}' already exists: {target}")
 
-    chosen = model
-    if chosen is None:
-        chosen = codex_default_model(base) if template == "codex" else DEFAULT_MODELS[template]
-        if chosen is None:
-            raise SupervisorError("No default Codex model in ~/.codex/config.toml; pass --model.")
+    chosen = model if model is not None else DEFAULT_MODELS[template]
     check = check_model(template, chosen, list_models(_TOOL_FOR_TEMPLATE[template], base))
     if not check.ok:
         raise SupervisorError(f"Model '{chosen}' refused: {check.reason}")

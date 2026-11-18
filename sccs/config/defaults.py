@@ -423,7 +423,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 ".migration_state.yaml",
                 ".profile_state.yaml",
                 ".deploy_receipt.yaml",
-                ".codex_hooks_state.yaml",
                 "sync.log",
                 "history.yaml",
                 "backups/*",

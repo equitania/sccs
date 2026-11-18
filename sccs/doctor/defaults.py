@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from sccs.doctor.schema import (
     BundledSkillSpec,
-    CaoProviderSpec,
     CliToolSpec,
     MCPServerSpec,
     NodeInstallSpec,
@@ -446,29 +445,3 @@ DEFAULT_DISALLOWED_HOOKS: list[str] = []
 # (`@opengsd/gsd-core: ["gsd-*"]`). Users may override via
 # `doctor.protected_hooks:` in `~/.config/sccs/config.yaml`.
 DEFAULT_PROTECTED_HOOKS: list[str] = ["gsd-"]
-
-# ---------------------------------------------------------------------------
-# CAO provider patches
-# ---------------------------------------------------------------------------
-# CAO 2.5.0 ships four providers and resolves them through a hard-coded
-# if/elif chain fed by a ProviderType enum. Its plugin system cannot help:
-# CAO plugins are observers that receive events after the fact and cannot
-# register a provider. So an extra provider has to be patched into the
-# installed package at every site the registry touches — and every
-# `cao update` replaces that package and removes all of it again. Syncing the
-# provider file alone transports it without ever making CAO use it; this is
-# what closes that gap.
-#
-# No provider is bundled. The only one ever shipped here — pi (`pi_cli`) —
-# was retired from the fleet in v2.67.1, so the list is empty and the doctor
-# reports nothing. The mechanism stays: a provider declared in
-# `doctor.cao_providers` / `extra_cao_providers` (source file in a private
-# location, never in this package, which publishes to PyPI and GitHub) is
-# checked and patched exactly as before.
-#
-# Anchors must be literal text from the installed CAO. When one stops matching,
-# the doctor reports `anchor_lost` and refuses to patch rather than guessing a
-# location — re-derive the anchors against the installed package instead of
-# loosening them.
-
-DEFAULT_CAO_PROVIDERS: list[CaoProviderSpec] = []

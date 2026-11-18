@@ -9,7 +9,7 @@ class SupervisorError(Exception):
 
 from sccs.supervisor.edit import adopt, set_model  # noqa: E402
 from sccs.supervisor.models import MODEL_PATTERN, ModelCheck, ModelList, check_model, list_models  # noqa: E402
-from sccs.supervisor.tools import ToolId, ToolInfo, codex_default_model, detect_tools  # noqa: E402
+from sccs.supervisor.tools import ToolId, ToolInfo, detect_tools  # noqa: E402
 from sccs.supervisor.wrappers import (  # noqa: E402
     AgentInfo,
     TemplateId,
@@ -33,7 +33,6 @@ __all__ = [
     "adopt",
     "body_hash",
     "check_model",
-    "codex_default_model",
     "detect_shape",
     "detect_tools",
     "find_model_token",

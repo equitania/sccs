@@ -378,11 +378,11 @@ def save_opencode_model_map(model_map: dict[str, str], config_path: Path | None 
 
 
 def add_supervisor_excludes(name: str, config_path: Path | None = None) -> bool:
-    """Add an agent name to `opencode.exclude`, `pi.exclude` and `codex.exclude`.
+    """Add an agent name to `opencode.exclude` and `pi.exclude`.
 
     Raw-YAML edit like `save_opencode_model_map`: blocks and lists are created as
     needed, nothing else in the file changes. A backup is written before the write.
-    Returns True when something was added; no write and no backup when all three
+    Returns True when something was added; no write and no backup when both
     lists already contain the name.
     """
     if config_path is None:
@@ -390,7 +390,7 @@ def add_supervisor_excludes(name: str, config_path: Path | None = None) -> bool:
 
     raw = load_raw_user_data(config_path)
     changed = False
-    for key in ("opencode", "pi", "codex"):
+    for key in ("opencode", "pi"):
         block = raw.get(key)
         if not isinstance(block, dict):
             block = {}

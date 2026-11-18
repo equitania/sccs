@@ -1,6 +1,3 @@
-import json
-from pathlib import Path
-
 from sccs.config.schema import RepositoryConfig, SccsConfig
 from sccs.convert.frontmatter import parse_frontmatter_ex
 from sccs.supervisor.wrappers import (
@@ -20,24 +17,10 @@ def only(agents: list[AgentInfo], name: str) -> AgentInfo:
     return found[0]
 
 
-def install_fake_plugin(home: Path, key: str, agents: list[str]) -> Path:
-    install = home / ".claude" / "plugins" / "cache" / key.replace("@", "-")
-    (install / "agents").mkdir(parents=True)
-    for stem in agents:
-        (install / "agents" / f"{stem}.md").write_text(f"---\nname: {stem}\n---\nBody\n", encoding="utf-8")
-    index = home / ".claude" / "plugins" / "installed_plugins.json"
-    index.parent.mkdir(parents=True, exist_ok=True)
-    data = json.loads(index.read_text()) if index.exists() else {"version": 2, "plugins": {}}
-    data["plugins"][key] = [{"scope": "user", "installPath": str(install), "version": "1"}]
-    index.write_text(json.dumps(data), encoding="utf-8")
-    return install
-
-
-def config_with_excludes(opencode: list[str], pi: list[str], codex: list[str]) -> SccsConfig:
+def config_with_excludes(opencode: list[str], pi: list[str]) -> SccsConfig:
     cfg = SccsConfig(repository=RepositoryConfig(path="/nonexistent"))
     cfg.opencode.exclude = list(opencode)
     cfg.pi.exclude = list(pi)
-    cfg.codex.exclude = list(codex)
     return cfg
 
 
@@ -65,17 +48,13 @@ def test_prose_mention_of_flash_model_is_not_the_token():
     assert "flash" not in body[s:e]
 
 
-def test_detect_shape_codex_and_none():
-    codex = 'x\n```bash\ntimeout 900 codex exec -s read-only --ephemeral -m gpt-5 "<P>"\n```\n'
-    assert detect_shape(codex) == "codex"
-    s, e = find_model_token(codex, "codex")  # type: ignore[misc]
-    assert codex[s:e] == "gpt-5"
+def test_detect_shape_none():
     assert detect_shape("just prose, agy -p mentioned\n") is None
     assert detect_shape("```bash\nagy -p x --mode accept-edits\n```\n") is None
 
 
 def test_detect_shape_only_looks_in_first_bash_block():
-    body = "```bash\necho hi\n```\n\n```bash\ncodex exec -s read-only -m x\n```\n"
+    body = "```bash\necho hi\n```\n\n```bash\nopencode run --agent claude-ro -m x\n```\n"
     assert detect_shape(body) is None
 
 
@@ -96,14 +75,14 @@ def test_crlf_and_bom(fake_home):
     assert body[s:e] == "openrouter/~moonshotai/kimi-latest"
     # through scan_agents, with BOM
     write_agent(fake_home, "bom-worker", "﻿" + crlf)
-    a = only(scan_agents(fake_home, config_with_excludes([], [], [])), "bom-worker")
+    a = only(scan_agents(fake_home, config_with_excludes([], [])), "bom-worker")
     assert a.template == "opencode"
     assert a.cli_model == "openrouter/~moonshotai/kimi-latest"
     assert a.managed == "no"
 
 
 def test_missing_agents_dir(fake_home):
-    assert [a for a in scan_agents(fake_home) if a.source == "user"] == []
+    assert scan_agents(fake_home) == []
 
 
 def test_unrecognised_agent_listed_unmanaged(fake_home):
@@ -116,7 +95,7 @@ def test_skips_underscore_dot_and_local(fake_home):
     for n in ("_draft", ".hidden", "x.local"):
         write_agent(fake_home, n, "---\nname: x\n---\nb\n")
     write_agent(fake_home, "keep", "---\nname: keep\n---\nb\n")
-    assert [a.name for a in scan_agents(fake_home) if a.source == "user"] == ["keep"]
+    assert [a.name for a in scan_agents(fake_home)] == ["keep"]
 
 
 def test_unmanaged_recognised_wrapper(fake_home):
@@ -149,32 +128,10 @@ def test_managed_adopted(fake_home):
     assert (a.template, a.managed, a.hash_ok) == ("opencode", "adopted", True)
 
 
-def test_codex_plugin_agent_listed_readonly(fake_home, empty_path, monkeypatch):
-    def boom(*a, **k):
-        raise AssertionError("subprocess spawned")
-
-    monkeypatch.setattr("sccs.doctor.runner._run", boom)
-    (fake_home / ".codex").mkdir()
-    (fake_home / ".codex" / "config.toml").write_text('model = "gpt-9"\n', encoding="utf-8")
-    install_fake_plugin(fake_home, "codex@openai-codex", agents=["codex-rescue"])
-    install_fake_plugin(fake_home, "other@somewhere", agents=["nope"])
-    agents = scan_agents(fake_home)
-    a = only(agents, "codex:codex-rescue")
-    assert (a.source, a.template, a.managed, a.path is not None, a.cli_model) == ("plugin", None, "no", True, "gpt-9")
-    assert not [x for x in agents if "nope" in x.name]
-
-
-def test_malformed_plugin_index(fake_home):
-    idx = fake_home / ".claude" / "plugins" / "installed_plugins.json"
-    idx.parent.mkdir(parents=True)
-    idx.write_text("{not json", encoding="utf-8")
-    assert scan_agents(fake_home) == []
-
-
-def test_excluded_needs_all_three_lists(fake_home):
+def test_excluded_needs_both_lists(fake_home):
     write_agent(fake_home, "w", "---\nname: w\n---\nx\n")
-    assert only(scan_agents(fake_home, config_with_excludes(["w"], ["w"], ["w"])), "w").excluded is True
-    assert only(scan_agents(fake_home, config_with_excludes(["w"], ["w"], [])), "w").excluded is False
+    assert only(scan_agents(fake_home, config_with_excludes(["w"], ["w"])), "w").excluded is True
+    assert only(scan_agents(fake_home, config_with_excludes(["w"], [])), "w").excluded is False
 
 
 def test_find_model_token_in_raw_crlf_file_text():
@@ -188,28 +145,9 @@ def test_find_model_token_in_raw_crlf_file_text():
     assert find_model_token_in_file_text("no frontmatter\n", "agy") is None
 
 
-def test_codex_plugin_with_two_install_paths_yields_one_agent(tmp_path):
-    import json
-
-    for scope in ("a", "b"):
-        (tmp_path / "plug" / scope / "agents").mkdir(parents=True)
-        agent_file = tmp_path / "plug" / scope / "agents" / "codex-rescue.md"
-        agent_file.write_text("---\nname: x\n---\nb\n", encoding="utf-8")
-    index = tmp_path / ".claude" / "plugins" / "installed_plugins.json"
-    index.parent.mkdir(parents=True)
-    entries = [
-        {"scope": "project", "installPath": str(tmp_path / "plug" / "a")},
-        {"scope": "user", "installPath": str(tmp_path / "plug" / "b")},
-    ]
-    index.write_text(json.dumps({"plugins": {"codex@openai-codex": entries}}), encoding="utf-8")
-    found = [a for a in scan_agents(tmp_path, None) if a.source == "plugin"]
-    assert [a.name for a in found] == ["codex:codex-rescue"]
-    assert found[0].path == tmp_path / "plug" / "b" / "agents" / "codex-rescue.md"
-
-
 def test_mode_label_marks_edited_managed_agents():
     from sccs.supervisor.wrappers import AgentInfo, mode_label
 
-    base = {"name": "w", "path": None, "source": "user", "template": "agy", "cli_model": "m", "excluded": False}
+    base = {"name": "w", "path": None, "template": "agy", "cli_model": "m", "excluded": False}
     assert mode_label(AgentInfo(managed="new", hash_ok=False, **base)) == "read-only (edited)"
     assert mode_label(AgentInfo(managed="new", hash_ok=True, **base)) == "read-only"

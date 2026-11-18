@@ -62,7 +62,7 @@ def test_list_table_columns(fake_home):
 
 def test_tools_json(fake_home):
     data = json.loads(_run("tools", "--json").output)
-    assert {t["id"] for t in data["tools"]} == {"claude", "codex", "opencode", "agy", "pi"}
+    assert {t["id"] for t in data["tools"]} == {"claude", "opencode", "agy", "pi"}
 
 
 def test_models_json_unreadable(fake_home, empty_path):

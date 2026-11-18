@@ -171,27 +171,6 @@ Der Abgleich läuft nur auf macOS: Ein Linux- oder Windows-Rechner, der dieselbe
   (`uv tool install sccs==…`), danach `sccs doctor install` erneut ausführen,
   um den Rest des Plans abzuarbeiten.
 
-### CAO-Provider nach einem `cao update` wiederherstellen — ab v2.64.0
-
-Der [CLI Agent Orchestrator](https://github.com/awslabs/cli-agent-orchestrator) (CAO) löst seine Provider über eine **fest verdrahtete if/elif-Kette** auf, die aus einem Enum gespeist wird — kein Erweiterungspunkt. Sein Plugin-System hilft nicht: CAO-Plugins sind reine Beobachter und können keinen Provider registrieren. Einen zusätzlichen Provider anzubinden heißt deshalb, das **installierte Paket** an sechs Stellen zu ergänzen — und jedes `cao update`, `uv tool upgrade` oder Neuinstallieren ersetzt dieses Paket und entfernt alles davon wieder. Das erste Anzeichen ist ein Worker, der nicht mehr startet.
-
-Die Provider-Datei nur zu versionieren transportiert sie, hält CAO aber nicht am Laufen. Genau diese Lücke schließt der Doctor: `sccs doctor check` meldet einen entfernten Provider, `sccs doctor install` spielt ihn wieder ein.
-
-**Seit v2.67.1 ist kein Provider mehr mitgeliefert.** Der einzige, Pi (`pi_cli`), wurde aus der Flotte genommen; `DEFAULT_CAO_PROVIDERS` ist leer, und ohne eigene Deklaration zeigt `doctor check` keine CAO-Zeile. Der Mechanismus bleibt für Provider, die in `doctor.cao_providers` bzw. `doctor.extra_cao_providers` deklariert sind (Name, Binary, `source_dir`, `source_file`, `package_subpath` und die Patch-Stellen mit Anker, Einfügung und Marker):
-
-```
-cao provider: <name>   ❌ MISSING   removed by a CAO update — run `sccs doctor install`
-cao provider: <name>   ✅ OK        patched into /Users/…/site-packages/cli_agent_orchestrator
-```
-
-**Die Quelle liegt bewusst nicht im Paket.** SCCS wird nach PyPI und GitHub veröffentlicht; nur der *Mechanismus* (finden, prüfen, patchen) steht in `sccs/doctor/cao.py`. Die Provider-Datei selbst liegt an einem privaten Ort (`source_dir`) — dieselbe Trennlinie, nach der in v2.60.0 die CAO-Agentenprofile aus diesem Repository verschwunden sind.
-
-**Das Opt-in ist das Zusammentreffen beider, kein Schalter.** Eine Zeile erscheint nur, wenn ein installiertes CAO **und** die Quelle des deklarierten Providers vorhanden sind. Fehlt eines von beiden, erscheint nichts.
-
-**Ein verschobener Ankerpunkt wird gemeldet, nie repariert.** Ändert CAO seinen eigenen Aufbau, meldet der Doctor `CAO layout changed` und druckt, wo die Ankerpunkte in der Provider-Deklaration neu abzuleiten sind. Ein halb angewandter Patch hinterlässt ein Paket, das zwar importiert, aber beim Start scheitert — schlimmer als ein ungepatchtes. Aus demselben Grund läuft die Prüfung **vollständig durch, bevor die erste Datei geschrieben wird**.
-
-Nach dem Einspielen den CAO-Server neu starten, damit der Provider geladen wird.
-
 ### Was wird geprüft?
 
 | Komponente | Check (`check`) | Reparatur (`install` / `update`) |
@@ -245,7 +224,7 @@ doctor:
 - `sccs doctor optimize` entfernt sie nach Rückfrage (Standard: Nein) – ohne `--strict`. `install` und `update` fassen das Paket nicht an.
 - Entfernt wird nur, was die Lock-Datei der `skills`-CLI (`~/.agents/.skill-lock.json`) dem Paket zuordnet. Ohne Lock-Datei passiert nichts – ein eigener Skill, der zufällig `figma` heißt, bleibt.
 - Nach dem Entfernen prüft ein zweiter Schritt, ob die Ordner wirklich weg sind; die `skills`-CLI meldet auch dann Erfolg, wenn sie nichts gefunden hat.
-- Gleichnamige Kopien in `~/.agents/skills/` (Codex-Export) entfernt die `skills`-CLI mit. Per `sccs profile off` geparkte Skills bleiben im Parkbereich.
+- Gleichnamige Kopien in `~/.agents/skills/` entfernt die `skills`-CLI mit. Per `sccs profile off` geparkte Skills bleiben im Parkbereich.
 - Ein Paket darf nicht gleichzeitig in beiden Listen stehen – `config validate` lehnt das ab.
 
 ### Mitgelieferte Mods (v2.75.0)
@@ -593,27 +572,6 @@ same `config.yaml` is neither source nor mirror (since 2.69.1).
   reinstalls `sccs` itself (`uv tool install sccs==…`), re-run
   `sccs doctor install` afterwards to work through the rest of the plan.
 
-### Restoring a CAO provider after a `cao update` — since v2.64.0
-
-The [CLI Agent Orchestrator](https://github.com/awslabs/cli-agent-orchestrator) (CAO) resolves providers through a **hard-coded if/elif chain** fed by an enum — not an extension point. Its plugin system does not help: CAO plugins are observers and cannot register a provider. Adding one therefore means editing the **installed package** at six sites — and every `cao update`, `uv tool upgrade` or reinstall replaces that package and removes all of it again. The first sign is a worker that no longer starts.
-
-Versioning the provider file transports it but does not keep CAO working. That is the gap the doctor closes: `sccs doctor check` reports a wiped provider, `sccs doctor install` puts it back.
-
-**Since v2.67.1 no provider is bundled.** The only one, pi (`pi_cli`), was retired from the fleet; `DEFAULT_CAO_PROVIDERS` is empty, and without a declaration of your own `doctor check` shows no CAO row. The mechanism remains for providers declared in `doctor.cao_providers` or `doctor.extra_cao_providers` (name, binary, `source_dir`, `source_file`, `package_subpath` and the patch sites with anchor, insertion and marker):
-
-```
-cao provider: <name>   ❌ MISSING   removed by a CAO update — run `sccs doctor install`
-cao provider: <name>   ✅ OK        patched into /Users/…/site-packages/cli_agent_orchestrator
-```
-
-**The source is deliberately not bundled.** SCCS publishes to PyPI and GitHub; only the *mechanism* (locate, verify, patch) lives in `sccs/doctor/cao.py`. The provider file itself lives in a private location (`source_dir`) — the same line that took the CAO agent profiles out of this repository in v2.60.0.
-
-**The opt-in is the pairing, not a flag.** A row appears only when an installed CAO **and** the declared provider's source are both present. Missing either means no row at all.
-
-**A moved anchor is reported, never repaired.** If CAO changes its own layout, the doctor reports `CAO layout changed` and prints where to re-derive the anchors in the provider declaration. A half-applied patch leaves a package that imports but fails at launch — worse than an unpatched one. For the same reason verification runs to completion **before the first file is written**.
-
-Restart the CAO server afterwards so the provider is loaded.
-
 ### PowerShell 7+ check (Windows) — since v2.45.0
 
 On **Windows**, `sccs doctor check` verifies that modern **PowerShell 7+** (`pwsh`, not the legacy Windows PowerShell 5.1) is installed and current — it is the shell that consumes the profile produced by `sccs convert fish-to-pwsh`. The table shows a `PowerShell 7+ (pwsh)` row (`OK` / `OUTDATED` / `MISSING`), and when it's missing or older than 7.x the report prints a copy-paste suggestion below the table:
@@ -679,7 +637,7 @@ doctor:
 - `sccs doctor optimize` removes them after a confirm prompt (default: No) — without `--strict`. `install` and `update` leave the package alone.
 - Only what the `skills` CLI lock file (`~/.agents/.skill-lock.json`) attributes to the package is removed. Without a lock file nothing happens — a skill of your own that happens to be called `figma` stays.
 - After the removal a second step checks that the folders are really gone; the `skills` CLI reports success even when it matched nothing.
-- Same-named copies in `~/.agents/skills/` (Codex export) are removed by the `skills` CLI as well. Skills parked with `sccs profile off` stay in the parking area.
+- Same-named copies in `~/.agents/skills/` are removed by the `skills` CLI as well. Skills parked with `sccs profile off` stay in the parking area.
 - A package cannot be in both lists at once — `config validate` rejects it.
 
 ### Bundled mods (v2.75.0)

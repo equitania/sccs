@@ -18,7 +18,7 @@ from sccs.supervisor.tools import ToolId
 from sccs.supervisor.wrappers import AgentInfo, TemplateId, body_hash, find_model_token_in_file_text, scan_agents
 from sccs.utils.paths import atomic_write
 
-_TOOL_FOR_TEMPLATE: dict[str, ToolId] = {"agy": "agy", "opencode": "opencode", "codex": "codex"}
+_TOOL_FOR_TEMPLATE: dict[str, ToolId] = {"agy": "agy", "opencode": "opencode"}
 _HASH_LINE = re.compile(r"^([ \t]+hash:[ \t]*)(\S+)", re.MULTILINE)
 
 
@@ -62,8 +62,6 @@ def _body_of(text: str) -> str:
 def set_model(name: str, model: str, home: Path | None = None) -> ModelCheck:
     """Replace the model value in a managed user agent's command; refresh the hash only if it matched."""
     info = _find_agent(name, home)
-    if info.source != "user":
-        raise SupervisorError(f"'{name}' is a plugin agent and is never edited.")
     if info.managed == "no" or info.template is None or info.path is None:
         raise SupervisorError(f"'{name}' is not managed by sccs; adopt it first.")
     template: TemplateId = info.template
@@ -100,12 +98,12 @@ def _replace_stored_hash(text: str, new_hash: str) -> str:
 def adopt(name: str, home: Path | None = None, config_path: Path | None = None) -> bool:
     """Mark a hand-written wrapper as managed (``template: adopted``); False if it already is."""
     info = _find_agent(name, home)
-    if info.source != "user" or info.path is None:
-        raise SupervisorError(f"'{name}' is a plugin agent and is never edited.")
+    if info.path is None:
+        raise SupervisorError(f"'{name}' has no file; nothing to adopt.")
     if info.managed != "no":
         return False
     if info.template is None:
-        raise SupervisorError(f"'{name}' matches no known wrapper shape (agy, opencode, codex); cannot adopt.")
+        raise SupervisorError(f"'{name}' matches no known wrapper shape (agy, opencode); cannot adopt.")
     text = _read_raw(info.path)
     close = _frontmatter_close(text)
     if close is None:

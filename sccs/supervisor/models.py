@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 from sccs.doctor.runner import run_agy_models, run_opencode_models
-from sccs.supervisor.tools import ToolId, codex_default_model
+from sccs.supervisor.tools import ToolId
 
 MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._:/~][A-Za-z0-9._:/~-]*$")
 
@@ -65,9 +65,6 @@ def list_models(tool: ToolId, home: Path | None = None) -> ModelList:
     base = home if home is not None else Path.home()
     if tool == "claude":
         return ModelList(tool, _CLAUDE_MODELS, True)
-    if tool == "codex":
-        model = codex_default_model(base)
-        return ModelList(tool, (model,) if model else (), False)
     if tool == "pi":
         ids = _pi_models(base)
         return ModelList(tool, ids or (), ids is not None)
@@ -77,7 +74,7 @@ def list_models(tool: ToolId, home: Path | None = None) -> ModelList:
 
 
 def check_model(template: str, model: str, available: ModelList) -> ModelCheck:
-    """Validate `model` for a wrapper template ("agy" | "opencode" | "codex")."""
+    """Validate `model` for a wrapper template ("agy" | "opencode")."""
     if not MODEL_PATTERN.match(model) or "\n" in model:
         return ModelCheck(False, "rejected", "model name contains characters that are not allowed")
     if template == "agy" and not model.startswith("gemini-"):

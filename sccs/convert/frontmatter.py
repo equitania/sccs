@@ -82,7 +82,7 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     in ``doctor/scope_patch.py``: ``render_frontmatter({}, body)`` returns the
     body unchanged, so a gsd-* prompt with unparsable frontmatter is patched
     without losing its frontmatter. Callers that BUILD a new document (the
-    Codex/OpenCode converters, which emit their own frontmatter) must use
+    OpenCode converter, which emits its own frontmatter) must use
     :func:`parse_frontmatter_ex` instead — prepending a header to a body that
     still carries the original block yields two stacked frontmatter blocks.
 

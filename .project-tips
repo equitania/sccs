@@ -1,4 +1,4 @@
-# sccs v2.75.0 | Claude Code Sync Tool (UV)
+# sccs v2.76.0 | Claude Code Sync Tool (UV)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ▸ Setup:    uv venv --python 3.12 && venv+ && uv pip install -e ".[dev]"
 ▸ Sync:     sccs sync --dry-run
@@ -8,8 +8,7 @@
 ▸ Lint:     ruff check sccs/ tests/ && ruff format --check sccs/ tests/
 ▸ Doctor:   sccs doctor check
 ▸ Zsh:      sccs convert fish-to-zsh --dry-run
-▸ Codex:    sccs integrations codex export-all --dry-run
-▸ Hooks:    sccs integrations codex export-hooks --dry-run  (danach /hooks in Codex)
+▸ Sync-all: sccs integrations sync-all --dry-run
 ▸ Profile:  sccs profile off gsd
 ▸ Statusln: sccs statusline list
 ▸ Deploy:   sccs deploy export odoo-server -o odoo.zip --dry-run

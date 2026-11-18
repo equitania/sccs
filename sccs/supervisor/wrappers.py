@@ -1,4 +1,4 @@
-"""Scan Claude agents and recognise the thin wrapper shapes (agy, opencode, codex).
+"""Scan Claude agents and recognise the thin wrapper shapes (agy, opencode).
 
 Recognition looks only inside the first fenced ``bash`` block of the agent body.
 Nothing here writes; edits happen textually in a later step, never via re-rendered
@@ -8,32 +8,28 @@ frontmatter.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from sccs.convert.frontmatter import parse_frontmatter_ex
-from sccs.supervisor.tools import codex_default_model
 
 if TYPE_CHECKING:
     from sccs.config.schema import SccsConfig
 
-TemplateId = Literal["agy", "opencode", "codex"]
+TemplateId = Literal["agy", "opencode"]
 Managed = Literal["new", "adopted", "no"]
 
-_TEMPLATES: tuple[str, ...] = ("agy", "opencode", "codex")
-_CODEX_PLUGIN_KEY = "codex@openai-codex"
+_TEMPLATES: tuple[str, ...] = ("agy", "opencode")
 _BASH_BLOCK = re.compile(r"```bash[ \t]*\r?\n(.*?)\r?\n[ \t]*```", re.DOTALL)
-_MODEL_FLAG: dict[str, str] = {"agy": "--model", "opencode": "-m", "codex": "-m"}
+_MODEL_FLAG: dict[str, str] = {"agy": "--model", "opencode": "-m"}
 
 
 @dataclass(frozen=True)
 class AgentInfo:
     name: str
     path: Path | None
-    source: Literal["user", "plugin"]
     template: TemplateId | None
     managed: Managed
     cli_model: str | None
@@ -43,8 +39,6 @@ class AgentInfo:
 
 def mode_label(agent: AgentInfo) -> str:
     """Human label for an agent's mode (shared by the CLI table and the TUI)."""
-    if agent.source == "plugin":
-        return "plugin"
     if agent.template is None:
         label = "unmanaged"
     elif agent.managed == "no":
@@ -72,8 +66,6 @@ def detect_shape(body: str) -> TemplateId | None:
         return "agy"
     if "opencode run --agent claude-ro" in text:
         return "opencode"
-    if "codex exec -s read-only" in text:
-        return "codex"
     return None
 
 
@@ -154,44 +146,17 @@ def _scan_user_agent(path: Path, excluded: bool) -> AgentInfo | None:
     hash_ok = None
     if managed != "no" and template is not None:
         hash_ok = sccs_meta.get("hash") == body_hash(body, template)
-    return AgentInfo(path.stem, path, "user", template, managed, cli_model, hash_ok, excluded)
+    return AgentInfo(path.stem, path, template, managed, cli_model, hash_ok, excluded)
 
 
 def _is_excluded(name: str, config: SccsConfig | None) -> bool:
     if config is None:
         return False
-    return name in config.opencode.exclude and name in config.pi.exclude and name in config.codex.exclude
-
-
-def _plugin_agents(home: Path) -> list[AgentInfo]:
-    try:
-        data: Any = json.loads((home / ".claude" / "plugins" / "installed_plugins.json").read_text(encoding="utf-8"))
-        entries = data["plugins"][_CODEX_PLUGIN_KEY]
-        usable = [e for e in entries if isinstance(e, dict) and e.get("installPath")]
-        usable.sort(key=lambda e: e.get("scope") != "user")  # stable: user scope first
-        install_paths = [Path(e["installPath"]) for e in usable]
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
-    if not install_paths:
-        return []
-    codex_model = codex_default_model(home)
-    found: list[AgentInfo] = []
-    seen: set[str] = set()
-    for install in install_paths:
-        try:
-            files = sorted((install / "agents").glob("*.md"))
-        except OSError:
-            continue
-        for file in files:
-            if file.stem in seen:
-                continue
-            seen.add(file.stem)
-            found.append(AgentInfo(f"codex:{file.stem}", file, "plugin", None, "no", codex_model, None, False))
-    return found
+    return name in config.opencode.exclude and name in config.pi.exclude
 
 
 def scan_agents(home: Path | None = None, config: SccsConfig | None = None) -> list[AgentInfo]:
-    """User agents from ``~/.claude/agents`` followed by Codex plugin agents."""
+    """User agents from ``~/.claude/agents``."""
     home = home if home is not None else Path.home()
     if config is None:
         try:
@@ -212,5 +177,4 @@ def scan_agents(home: Path | None = None, config: SccsConfig | None = None) -> l
         info = _scan_user_agent(path, _is_excluded(path.stem, config))
         if info is not None:
             agents.append(info)
-    agents.extend(_plugin_agents(home))
     return agents

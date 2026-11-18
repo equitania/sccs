@@ -1,6 +1,6 @@
 # SCCS — one pass across every installed agent CLI
 #
-# Without this, keeping four assistants current means running four to twelve
+# Without this, keeping three assistants current means running several
 # separate export commands and remembering which ones exist on this machine.
 # `sccs integrations sync-all` detects what is installed, shows one combined
 # plan, asks once, and applies it.
@@ -10,17 +10,9 @@
 # per target, not two that can drift apart. What this module adds is detection,
 # aggregation and a single confirmation.
 #
-# Two rules shape it:
-#   - `--overwrite` is the DEFAULT here, unlike the individual commands. A
-#     collection command that only ever creates new artefacts would never keep
-#     anything current, which is the entire reason it exists.
-#   - `--replace-foreign` is NOT the default. A target SCCS did not write may
-#     hold somebody's hand edits, and a convenience command is the worst place
-#     to discard those silently. Such targets are counted and named instead.
-#
-# Codex hooks are deliberately absent, for the same reason `codex export-all`
-# omits them: a hook runs code on every matching tool call and deserves its own
-# deliberate command.
+# `--overwrite` is the DEFAULT here, unlike the individual commands. A
+# collection command that only ever creates new artefacts would never keep
+# anything current, which is the entire reason it exists.
 
 from __future__ import annotations
 
@@ -38,9 +30,6 @@ class TargetPlan:
     location: str | None = None
     # Artefact kind -> number of pending items ("skills" -> 12).
     counts: dict[str, int] = field(default_factory=dict)
-    # Targets that exist but were not written by SCCS: reported, never touched
-    # unless the user passes --replace-foreign.
-    foreign: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -80,7 +69,7 @@ class Target(Protocol):
 
     def plan(self) -> TargetPlan: ...
 
-    def apply(self, *, dry_run: bool, replace_foreign: bool) -> TargetOutcome: ...
+    def apply(self, *, dry_run: bool) -> TargetOutcome: ...
 
 
 def collect_plans(targets: list[Target]) -> list[TargetPlan]:
@@ -105,7 +94,6 @@ def apply_plans(
     plans: list[TargetPlan],
     *,
     dry_run: bool,
-    replace_foreign: bool,
 ) -> list[TargetOutcome]:
     """Apply only the targets that are installed and actually have work."""
     by_key = {plan.key: plan for plan in plans}
@@ -115,7 +103,7 @@ def apply_plans(
         if plan is None or not plan.installed or plan.error or not plan.pending:
             continue
         try:
-            outcomes.append(target.apply(dry_run=dry_run, replace_foreign=replace_foreign))
+            outcomes.append(target.apply(dry_run=dry_run))
         except Exception as exc:  # noqa: BLE001 - report and continue to the next assistant
             outcomes.append(
                 TargetOutcome(key=target.key, label=target.label, errors={target.key: f"export failed: {exc}"})
@@ -133,7 +121,6 @@ def plans_to_dict(plans: list[TargetPlan]) -> list[dict]:
             "location": plan.location,
             "pending": plan.pending,
             "counts": plan.counts,
-            "foreign": plan.foreign,
             "notes": plan.notes,
             "error": plan.error,
         }
@@ -203,7 +190,7 @@ class AntigravityTarget:
             counts={"prompts": len(gaps)} if gaps else {},
         )
 
-    def apply(self, *, dry_run: bool, replace_foreign: bool) -> TargetOutcome:
+    def apply(self, *, dry_run: bool) -> TargetOutcome:
         from sccs.integrations.antigravity import migrate_skills_to_prompts
 
         result = migrate_skills_to_prompts(
@@ -247,7 +234,7 @@ class OpenCodeTarget:
             notes=["skills: read natively from ~/.claude/skills, no export needed"],
         )
 
-    def apply(self, *, dry_run: bool, replace_foreign: bool) -> TargetOutcome:
+    def apply(self, *, dry_run: bool) -> TargetOutcome:
         from sccs.integrations.opencode import (
             convert_agents_to_opencode,
             convert_commands_to_opencode,
@@ -311,7 +298,7 @@ class PiTarget:
             notes=_skill_limit_notes(self.detector._cc_skills_dir, self.exclude, self.label),
         )
 
-    def apply(self, *, dry_run: bool, replace_foreign: bool) -> TargetOutcome:
+    def apply(self, *, dry_run: bool) -> TargetOutcome:
         from sccs.integrations.pi import export_agents_to_pi, export_commands_to_pi, export_skills_to_pi
 
         outcome = TargetOutcome(key=self.key, label=self.label)
@@ -329,98 +316,4 @@ class PiTarget:
             outcome.skipped += len(result.skipped)
             outcome.errors.update(result.errors)
             outcome.warnings.update(result.warnings)
-        return outcome
-
-
-@dataclass
-class CodexTarget:
-    detector: Any
-    model_map: dict
-    reasoning_map: dict
-    state_manager: Any
-    exclude: list[str] | None = None
-    key: str = "codex"
-    label: str = "Codex"
-
-    def plan(self) -> TargetPlan:
-        info = self.detector.get_info()
-        if info is None:
-            return TargetPlan(key=self.key, label=self.label, installed=False)
-        state = self.state_manager.load()
-        skills = self.detector.get_skill_gaps(exclude_patterns=self.exclude, state=state)
-        agents = self.detector.get_agent_gaps(
-            self.model_map, self.reasoning_map, exclude_patterns=self.exclude, state=state
-        )
-        commands = self.detector.get_command_gaps(exclude_patterns=self.exclude, state=state)
-        counts = {"skills": len(skills), "agents": len(agents), "commands": len(commands)}
-        foreign = sorted(gap.name for gap in (*skills, *agents, *commands) if getattr(gap, "foreign_target", False))
-        notes = _skill_limit_notes(self.detector._cc_skills_dir, self.exclude, self.label)
-        notes.append("hooks excluded — run `codex export-hooks` deliberately")
-        return TargetPlan(
-            key=self.key,
-            label=self.label,
-            installed=True,
-            location=str(info.skills_dir),
-            counts={k: v for k, v in counts.items() if v},
-            foreign=foreign,
-            notes=notes,
-        )
-
-    def apply(self, *, dry_run: bool, replace_foreign: bool) -> TargetOutcome:
-        from sccs.integrations.codex import (
-            convert_agents_to_codex,
-            convert_commands_to_codex,
-            export_skills_to_codex,
-        )
-
-        outcome = TargetOutcome(key=self.key, label=self.label)
-        state = self.state_manager.load()
-        adopted = self.detector.adopt_in_sync(
-            state,
-            model_map=self.model_map,
-            reasoning_map=self.reasoning_map,
-            exclude_patterns=self.exclude,
-        )
-        jobs = (
-            (
-                "skills",
-                self.detector.get_skill_gaps(exclude_patterns=self.exclude, state=state),
-                export_skills_to_codex,
-            ),
-            (
-                "agents",
-                self.detector.get_agent_gaps(
-                    self.model_map, self.reasoning_map, exclude_patterns=self.exclude, state=state
-                ),
-                convert_agents_to_codex,
-            ),
-            (
-                "commands",
-                self.detector.get_command_gaps(exclude_patterns=self.exclude, state=state),
-                convert_commands_to_codex,
-            ),
-        )
-        wrote = False
-        for _kind, gaps, writer in jobs:
-            if not gaps:
-                continue
-            result = writer(
-                gaps,
-                dry_run=dry_run,
-                overwrite_existing=True,
-                replace_foreign=replace_foreign,
-                state=state,
-            )
-            outcome.created += len(result.created)
-            outcome.updated += len(result.updated)
-            outcome.skipped += len(result.skipped)
-            outcome.errors.update(result.errors)
-            outcome.warnings.update(result.warnings)
-            wrote = wrote or bool(result.created or result.updated)
-
-        if (wrote or adopted) and not dry_run:
-            try:
-                self.state_manager.save(state)
-            except OSError as exc:
-                outcome.errors["state"] = f"exported, but could not persist ownership state: {exc}"
         return outcome

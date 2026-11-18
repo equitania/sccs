@@ -1,6 +1,6 @@
 ---
 name: antigravity-worker
-description: Forwards a review, a second opinion or a bounded analysis to Google Gemini through the Antigravity CLI (`agy -p`) and returns Gemini's answer. Use when the main Claude session acts as supervisor and wants an independent non-Anthropic perspective — a cross-model review of a diff or design, edge cases, a "zweite Meinung von Gemini" — or when work is spread over several providers in parallel (Gemini via this agent, Codex via codex:codex-rescue). Read-only by default. NOT for Codex, NOT for tasks the main session can finish quickly itself.
+description: Forwards a review, a second opinion or a bounded analysis to Google Gemini through the Antigravity CLI (`agy -p`) and returns Gemini's answer. Use when the main Claude session acts as supervisor and wants an independent non-Anthropic perspective — a cross-model review of a diff or design, edge cases, a "zweite Meinung von Gemini" —. Read-only by default. NOT for tasks the main session can finish quickly itself.
 tools: Bash, Read
 model: haiku
 ---

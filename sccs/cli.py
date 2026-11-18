@@ -505,12 +505,11 @@ def capacity(ctx: click.Context, offline: bool, output_json: bool) -> None:
     """Show remaining plan quota per agent CLI, with routing advice.
 
     \b
-    Intended for a CAO supervisor deciding which worker to delegate to:
+    Intended for a supervising agent deciding which worker to delegate to:
         sccs capacity --json
 
     \b
     Sources differ in freshness, and the payload says which is which:
-        codex        read from its own session records (free, may be stale)
         antigravity  live via `agy -p "/usage"` (costs one tiny request)
         claude_code  not machine-readable; reported as the fallback reserve
     """
@@ -566,7 +565,7 @@ def _print_agents_table(console, payload: dict) -> None:
     table.add_column("Model")
     table.add_column("Mode")
     for agent in payload["agents"]:
-        tool_id = "codex" if agent.source == "plugin" else agent.template
+        tool_id = agent.template
         tool = tools.get(tool_id) if tool_id else None
         if tool is None:
             tool_cell = "-"
@@ -651,7 +650,7 @@ def agents_tools(ctx: click.Context, output_json: bool) -> None:
 
 
 @agents.command("models")
-@click.argument("tool", type=click.Choice(["claude", "codex", "opencode", "agy", "pi"]))
+@click.argument("tool", type=click.Choice(["claude", "opencode", "agy", "pi"]))
 @click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
 @click.pass_context
 def agents_models(ctx: click.Context, tool: str, output_json: bool) -> None:
@@ -707,7 +706,7 @@ def agents_set_model(ctx: click.Context, name: str, model: str, output_json: boo
 
 
 @agents.command("new")
-@click.argument("tool", type=click.Choice(["agy", "opencode", "codex", "pi"]))
+@click.argument("tool", type=click.Choice(["agy", "opencode", "pi"]))
 @click.argument("name")
 @click.option("--model", "model", default=None, help="Model for the wrapper (default: the template's default)")
 @click.option("--json", "output_json", is_flag=True, help="Output machine-readable JSON")
@@ -2132,7 +2131,7 @@ def integrations_group() -> None:
 
     \b
     Detect and manage integrations with Antigravity IDE, Claude Desktop,
-    OpenCode, Pi and OpenAI Codex.
+    OpenCode and Pi.
 
     \b
     Examples:
@@ -2141,7 +2140,6 @@ def integrations_group() -> None:
         sccs integrations trust-repo        Register SCCS repo as trusted
         sccs integrations opencode status   OpenCode export status
         sccs integrations pi status         Pi export status
-        sccs integrations codex status      Codex export status
     """
 
 
@@ -2176,10 +2174,7 @@ def integrations_status(ctx: click.Context) -> None:
     pi_detector = _make_pi_detector()
     pi_info = pi_detector.get_info()
 
-    codex_detector = _make_codex_detector()
-    codex_info = codex_detector.get_info()
-
-    if ag_info is None and cd_info is None and oc_info is None and pi_info is None and codex_info is None:
+    if ag_info is None and cd_info is None and oc_info is None and pi_info is None:
         console.print("[dim]No integrations detected[/dim]")
         return
 
@@ -2218,27 +2213,6 @@ def integrations_status(ctx: click.Context) -> None:
             f"  skills to export: {len(pi_skill_gaps)} · "
             f"agents to export: {len(pi_agent_gaps)} · "
             f"commands to export: {len(pi_command_gaps)}"
-        )
-
-    # Codex section
-    if codex_info is not None:
-        console.print(f"\n[bold]Codex[/bold] detected at {codex_info.codex_dir}")
-        codex_exclude = _resolve_codex_excludes()
-        # The model maps must be injected here exactly as `codex status` does:
-        # an agent gap is decided by comparing RENDERED TOML against the target
-        # file, and the rendered `model` line comes from the map. Falling back
-        # to the bundled default would make this overview disagree with
-        # `sccs integrations codex status` for anyone overriding codex.model_map.
-        codex_model_map, codex_reasoning_map = _resolve_codex_model_maps()
-        codex_skill_gaps = codex_detector.get_skill_gaps(exclude_patterns=codex_exclude)
-        codex_agent_gaps = codex_detector.get_agent_gaps(
-            codex_model_map, codex_reasoning_map, exclude_patterns=codex_exclude
-        )
-        codex_command_gaps = codex_detector.get_command_gaps(exclude_patterns=codex_exclude)
-        console.print(
-            f"  skills to export: {len(codex_skill_gaps)} · "
-            f"agents to export: {len(codex_agent_gaps)} · "
-            f"commands to export: {len(codex_command_gaps)}"
         )
 
 
@@ -2940,439 +2914,6 @@ def pi_export_all(ctx: click.Context, dry_run: bool, overwrite: bool) -> None:
         _run_pi_export(ctx, kind, dry_run, overwrite, ())
 
 
-# --- Codex integration sub-group ---
-
-
-@integrations_group.group("codex")
-def codex_group() -> None:
-    """Export Claude Code artefacts to OpenAI Codex (codex CLI).
-
-    \b
-    Codex reads skills in the agentskills.io SKILL.md format from
-    ~/.agents/skills/, so Claude skills are copied verbatim. Claude agents are
-    converted into Codex agent TOML files (~/.codex/agents/), and Claude
-    commands are wrapped as Codex skills (Codex custom prompts are deprecated;
-    skills are the official migration target).
-
-    \b
-    Examples:
-        sccs integrations codex status            Show Codex integration status
-        sccs integrations codex export-skills     Copy CC skills -> Codex skills
-        sccs integrations codex export-agents     Convert CC agents -> Codex TOML
-        sccs integrations codex export-commands   Wrap CC commands as Codex skills
-        sccs integrations codex export-all        Export skills, agents and commands
-    """
-
-
-def _resolve_codex_excludes() -> list[str]:
-    """Glob patterns to skip on Codex export.
-
-    Combines the doctor-managed patterns (gsd-*, playwright-cli — same registry
-    the sync engine excludes) with the user's optional ``codex.exclude``. Falls
-    back to the bundled doctor defaults when no config file exists, so
-    plugin-managed artefacts stay excluded out of the box.
-    """
-    from sccs.doctor.managed import get_doctor_managed_excludes
-    from sccs.doctor.schema import DoctorConfig
-
-    try:
-        config = load_config()
-    except FileNotFoundError:
-        return get_doctor_managed_excludes(DoctorConfig())
-
-    patterns = get_doctor_managed_excludes(config.doctor)
-    user_extra = getattr(config.codex, "exclude", None) or []
-    return patterns + list(user_extra)
-
-
-def _make_codex_detector():
-    """Build a CodexDetector honouring the configured dir overrides."""
-    from sccs.integrations.codex import CodexDetector
-    from sccs.utils.paths import expand_path
-
-    try:
-        config = load_config()
-    except FileNotFoundError:
-        return CodexDetector()
-
-    base = getattr(config.codex, "base_dir", None)
-    skills = getattr(config.codex, "skills_dir", None)
-    return CodexDetector(
-        codex_dir=expand_path(base) if base else None,
-        skills_dir=expand_path(skills) if skills else None,
-    )
-
-
-def _resolve_codex_model_maps() -> tuple[dict, dict]:
-    """Effective (model_map, reasoning_effort_map) for a CLI run.
-
-    Codex has no live model discovery, so this is static defaults + the user's
-    config override only (codex.model_map / extra_model_map /
-    reasoning_effort_map).
-    """
-    from sccs.convert.claude_to_codex import (
-        DEFAULT_CODEX_MODEL_MAP,
-        DEFAULT_CODEX_REASONING_EFFORT_MAP,
-    )
-
-    try:
-        config = load_config()
-    except FileNotFoundError:
-        return dict(DEFAULT_CODEX_MODEL_MAP), dict(DEFAULT_CODEX_REASONING_EFFORT_MAP)
-    return config.codex.effective_model_map, config.codex.effective_reasoning_effort_map
-
-
-def _codex_export_state_path() -> Path:
-    """State file that marks targets SCCS is allowed to update."""
-    from sccs.integrations.codex import DEFAULT_CODEX_EXPORT_STATE_PATH
-
-    return DEFAULT_CODEX_EXPORT_STATE_PATH
-
-
-def _codex_export_state_manager():
-    from sccs.integrations.codex import CodexExportStateManager
-
-    return CodexExportStateManager(state_path=_codex_export_state_path())
-
-
-def _validate_codex_models(detector, model_map: dict) -> tuple[list[str], list[str]]:
-    """Check model slugs when Codex has a local model catalogue."""
-    from sccs.integrations.codex import validate_model_map_against_cache
-
-    return validate_model_map_against_cache(model_map, detector._codex_dir / "models_cache.json")
-
-
-def _codex_hooks_paths() -> tuple[Path, Path]:
-    """(claude settings.json, codex hooks.json), honouring codex.base_dir."""
-    from sccs.utils.paths import expand_path
-
-    settings = Path.home() / ".claude" / "settings.json"
-    try:
-        config = load_config()
-    except (FileNotFoundError, Exception):  # noqa: BLE001 — defensive fallback
-        return settings, Path.home() / ".codex" / "hooks.json"
-    base = getattr(config.codex, "base_dir", None)
-    codex_home = expand_path(base) if base else Path.home() / ".codex"
-    return settings, codex_home / "hooks.json"
-
-
-def _codex_hooks_state_path() -> Path:
-    """Where the hook-ownership state lives. Split out so tests can redirect it."""
-    from sccs.integrations.codex_hooks import DEFAULT_CODEX_HOOKS_STATE_PATH
-
-    return DEFAULT_CODEX_HOOKS_STATE_PATH
-
-
-@codex_group.command("status")
-@click.pass_context
-def codex_status(ctx: click.Context) -> None:
-    """Show Codex installation and export gaps."""
-    console = ctx.obj["console"]
-    detector = _make_codex_detector()
-    info = detector.get_info()
-
-    if info is None:
-        console.print("[dim]Codex is not installed (~/.codex/ not found)[/dim]")
-        return
-
-    console.print(f"[bold]Codex[/bold] detected at {info.codex_dir}")
-    console.print(f"  skills target: {info.skills_dir} · agents target: {info.agents_dir}")
-
-    exclude = _resolve_codex_excludes()
-    model_map, reasoning_map = _resolve_codex_model_maps()
-    model_errors, model_warnings = _validate_codex_models(detector, model_map)
-    for warning in model_warnings:
-        console.print(f"[yellow]Warning:[/yellow] {warning}")
-    for error in model_errors:
-        console.print(f"[red]Model configuration error:[/red] {error}")
-    state = _codex_export_state_manager().load()
-    skill_gaps = detector.get_skill_gaps(exclude_patterns=exclude, state=state)
-    agent_gaps = detector.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude, state=state)
-    command_gaps = detector.get_command_gaps(exclude_patterns=exclude, state=state)
-
-    for title, gaps in (
-        ("Skills to export", skill_gaps),
-        ("Agents to export (as TOML)", agent_gaps),
-        ("Commands to export (as skills)", command_gaps),
-    ):
-        console.print(f"\n[bold]{title} ({len(gaps)}):[/bold]")
-        for gap in gaps:
-            if getattr(gap, "blocked", False):
-                label = "[red]blocked — skipped[/red]"
-            elif getattr(gap, "collision", False):
-                label = "[red]collision — skipped[/red]"
-            elif getattr(gap, "foreign_target", False):
-                label = "[yellow]outdated — foreign target, needs --replace-foreign[/yellow]"
-            elif gap.needs_update:
-                label = "[yellow]outdated[/yellow]"
-            else:
-                label = "[red]missing[/red]"
-            console.print(f"  {gap.name} — {label}")
-
-    _print_skill_limit_violations(console, detector._cc_skills_dir, exclude, "Codex")
-
-    from sccs.integrations.codex_hooks import CodexHooksStateManager, build_hooks_plan
-
-    settings_path, hooks_path = _codex_hooks_paths()
-    plan, hooks_error = build_hooks_plan(
-        settings_path, hooks_path, CodexHooksStateManager(state_path=_codex_hooks_state_path())
-    )
-    console.print("\n[bold]Hooks:[/bold]")
-    if hooks_error is not None or plan is None:
-        console.print(f"  [red]{hooks_error}[/red]")
-    elif plan.unchanged:
-        console.print("  [dim]up to date[/dim]")
-    else:
-        console.print(f"  {len(plan.added)} to add · {len(plan.updated)} to update · {len(plan.removed)} to remove")
-
-
-def _run_codex_export(ctx, kind, dry_run, overwrite, selected_names, replace_foreign=False) -> None:
-    """Shared body for the three Codex export commands.
-
-    kind is one of 'skills', 'agents', 'commands'. Prints the result and exits
-    non-zero on errors via _print_conversion_result.
-    """
-    from sccs.integrations.codex import (
-        convert_agents_to_codex,
-        convert_commands_to_codex,
-        export_skills_to_codex,
-    )
-
-    console = ctx.obj["console"]
-    detector = _make_codex_detector()
-    if not detector.is_installed():
-        console.print_error("Codex is not installed (~/.codex/ not found)")
-        sys.exit(1)
-
-    # Explicit name selection overrides the default exclude (the user asked for
-    # a specific artefact by name, even a doctor-managed one).
-    exclude = None if selected_names else _resolve_codex_excludes()
-    selected = list(selected_names) if selected_names else None
-    state_manager = _codex_export_state_manager()
-    state = state_manager.load()
-    model_map, reasoning_map = _resolve_codex_model_maps()
-    # Claim targets that already match the source, so the foreign-target guard
-    # fires on real divergence rather than on a missing ownership record.
-    adopted = detector.adopt_in_sync(
-        state,
-        model_map=model_map,
-        reasoning_map=reasoning_map,
-        exclude_patterns=_resolve_codex_excludes(),
-    )
-
-    if kind == "agents":
-        model_errors, model_warnings = _validate_codex_models(detector, model_map)
-        for warning in model_warnings:
-            console.print_info(warning)
-        if model_errors:
-            for error in model_errors:
-                console.print_error(error)
-            sys.exit(1)
-        gaps = detector.get_agent_gaps(model_map, reasoning_map, exclude_patterns=exclude, state=state)
-        export_fn, unit = convert_agents_to_codex, "agents"
-    elif kind == "commands":
-        gaps = detector.get_command_gaps(exclude_patterns=exclude, state=state)
-        export_fn, unit = convert_commands_to_codex, "commands"
-    else:
-        gaps = detector.get_skill_gaps(exclude_patterns=exclude, state=state)
-        export_fn, unit = export_skills_to_codex, "skills"
-
-    if selected:
-        # A typo must not look like success: an artefact already in sync
-        # produces no gap, and so does a name that does not exist at all.
-        # Compare against the source tree to tell the two apart.
-        known = detector.source_names(kind)
-        unknown = sorted(name for name in selected if name not in known)
-        if unknown:
-            console.print_error(f"No such {unit[:-1]} in ~/.claude: {', '.join(unknown)}")
-            sys.exit(1)
-        gaps = [gap for gap in gaps if gap.name in set(selected)]
-
-    if not gaps:
-        console.print_success(f"All {unit} are already up to date in Codex")
-        return
-
-    if dry_run:
-        console.print_info("Dry run — no files will be written\n")
-
-    result = export_fn(
-        gaps,
-        dry_run=dry_run,
-        overwrite_existing=overwrite,
-        replace_foreign=replace_foreign,
-        selected=selected,
-        state=state,
-    )
-    if not dry_run and (result.created or result.updated or adopted):
-        try:
-            state_manager.save(state)
-        except OSError as exc:
-            result.errors["state"] = f"export completed but could not persist SCCS ownership state: {exc}"
-    _print_conversion_result(console, result, dry_run=dry_run, verbose=ctx.obj["verbose"], unit=unit)
-    if kind == "skills" and (result.created or result.updated):
-        console.print_info(
-            "Codex activates skills contextually. Request one explicitly with $<skill-name>; "
-            "start a new Codex session if its skill list is cached."
-        )
-
-
-@codex_group.command("export-skills")
-@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing skills (default: no)")
-@click.option("--force", is_flag=True, help="Alias for --overwrite; foreign targets need --replace-foreign")
-@click.option(
-    "--replace-foreign",
-    is_flag=True,
-    help="Also replace targets SCCS did not write (may discard hand edits at the target)",
-)
-@click.option("-s", "--skill", "skills", multiple=True, help="Limit to specific skill (repeatable)")
-@click.pass_context
-def codex_export_skills(
-    ctx: click.Context,
-    dry_run: bool,
-    overwrite: bool,
-    force: bool,
-    replace_foreign: bool,
-    skills: tuple[str, ...],
-) -> None:
-    """Copy Claude skills into Codex skills (~/.agents/skills/).
-
-    Codex activates skills contextually; request one explicitly as
-    ``$<skill-name>``. Start a new session if its available-skill list is cached.
-    """
-    _run_codex_export(ctx, "skills", dry_run, overwrite or force, skills, replace_foreign)
-
-
-@codex_group.command("export-agents")
-@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing agents (default: no)")
-@click.option("--force", is_flag=True, help="Alias for --overwrite; foreign targets need --replace-foreign")
-@click.option(
-    "--replace-foreign",
-    is_flag=True,
-    help="Also replace targets SCCS did not write (may discard hand edits at the target)",
-)
-@click.option("-a", "--agent", "agents", multiple=True, help="Limit to specific agent (repeatable)")
-@click.pass_context
-def codex_export_agents(
-    ctx: click.Context,
-    dry_run: bool,
-    overwrite: bool,
-    force: bool,
-    replace_foreign: bool,
-    agents: tuple[str, ...],
-) -> None:
-    """Convert Claude agents into Codex agent TOML files (~/.codex/agents/)."""
-    _run_codex_export(ctx, "agents", dry_run, overwrite or force, agents, replace_foreign)
-
-
-@codex_group.command("export-commands")
-@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing commands (default: no)")
-@click.option("--force", is_flag=True, help="Alias for --overwrite; foreign targets need --replace-foreign")
-@click.option(
-    "--replace-foreign",
-    is_flag=True,
-    help="Also replace targets SCCS did not write (may discard hand edits at the target)",
-)
-@click.option("-c", "--command", "commands", multiple=True, help="Limit to specific command (repeatable)")
-@click.pass_context
-def codex_export_commands(
-    ctx: click.Context,
-    dry_run: bool,
-    overwrite: bool,
-    force: bool,
-    replace_foreign: bool,
-    commands: tuple[str, ...],
-) -> None:
-    """Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md)."""
-    _run_codex_export(ctx, "commands", dry_run, overwrite or force, commands, replace_foreign)
-
-
-@codex_group.command("export-all")
-@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.option("--overwrite/--no-overwrite", default=False, help="Update SCCS-managed existing artefacts (default: no)")
-@click.option("--force", is_flag=True, help="Alias for --overwrite; foreign targets need --replace-foreign")
-@click.option(
-    "--replace-foreign",
-    is_flag=True,
-    help="Also replace targets SCCS did not write (may discard hand edits at the target)",
-)
-@click.pass_context
-def codex_export_all(ctx: click.Context, dry_run: bool, overwrite: bool, force: bool, replace_foreign: bool) -> None:
-    """Export skills, agents and commands to Codex in one run.
-
-    Hooks are NOT included — they execute code on every tool call, so they need
-    a deliberate `sccs integrations codex export-hooks`.
-    """
-    console = ctx.obj["console"]
-    for kind in ("skills", "agents", "commands"):
-        console.print(f"[bold]Exporting {kind}…[/bold]")
-        _run_codex_export(ctx, kind, dry_run, overwrite or force, (), replace_foreign)
-
-
-@codex_group.command("export-hooks")
-@click.option("-n", "--dry-run", is_flag=True, help="Preview changes without executing")
-@click.pass_context
-def codex_export_hooks(ctx: click.Context, dry_run: bool) -> None:
-    """Export Claude hook entries into ~/.codex/hooks.json.
-
-    Merges into the file rather than owning it: entries SCCS did not write are
-    left alone. Deliberately NOT part of `export-all` — hooks execute code on
-    every tool call, so they stay behind their own command.
-    """
-    from sccs.integrations.codex_hooks import (
-        CodexHooksStateManager,
-        build_hooks_plan,
-        write_hooks_plan,
-    )
-
-    console = ctx.obj["console"]
-    detector = _make_codex_detector()
-    if not detector.is_installed():
-        console.print_error("Codex is not installed (~/.codex/ not found)")
-        sys.exit(1)
-
-    settings_path, hooks_path = _codex_hooks_paths()
-    state_manager = CodexHooksStateManager(state_path=_codex_hooks_state_path())
-
-    plan, error = build_hooks_plan(settings_path, hooks_path, state_manager)
-    if error is not None:
-        console.print_error(error)
-        sys.exit(1)
-    assert plan is not None  # error is None iff plan is not, per build_hooks_plan's contract
-
-    if dry_run:
-        console.print_info("Dry run — no files will be written\n")
-
-    for label, names, colour in (
-        ("Would add" if dry_run else "Added", plan.added, "green"),
-        ("Would update" if dry_run else "Updated", plan.updated, "yellow"),
-        ("Would remove" if dry_run else "Removed", plan.removed, "red"),
-    ):
-        for name in names:
-            console.print(f"  [{colour}]{label}:[/{colour}] {name}")
-
-    if plan.warnings:
-        console.print(f"\n[yellow]Warnings ({len(plan.warnings)}):[/yellow]")
-        for warning in plan.warnings:
-            console.print(f"  [yellow]![/yellow] {warning}")
-
-    if plan.unchanged:
-        console.print_success("Hooks are already up to date in Codex")
-        return
-
-    write_error = write_hooks_plan(plan, hooks_path, state_manager, dry_run=dry_run)
-    if write_error is not None:
-        console.print_error(write_error)
-        sys.exit(1)
-
-    if not dry_run:
-        console.print_success(f"\nWrote {hooks_path}")
-        # Codex trusts hooks by hash, so a fresh export always needs review.
-        console.print_info("Run /hooks in Codex to review and trust the new entries — until then they do not run")
-
-
 # --- Doctor command group ---
 
 
@@ -3427,7 +2968,6 @@ def _collect_doctor_statuses(
     don't also want the plugin/npx-tool registry lookups `check_updates` implies.
     """
     from sccs.doctor.bundled_mods import BundledModDetector
-    from sccs.doctor.cao import CaoDetector
     from sccs.doctor.defaults import MIN_PWSH_MAJOR
     from sccs.doctor.detectors import (
         BrowserBundleDetector,
@@ -3468,7 +3008,6 @@ def _collect_doctor_statuses(
     path_prefix_specs = doctor_cfg.effective_path_prefix_checks()
     status_line_specs = doctor_cfg.effective_status_line_checks()
     cli_tool_specs = doctor_cfg.effective_cli_tools()
-    cao_provider_specs = doctor_cfg.effective_cao_providers()
     disallowed_hooks = doctor_cfg.effective_disallowed_hooks()
     protected_hooks = doctor_cfg.effective_protected_hooks()
     state = state_manager or DoctorStateManager()
@@ -3503,9 +3042,6 @@ def _collect_doctor_statuses(
         "bundled_mods": BundledModDetector().get_statuses(doctor_cfg.effective_bundled_mods()),
         "skill_packages": SkillPackageDetector().get_statuses(skill_package_specs)
         + SkillPackageDetector().get_retired_statuses(doctor_cfg.retired_skill_package_specs()),
-        # Silent unless BOTH an installed CAO and the synced provider
-        # source exist — that pairing is the opt-in.
-        "cao_providers": CaoDetector().get_statuses(cao_provider_specs),
         "statusline_presets": _collect_statusline_preset_statuses(),
         "mirror": mirror,
         # A host whose config lacks the category that syncs config.yaml never
@@ -3617,7 +3153,6 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
             browser_bundles=statuses.get("browser_bundles"),
             status_lines=statuses.get("status_lines"),
             gsd_orphans=statuses.get("gsd_orphans"),
-            cao_providers=statuses.get("cao_providers"),
             skill_packages=statuses.get("skill_packages"),
             bundled_mods=statuses.get("bundled_mods"),
             mirror=statuses.get("mirror"),
@@ -3647,7 +3182,6 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
                 "cli_tools": statuses.get("cli_tools"),
                 "skill_packages": statuses.get("skill_packages"),
                 "bundled_mods": statuses.get("bundled_mods"),
-                "cao_providers": statuses.get("cao_providers"),
                 "mirror": statuses.get("mirror"),
                 "shared_config": statuses.get("shared_config"),
             }
@@ -3669,7 +3203,6 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
-        cao_providers=statuses.get("cao_providers"),
         statusline_presets=statuses.get("statusline_presets"),
         powershell=statuses.get("powershell"),
         skill_packages=statuses.get("skill_packages"),
@@ -3696,7 +3229,6 @@ def doctor_check(ctx: click.Context, update_check: bool, output_json: bool) -> N
         browser_bundles=statuses.get("browser_bundles"),
         status_lines=statuses.get("status_lines"),
         gsd_orphans=statuses.get("gsd_orphans"),
-        cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
         bundled_mods=statuses.get("bundled_mods"),
         mirror=statuses.get("mirror"),
@@ -3755,7 +3287,6 @@ def doctor_install(ctx: click.Context, yes: bool, include_optional: bool, output
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
-        cao_providers=statuses.get("cao_providers"),
         statusline_presets=statuses.get("statusline_presets"),
         skill_packages=statuses.get("skill_packages"),
         bundled_mods=statuses.get("bundled_mods"),
@@ -3825,7 +3356,6 @@ def doctor_update(ctx: click.Context, yes: bool, output_json: bool) -> None:
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
-        cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
         bundled_mods=statuses.get("bundled_mods"),
         mirror=statuses.get("mirror"),
@@ -3916,7 +3446,6 @@ def doctor_optimize(ctx: click.Context, strict: bool, yes: bool, include_optiona
         settings_path=statuses.get("settings_path"),
         gsd_orphans=statuses.get("gsd_orphans"),
         cli_tools=statuses.get("cli_tools"),
-        cao_providers=statuses.get("cao_providers"),
         skill_packages=statuses.get("skill_packages"),
         bundled_mods=statuses.get("bundled_mods"),
         mirror=statuses.get("mirror"),
@@ -4903,26 +4432,16 @@ def statusline_install(ctx: click.Context, name: str, yes: bool, use: bool) -> N
 @integrations_group.command("sync-all")
 @click.option("-n", "--dry-run", is_flag=True, help="Show the plan without writing anything")
 @click.option("-y", "--yes", is_flag=True, help="Skip the confirmation")
-@click.option(
-    "--replace-foreign",
-    is_flag=True,
-    help="Also replace Codex targets SCCS did not write (may discard hand edits at the target)",
-)
-@click.option("-t", "--target", "only", multiple=True, help="Limit to one assistant: antigravity/opencode/pi/codex")
+@click.option("-t", "--target", "only", multiple=True, help="Limit to one assistant: antigravity/opencode/pi")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
 @click.pass_context
-def integrations_sync_all(
-    ctx: click.Context, dry_run: bool, yes: bool, replace_foreign: bool, only: tuple[str, ...], as_json: bool
-) -> None:
+def integrations_sync_all(ctx: click.Context, dry_run: bool, yes: bool, only: tuple[str, ...], as_json: bool) -> None:
     """Export Claude artefacts to every installed agent CLI in one pass.
 
     Detects which assistants are on this machine, shows one combined plan and
     asks once. Unlike the individual export commands this updates existing
     SCCS-managed targets by default — a collection command that only created
     new artefacts would keep nothing current.
-
-    Codex hooks are NOT included; they run code on every matching tool call and
-    need the deliberate `sccs integrations codex export-hooks`.
     """
     from sccs.integrations.sync_all import (
         apply_plans,
@@ -4975,7 +4494,7 @@ def integrations_sync_all(
             console.print_info("Nothing was written")
             return
 
-    outcomes = apply_plans(targets, plans, dry_run=False, replace_foreign=replace_foreign)
+    outcomes = apply_plans(targets, plans, dry_run=False)
 
     if as_json:
         emit_json(
@@ -4999,9 +4518,8 @@ def _build_sync_all_targets() -> list:
     """
     from sccs.integrations.detectors import AntigravityDetector
     from sccs.integrations.opencode import OpenCodeDetector
-    from sccs.integrations.sync_all import AntigravityTarget, CodexTarget, OpenCodeTarget, PiTarget
+    from sccs.integrations.sync_all import AntigravityTarget, OpenCodeTarget, PiTarget
 
-    codex_model_map, codex_reasoning_map = _resolve_codex_model_maps()
     return [
         AntigravityTarget(detector=AntigravityDetector()),
         OpenCodeTarget(
@@ -5010,13 +4528,6 @@ def _build_sync_all_targets() -> list:
             exclude=_resolve_opencode_excludes(),
         ),
         PiTarget(detector=_make_pi_detector(), exclude=_resolve_pi_excludes()),
-        CodexTarget(
-            detector=_make_codex_detector(),
-            model_map=codex_model_map,
-            reasoning_map=codex_reasoning_map,
-            state_manager=_codex_export_state_manager(),
-            exclude=_resolve_codex_excludes(),
-        ),
     ]
 
 
@@ -5048,12 +4559,6 @@ def _render_sync_all_plan(console, plans) -> None:
         console.print(f"  {label}  {state}  [dim]{_shorten_home(plan.location)}[/dim]", highlight=False)
         for note in plan.notes:
             console.print(f"{indent}[dim]· {note}[/dim]", highlight=False)
-        if plan.foreign:
-            console.print(
-                f"{indent}[yellow]· {len(plan.foreign)} foreign target(s) kept (--replace-foreign to replace)[/yellow]",
-                highlight=False,
-            )
-            console.print(f"{indent}  [dim]{', '.join(plan.foreign)}[/dim]", highlight=False)
 
 
 def _render_sync_all_outcomes(console, outcomes) -> None:

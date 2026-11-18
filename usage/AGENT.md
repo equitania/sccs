@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.75.0  ·  **Python:** ≥3.11
+- **Version:** 2.76.0  ·  **Python:** ≥3.11
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -28,15 +28,13 @@
 - Set up Claude Code as a supervisor that hands reviews to other agent CLIs (`sccs agents`): list the
   CLIs and the wrapper agents in `~/.claude/agents`, pick models, create read-only wrappers, adopt
   hand-written ones. Configuration only — it never starts or monitors agent work.
-- Report how much plan quota each orchestrated agent CLI has left (`sccs capacity`), with the
+- Report how much plan quota each agent CLI has left (`sccs capacity`), with the
   provenance of every number, so a supervisor routes by remaining capacity instead of guessing.
 - "Doctor": inspect & repair a Claude Code environment (Node, `claude` CLI, plugins, npx tools,
   bundled skills, Playwright browsers, filesystem permissions, statusline) — CI-friendly.
 - Push Claude agents/commands/MCP servers into OpenCode (`~/.config/opencode/`), with model mapping.
-- Push Claude skills/agents/commands one-way into Pi (`~/.pi/agent/`) and OpenAI Codex
-  (skills verbatim → `~/.agents/skills/`, agents → `~/.codex/agents/*.toml`, commands wrapped as skills),
-  requiring `--overwrite` for SCCS-managed targets and the separate `--replace-foreign` for targets
-  SCCS did not write. Both exports also name the skills the target will refuse to load.
+- Push Claude skills/agents/commands one-way into Pi (`~/.pi/agent/`). The export also names the
+  skills the target will refuse to load.
 - Convert a Fish shell config into a PowerShell profile or a native zsh profile (best-effort
   function translation, `uname`-guarded platform files); generate a hub README for the repo.
 - Park a whole extension's artefacts (skills, agents, hooks, statusline) with `profile off`, without
@@ -50,13 +48,13 @@
 | Command | Purpose | Args / Flags |
 |---|---|---|
 | `sccs agents` | On a terminal: full-screen view (Textual: Enter/`m` model, `n` new, `w` tools, `?` help, `r` reload, `q` quit). Piped/scripted: prints the agent table. Configuration only. | — |
-| `sccs agents adopt` | Mark a hand-written wrapper as sccs-managed: asks once, inserts only an `sccs:` block into the frontmatter, rest of the file byte for byte; adds the name to `opencode.exclude`/`pi.exclude`/`codex.exclude`. | NAME, -y/--yes (required with --json), --json |
-| `sccs agents list` | The agent CLIs and the agents in `~/.claude/agents` with tool state, model and mode (`read-only`, `read-only (not adopted)`, `unmanaged`, `plugin`; `€` = costs OpenRouter credit). | --json |
-| `sccs agents models` | Models a tool itself reports (empty list when it cannot be read). | TOOL = claude\|codex\|opencode\|agy\|pi, --json |
-| `sccs agents new` | Create a read-only wrapper agent `~/.claude/agents/NAME.md` from the bundled template; never overwrites a file; restart Claude Code afterwards. | TOOL = agy\|opencode\|codex, NAME, --model TEXT, --json |
+| `sccs agents adopt` | Mark a hand-written wrapper as sccs-managed: asks once, inserts only an `sccs:` block into the frontmatter, rest of the file byte for byte; adds the name to `opencode.exclude`/`pi.exclude`. | NAME, -y/--yes (required with --json), --json |
+| `sccs agents list` | The agent CLIs and the agents in `~/.claude/agents` with tool state, model and mode (`read-only`, `read-only (not adopted)`, `unmanaged`; `€` = costs OpenRouter credit). | --json |
+| `sccs agents models` | Models a tool itself reports (empty list when it cannot be read). | TOOL = claude\|opencode\|agy\|pi, --json |
+| `sccs agents new` | Create a read-only wrapper agent `~/.claude/agents/NAME.md` from the bundled template; never overwrites a file; restart Claude Code afterwards. | TOOL = agy\|opencode, NAME, --model TEXT, --json |
 | `sccs agents set-model` | Change the model of a managed wrapper (only the model in its command line; the wrapper's own `model:` stays). | NAME, MODEL, --json |
 | `sccs agents tools` | Which agent CLIs are installed, version, login presence, default model, config path. | --json |
-| `sccs capacity` | Remaining plan quota per agent CLI (codex from its session rollout, antigravity live via `agy -p "/usage"`, claude_code assumed), plus derived routing advice: image-generation target, independent reviewer, parallel-worker gate. | --json, --offline |
+| `sccs capacity` | Remaining plan quota per agent CLI (antigravity live via `agy -p "/usage"`, claude_code assumed), plus derived routing advice: image-generation target, independent reviewer, parallel-worker gate. | --json, --offline |
 | `sccs capability-card` | Print this capability card to stdout (raw Markdown, live version injected) — primary self-description surface for agents. | — |
 | `sccs categories disable` | Disable a category. | CATEGORY_NAME |
 | `sccs categories enable` | Enable a category. | CATEGORY_NAME |
@@ -94,13 +92,7 @@
 | `sccs integrations pi export-commands` | Copy Claude commands into Pi prompt templates (~/.pi/agent/prompts/). | -n/--dry-run, --overwrite/--no-overwrite, -c/--command TEXT |
 | `sccs integrations pi export-all` | Export skills, agents and commands to Pi in one run. | -n/--dry-run, --overwrite/--no-overwrite |
 | `sccs integrations pi status` | Show Pi installation and export gaps. | — |
-| `sccs integrations codex export-skills` | Copy Claude skills into Codex skills (~/.agents/skills/). | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign, -s/--skill TEXT |
-| `sccs integrations codex export-agents` | Convert Claude agents into Codex agent TOML files (~/.codex/agents/). | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign, -a/--agent TEXT |
-| `sccs integrations codex export-commands` | Wrap Claude commands as Codex skills (~/.agents/skills/<name>/SKILL.md). | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign, -c/--command TEXT |
-| `sccs integrations codex export-all` | Export skills, agents and commands to Codex in one run. | -n/--dry-run, --overwrite/--no-overwrite, --force, --replace-foreign |
-| `sccs integrations codex export-hooks` | Merge Claude hook entries into ~/.codex/hooks.json. | -n/--dry-run |
-| `sccs integrations codex status` | Show Codex installation and export gaps. | — |
-| `sccs integrations sync-all` | Export to every installed agent CLI in one confirmed pass. | -n/--dry-run, -y/--yes, --replace-foreign, -t/--target TEXT, --json |
+| `sccs integrations sync-all` | Export to every installed agent CLI in one confirmed pass. | -n/--dry-run, -y/--yes, -t/--target TEXT, --json |
 | `sccs integrations status` | Show detailed integration status. | — |
 | `sccs integrations trust-repo` | Register SCCS repository as trusted in Claude Desktop. | -n/--dry-run |
 | `sccs log` | Show sync history. | --last INTEGER |
@@ -226,43 +218,14 @@ sccs integrations pi export-skills -s astro       # one skill only (bypasses gsd
 ```
 One-way (Claude Code is source of truth). Pi has no subagent concept: skills + agents become Pi skills, commands become prompt templates. Format-identical, so copied verbatim (no conversion, no model mapping). `gsd-*` excluded by default.
 
-### Push artefacts to OpenAI Codex (codex CLI)
+### Push artefacts to every installed agent CLI in one pass
 ```bash
 sccs integrations sync-all -n                     # every installed assistant: one plan, nothing written
 sccs integrations sync-all                        # plan, ONE confirmation, export everywhere
-sccs integrations sync-all -t pi --json           # one assistant, machine-readable
-sccs integrations codex status                    # skills/agents/commands still to export
-sccs integrations codex export-skills --dry-run
-sccs integrations codex export-all                # skills verbatim → ~/.agents/skills/, agents → ~/.codex/agents/*.toml
-sccs integrations codex export-all --overwrite    # update targets SCCS previously created
-sccs integrations codex export-skills --replace-foreign  # also replace targets SCCS did NOT write
-sccs integrations codex export-agents -a reviewer # one agent only (bypasses gsd-* exclude)
-sccs integrations codex export-hooks --dry-run   # 10 shared events; others dropped with a warning
+sccs integrations sync-all -t pi --json           # one assistant, machine-readable (antigravity | opencode | pi)
 ```
-One-way (Claude Code is source of truth). Skills copy verbatim (identical agentskills.io format);
-agents become Codex agent TOML (body → `developer_instructions`, model alias → Codex model +
-reasoning effort, read-only tool sets → `sandbox_mode = "read-only"`); commands are wrapped as
-skills (Codex prompts are deprecated). Bundled model map (v2.58.3): `opus`/`sonnet` →
-`gpt-5.6-terra`, `haiku` → `gpt-5.6-luna`, efforts `high`/`medium`/`low`. All three aliases share
-ONE current model family and differ only in reasoning effort — Codex has no discovery *command*,
-but caches a catalogue at `~/.codex/models_cache.json` (one `slug` per entry) to validate the map
-before agent export; a missing configured slug aborts the export. SCCS tracks the targets it creates
-in `~/.config/sccs/.codex_export_state.yaml`, adopting any target that already matches byte for byte
-so ownership is not limited to targets it happened to write. Two independent switches, because they cover two
-different risks: `--overwrite` (or `--force`) updates targets SCCS recorded as its own, while
-`--replace-foreign` is required for a target SCCS did not write — one that may hold hand edits.
-Neither implies the other. Both exports additionally report skills the target will refuse to load
-(description > 1024 chars, name > 64, unparsable frontmatter) — reported, never blocking, and shown
-in `status` even when nothing is left to export. A name passed to `-s`/`-a`/`-c`
-that does not exist in `~/.claude/` fails with `No such agent/skill/command` and exit 1 (a name that is
-merely already in sync still succeeds). Name collisions: a real skill always wins over a same-named
-command (skipped with a warning). `gsd-*` excluded by default. No MCP merge / no CLAUDE.md→AGENTS.md (v1).
-A source file whose frontmatter is not valid YAML exports with the block stripped and a warning naming
-the file line/column (v2.58.4); the usual cause is `argument-hint: [a] [b...]` — quote it to fix.
-Hooks are a separate, deliberate export: `export-hooks` is NOT part of `export-all` (hooks execute
-code on every tool call) and merges into `~/.codex/hooks.json` rather than owning it — entries SCCS
-did not write are left alone. Run `/hooks` in Codex after exporting; until you approve there, the
-new or changed entries do not run.
+One-way (Claude Code is source of truth). Each assistant is detected on this machine; the pass shows
+one combined plan, asks once and applies it. One broken assistant never hides or sinks the others.
 
 ### Convert Fish config to PowerShell or zsh; regenerate hub README
 ```bash
@@ -304,17 +267,12 @@ sccs config show               # current config; also: validate | edit | init [-
 - **Destructive / overwriting:**
   - `sync --force local|repo` overwrites the losing side; `sync --force newer` decides by mtime — no per-item prompt.
   - `import --overwrite` replaces existing files (a timestamped backup is made *unless* `--no-backup`).
-  - Codex exports keep the two overwrite risks apart: `--overwrite`/`--force` updates only targets
-    recorded as SCCS-managed, `--replace-foreign` is needed for a target SCCS did not write (it may
-    carry hand edits). Without the matching option, an existing target is skipped. A command whose
-    skill slot is claimed by a real skill is never written — `--replace-foreign` does not release that.
   - `doctor optimize --strict` *removes* foreign plugins/MCP servers; doctor's hook removal / statusline
     rewrite are confirm-gated — `--yes` skips those confirms too. Use `--yes` only in CI.
   - `sccs doctor` mirror area: the host named by `doctor.mirror.source_host` is never modified;
     removals only under `optimize --strict`, one confirm each.
   - `integrations sync-all` updates existing SCCS-managed targets by DEFAULT (unlike the individual
-    export commands) — that is what makes it a maintenance command. It still never touches a foreign
-    target without `--replace-foreign`, and never exports Codex hooks.
+    export commands) — that is what makes it a maintenance command.
   - Mutating commands honour `-n/--dry-run` (or `--dry-run`) — preview first when unsure.
 - **Deploy ownership & revoke safety:**
   - A target that pre-dates the SCCS `deploy install` is recorded `pre_existing`; `revoke` never
@@ -373,7 +331,7 @@ sccs config show               # current config; also: validate | edit | init [-
   `gemini-*` — it also resells Claude/GPT models and a fallback to those would be a self-review. Free
   `opencode/*` models warn: unclear data policy, not for customer code. Pi has no tested template
   (`new pi` aborts with "Pi has no tested wrapper template yet."). Names: lowercase letters, digits, `-`.
-  Wrappers are kept out of the codex/opencode/pi exports (else they would call themselves there).
+  Wrappers are kept out of the opencode/pi exports (else they would call themselves there).
 
 ## Machine-readable outputs
 - **`--json`** (Core-First commands, single-line JSON on stdout via `click.echo`, never the ANSI Rich

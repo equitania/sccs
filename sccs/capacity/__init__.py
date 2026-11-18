@@ -1,7 +1,7 @@
 # SCCS Capacity Probe
 #
-# Reports how much plan quota each orchestrated CLI agent has left, so a CAO
-# supervisor can route work by remaining capacity instead of guessing.
+# Reports how much plan quota each agent CLI has left, so a supervising agent
+# can route work by remaining capacity instead of guessing.
 #
 # Lazy re-exports keep `import sccs` cheap (same pattern as sccs/__init__.py).
 

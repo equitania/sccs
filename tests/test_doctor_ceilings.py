@@ -130,7 +130,7 @@ class TestSourceConfirm:
         from sccs.doctor.detectors import PluginStatus
         from sccs.doctor.installer import _plugin_install_actions
 
-        spec = PluginSpec(name="codex", marketplace="openai-codex", marketplace_source="openai/codex-plugin-cc")
+        spec = PluginSpec(name="demo", marketplace="demo-market", marketplace_source="example/demo-plugin")
         actions = _plugin_install_actions([PluginStatus(spec=spec, installed=False, update_available=None)])
         [add] = [a for a in actions if "register marketplace" in a.label]
         assert add.auto_confirm is False

@@ -1,6 +1,6 @@
 """Source-side SKILL.md limit checks (sccs/integrations/skill_limits.py).
 
-The class of bug these guard: both the Pi and the Codex export copy skills
+The class of bug these guard: the Pi export copies skills
 verbatim, so a source violating the shared agentskills.io limits is copied
 faithfully and then silently dropped by the target. The export reports success
 while the skill never loads.

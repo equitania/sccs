@@ -254,7 +254,6 @@ class TestOptionalBlockPassthrough:
             ("profiles", {"mine": {"skills": ["x-*"]}}, lambda c: c.profiles["mine"].skills == ["x-*"]),
             ("doctor", {"min_node_major": 24}, lambda c: c.doctor.min_node_major == 24),
             ("pi", {"exclude": ["pi-*"]}, lambda c: c.pi.exclude == ["pi-*"]),
-            ("codex", {"exclude": ["cx-*"]}, lambda c: c.codex.exclude == ["cx-*"]),
             ("opencode", {"exclude": ["oc-*"]}, lambda c: c.opencode.exclude == ["oc-*"]),
         ],
     )
@@ -275,6 +274,33 @@ class TestOptionalBlockPassthrough:
 
         config = load_config(path)
         assert not hasattr(config, "not_a_real_block")
+
+    def test_legacy_codex_block_is_ignored(self, tmp_path, sample_config):
+        """Configs written before the Codex integration was removed still load."""
+        cfg = dict(sample_config)
+        cfg["codex"] = {"exclude": ["cx-*"], "base_dir": "~/.codex", "model_map": {"opus": "x"}}
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+        config = load_config(path)
+
+        assert not hasattr(config, "codex")
+
+    def test_legacy_cao_provider_keys_are_ignored(self, tmp_path, sample_config):
+        """Configs written before the CAO doctor check was removed still load."""
+        cfg = dict(sample_config)
+        cfg["doctor"] = {
+            "min_node_major": 24,
+            "cao_providers": [{"name": "my_cli", "binary": "my-cli"}],
+            "extra_cao_providers": [],
+        }
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+        config = load_config(path)
+
+        assert config.doctor.min_node_major == 24
+        assert not hasattr(config.doctor, "cao_providers")
 
 
 class TestDefaults:

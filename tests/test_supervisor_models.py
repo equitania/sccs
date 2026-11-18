@@ -36,17 +36,6 @@ def test_agy_list_from_fake_binary(fake_home, fake_bin):
     assert list_models("agy", fake_home).models == ("gemini-4-argon-high", "gemini-3.8-flash-medium")
 
 
-def test_codex_list_is_not_readable(fake_home, empty_path):
-    assert list_models("codex", fake_home).readable is False
-
-
-def test_codex_list_carries_config_model(fake_home, empty_path):
-    (fake_home / ".codex").mkdir()
-    (fake_home / ".codex" / "config.toml").write_text('model = "gpt-5.5"\n', encoding="utf-8")
-    ml = list_models("codex", fake_home)
-    assert ml.models == ("gpt-5.5",) and ml.readable is False
-
-
 def test_claude_list_is_fixed(fake_home, empty_path):
     ml = list_models("claude", fake_home)
     assert ml.models == ("haiku", "sonnet", "opus", "fable") and ml.readable
@@ -81,8 +70,8 @@ def test_pi_unparseable_is_unreadable(fake_home, empty_path):
     assert list_models("pi", fake_home).readable is False
 
 
-def test_codex_unreadable_list_is_unverified():
-    c = check_model("codex", "gpt-5.5", ModelList("codex", (), False))
+def test_unreadable_list_is_unverified():
+    c = check_model("opencode", "some/model", ModelList("opencode", (), False))
     assert c.ok and c.status == "unverified"
 
 

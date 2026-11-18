@@ -109,9 +109,9 @@ sccs capacity --offline          # Ohne Netzwerk-Probe (Antigravity /usage)
 sccs agents                      # Terminal: Vollbild-Ansicht; sonst Tabelle
 sccs agents list [--json]        # CLIs, Modelle und Agenten auf einen Blick
 sccs agents tools [--json]       # Installierte Agent-CLIs, Version, Login
-sccs agents models opencode      # Modelle eines Tools (claude|codex|opencode|agy|pi)
+sccs agents models opencode      # Modelle eines Tools (claude|opencode|agy|pi)
 sccs agents set-model NAME MODELL   # Modell eines verwalteten Wrappers ändern
-sccs agents new opencode NAME --model MODELL   # Read-only-Wrapper anlegen (agy|opencode|codex)
+sccs agents new opencode NAME --model MODELL   # Read-only-Wrapper anlegen (agy|opencode)
 sccs agents adopt NAME [--yes]   # Handgeschriebenen Wrapper übernehmen
 
 # Konvertierung (Shell-Profile aus der Fish-Config generieren)
@@ -124,11 +124,10 @@ sccs docs generate               # Hub-README für das Sync-Repository generiere
 # Capability Card (für LLM-/Agent-Konsum)
 sccs capability-card             # Capability Card (usage/AGENT.md) ausgeben
 
-# Integrationen (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
+# Integrationen (Antigravity, Claude Desktop, OpenCode, Pi)
 sccs integrations status                       # Integrations-Report
 sccs integrations sync-all -n                  # Alle installierten Assistenten: Plan ohne Schreiben
 sccs integrations sync-all                     # Plan zeigen, EINMAL bestätigen, alles exportieren
-sccs integrations sync-all --replace-foreign   # zusätzlich Codex-Ziele ersetzen, die SCCS nicht schrieb
 sccs integrations opencode status              # OpenCode: Installation + offene Konvertierungen
 sccs integrations opencode map-models          # CC-Modelle den OpenCode-Modellen zuweisen
 sccs integrations opencode export-agents -n    # Agents konvertieren (Vorschau)
@@ -136,11 +135,6 @@ sccs integrations opencode export-commands -n  # Commands konvertieren (Vorschau
 sccs integrations opencode merge-mcp -n        # MCP-Server in opencode.json mergen (Vorschau)
 sccs integrations pi status                    # Pi: Installation + offene Exporte
 sccs integrations pi export-all -n             # Skills/Agents/Commands nach Pi (Vorschau)
-sccs integrations codex status                 # Codex: Installation + offene Exporte
-sccs integrations codex export-skills -n       # Skills verbatim nach ~/.agents/skills (Vorschau)
-sccs integrations codex export-agents -n       # Agents -> Codex-TOML (Vorschau)
-sccs integrations codex export-commands -n     # Commands als Codex-Skills verpacken (Vorschau)
-sccs integrations codex export-all -n          # Alles in einem Lauf (Vorschau)
 ```
 
 ---
@@ -247,9 +241,9 @@ sccs capacity --offline          # Skip the network probe (Antigravity /usage)
 sccs agents                      # Terminal: full-screen view; otherwise a table
 sccs agents list [--json]        # CLIs, models and agents at a glance
 sccs agents tools [--json]       # Installed agent CLIs, version, login
-sccs agents models opencode      # Models of a tool (claude|codex|opencode|agy|pi)
+sccs agents models opencode      # Models of a tool (claude|opencode|agy|pi)
 sccs agents set-model NAME MODEL    # Change the model of a managed wrapper
-sccs agents new opencode NAME --model MODEL    # Create a read-only wrapper (agy|opencode|codex)
+sccs agents new opencode NAME --model MODEL    # Create a read-only wrapper (agy|opencode)
 sccs agents adopt NAME [--yes]   # Take over a hand-written wrapper
 
 # Convert (generate shell profiles from the Fish config)
@@ -262,11 +256,10 @@ sccs docs generate               # Generate the hub README for the sync reposito
 # Capability card (for LLM/agent consumption)
 sccs capability-card             # Print the capability card (usage/AGENT.md)
 
-# Integrations (Antigravity, Claude Desktop, OpenCode, Pi, Codex)
+# Integrations (Antigravity, Claude Desktop, OpenCode, Pi)
 sccs integrations status                       # Integration report
 sccs integrations sync-all -n                  # Every installed assistant: plan, write nothing
 sccs integrations sync-all                     # Show the plan, confirm ONCE, export everywhere
-sccs integrations sync-all --replace-foreign   # also replace Codex targets SCCS did not write
 sccs integrations opencode status              # OpenCode: install + outstanding conversions
 sccs integrations opencode map-models          # Assign CC models to OpenCode models
 sccs integrations opencode export-agents -n    # Convert agents (preview)
@@ -274,9 +267,4 @@ sccs integrations opencode export-commands -n  # Convert commands (preview)
 sccs integrations opencode merge-mcp -n        # Merge MCP servers into opencode.json (preview)
 sccs integrations pi status                    # Pi: install + outstanding exports
 sccs integrations pi export-all -n             # Skills/agents/commands to Pi (preview)
-sccs integrations codex status                 # Codex: install + outstanding exports
-sccs integrations codex export-skills -n       # Copy skills verbatim to ~/.agents/skills (preview)
-sccs integrations codex export-agents -n       # Agents -> Codex TOML (preview)
-sccs integrations codex export-commands -n     # Wrap commands as Codex skills (preview)
-sccs integrations codex export-all -n          # Everything in one run (preview)
 ```

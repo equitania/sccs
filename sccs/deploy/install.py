@@ -157,8 +157,8 @@ def install_bundle(
 ) -> InstallOutcome:
     """Install a deployment bundle and record what was written.
 
-    Ownership rule, the same line the Codex export draws between a target
-    SCCS wrote and one holding somebody's hand edits:
+    Ownership rule, the line between a target SCCS wrote and one holding
+    somebody's hand edits:
 
     * A target SCCS itself installed (a receipt entry exists for it and says
       it is ours) is refreshed, so a deployment never ships stale artefacts.

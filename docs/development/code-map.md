@@ -43,13 +43,12 @@ sccs/
 │   ├── exporter.py       # Scan + ZIP creation
 │   ├── importer.py       # ZIP extraction (zip-slip + symlink rejection)
 │   └── ui.py             # questionary checkbox helpers
-├── integrations/         # Antigravity IDE + Claude Desktop + OpenCode + Pi + Codex
+├── integrations/         # Antigravity IDE + Claude Desktop + OpenCode + Pi
 │   ├── detectors.py      # AntigravityDetector, ClaudeDesktopDetector
 │   ├── antigravity.py    # Skill→Prompt migration logic
 │   ├── claude_desktop.py # Trusted-folder registration
 │   ├── opencode.py       # OpenCodeDetector, agent/command convert, MCP merge
-│   ├── pi.py             # PiDetector, skill/agent/command export (pi.dev, verbatim copy)
-│   └── codex.py          # CodexDetector, skill copy + agent TOML + command skill-wrap
+│   └── pi.py             # PiDetector, skill/agent/command export (pi.dev, verbatim copy)
 ├── convert/              # Fish → PowerShell / Fish → Zsh profile conversion
 │   ├── fish_to_pwsh.py   # PS converter entry (function stubs)
 │   ├── rules.py          # alias/set/fish_add_path translation rules (shared regexes)
@@ -57,14 +56,12 @@ sccs/
 │   ├── fish_to_zsh.py    # Zsh converter entry (zsh -n gate, uname guards)
 │   ├── zsh_block.py      # Best-effort fish→zsh block translator
 │   ├── zsh_rules.py      # Zsh line rules
-│   ├── zsh_templates.py  # zshrc/conveniences/README templates
-│   ├── claude_to_codex.py # CC → Codex conversion rules (model/effort map, sandbox_mode)
-│   └── toml_write.py     # Minimal TOML emitter for Codex agent files
+│   └── zsh_templates.py  # zshrc/conveniences/README templates
 ├── supervisor/           # `sccs agents`: configure supervisor wrappers (configuration only)
-│   ├── tools.py          # Detect claude/codex/opencode/agy/pi: installed, version, login presence, default model
+│   ├── tools.py          # Detect claude/opencode/agy/pi: installed, version, login presence, default model
 │   ├── models.py         # Per-tool model lists, MODEL_PATTERN validation (gemini-* for agy)
-│   ├── wrappers.py       # Scan ~/.claude/agents, recognise the thin wrapper shapes (agy, opencode, codex)
-│   ├── render.py         # Create new wrapper agents from templates/ (agy.md, opencode.md, codex.md; read-only)
+│   ├── wrappers.py       # Scan ~/.claude/agents, recognise the thin wrapper shapes (agy, opencode)
+│   ├── render.py         # Create new wrapper agents from templates/ (agy.md, opencode.md; read-only)
 │   ├── edit.py           # Textual set-model and adopt (BOM/CRLF kept byte for byte)
 │   ├── tui.py            # Full-screen view (Textual; tool calls run in thread workers)
 │   └── templates/        # Wrapper templates (no Pi template yet)

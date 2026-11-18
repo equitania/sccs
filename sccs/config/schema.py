@@ -279,83 +279,6 @@ class PiConfig(BaseModel):
     )
 
 
-class CodexConfig(BaseModel):
-    """OpenAI Codex integration settings (codex CLI artefact export).
-
-    The export is one-way: skills are copied verbatim to ~/.agents/skills
-    (identical agentskills.io SKILL.md format), agents are converted to
-    ~/.codex/agents/*.toml, commands are wrapped as Codex skills. Codex has no
-    model-discovery command, so the model map is static + config override only.
-    """
-
-    # None keeps the default Codex home (~/.codex); a path overrides it
-    # (mainly for tests and non-standard installs).
-    base_dir: str | None = Field(
-        default=None,
-        description="Codex home directory. None keeps the default ~/.codex.",
-    )
-    # None keeps the default user skills root (~/.agents/skills — the
-    # agentskills.io location Codex scans; NOT ~/.codex/skills, which is
-    # reserved for OpenAI-bundled system skills).
-    skills_dir: str | None = Field(
-        default=None,
-        description="Codex user skills root. None keeps the default ~/.agents/skills.",
-    )
-    # None keeps the bundled DEFAULT_CODEX_MODEL_MAP; a dict fully replaces it.
-    model_map: dict[str, str] | None = Field(
-        default=None,
-        description="Override map of Claude model alias -> Codex model id. None keeps defaults.",
-    )
-    # Additive: merged on top of the effective map (wins over base entries).
-    extra_model_map: dict[str, str] = Field(
-        default_factory=dict,
-        description="Additional model aliases merged on top of the effective map.",
-    )
-    # None keeps the bundled DEFAULT_CODEX_REASONING_EFFORT_MAP.
-    reasoning_effort_map: dict[str, str] | None = Field(
-        default=None,
-        description="Override map of Claude model alias -> Codex model_reasoning_effort. None keeps defaults.",
-    )
-    # Extra glob patterns (matched against the artefact basename) skipped on
-    # export, on top of the doctor-managed patterns (e.g. gsd-*).
-    exclude: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Extra glob patterns (matched against artefact basename) skipped on export, "
-            "added to doctor-managed patterns."
-        ),
-    )
-
-    @field_validator("reasoning_effort_map")
-    @classmethod
-    def validate_reasoning_efforts(cls, value: dict[str, str] | None) -> dict[str, str] | None:
-        if value is None:
-            return value
-        from sccs.convert.claude_to_codex import validate_reasoning_effort_map
-
-        errors = validate_reasoning_effort_map(value)
-        if errors:
-            raise ValueError("; ".join(errors))
-        return value
-
-    @property
-    def effective_model_map(self) -> dict[str, str]:
-        """Bundled default (or full override) merged with extra_model_map."""
-        from sccs.convert.claude_to_codex import DEFAULT_CODEX_MODEL_MAP
-
-        base = dict(self.model_map) if self.model_map is not None else dict(DEFAULT_CODEX_MODEL_MAP)
-        return {**base, **self.extra_model_map}
-
-    @property
-    def effective_reasoning_effort_map(self) -> dict[str, str]:
-        """Bundled default reasoning-effort map or the full override."""
-        from sccs.convert.claude_to_codex import DEFAULT_CODEX_REASONING_EFFORT_MAP
-
-        if self.reasoning_effort_map is not None:
-            return dict(self.reasoning_effort_map)
-        return dict(DEFAULT_CODEX_REASONING_EFFORT_MAP)
-
-
 class SccsConfig(BaseModel):
     """Root configuration model for SCCS."""
 
@@ -379,12 +302,6 @@ class SccsConfig(BaseModel):
     pi: PiConfig = Field(
         default_factory=PiConfig,
         description="Pi integration settings (pi.dev artefact export).",
-    )
-    # Codex integration is fully optional and backwards-compatible: legacy
-    # config.yaml files without a `codex:` key get the bundled defaults.
-    codex: CodexConfig = Field(
-        default_factory=CodexConfig,
-        description="OpenAI Codex integration settings (codex CLI artefact export).",
     )
     # Profiles are fully optional: legacy config.yaml files without a
     # `profiles:` key get the bundled DEFAULT_PROFILES (currently `gsd`).

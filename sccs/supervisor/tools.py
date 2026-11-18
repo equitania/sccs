@@ -1,4 +1,4 @@
-"""Detect the five agent CLIs: installed, version, login presence, default model.
+"""Detect the four agent CLIs: installed, version, login presence, default model.
 
 Auth files are checked for existence only; their contents are never read.
 """
@@ -6,7 +6,6 @@ Auth files are checked for existence only; their contents are never read.
 from __future__ import annotations
 
 import json
-import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +13,7 @@ from typing import Any, Literal
 
 from sccs.doctor.runner import run_tool_version, which
 
-ToolId = Literal["claude", "codex", "opencode", "agy", "pi"]
+ToolId = Literal["claude", "opencode", "agy", "pi"]
 Login = Literal["yes", "unknown"]
 
 
@@ -44,17 +43,6 @@ def _claude_model(home: Path) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def codex_default_model(home: Path | None = None) -> str | None:
-    """Default model from ``~/.codex/config.toml`` (file read only, no binary is run)."""
-    home = home if home is not None else Path.home()
-    try:
-        data = tomllib.loads((home / ".codex" / "config.toml").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    value = data.get("model")
-    return value if isinstance(value, str) and value else None
-
-
 def _pi_model(home: Path) -> str | None:
     data = _read_json(home / ".pi" / "agent" / "settings.json")
     value = data.get("defaultModel") if isinstance(data, dict) else None
@@ -72,7 +60,6 @@ class _Spec:
 
 _SPECS: tuple[_Spec, ...] = (
     _Spec("claude", "Claude Code", ".claude", None, _claude_model),
-    _Spec("codex", "Codex", ".codex", ".codex/auth.json", codex_default_model),
     _Spec("opencode", "OpenCode", ".config/opencode", ".local/share/opencode/auth.json", None),
     _Spec("agy", "Antigravity", ".gemini/antigravity", None, None),
     _Spec("pi", "Pi", ".pi/agent", ".pi/agent/auth.json", _pi_model),

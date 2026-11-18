@@ -1,8 +1,8 @@
 # SCCS — source-side skill frontmatter limits
 #
-# Pi, Codex and Claude Code all read the same agentskills.io SKILL.md format,
-# and all three silently DROP a skill whose frontmatter breaks the shared
-# limits. Both the Pi and the Codex export copy skills verbatim, so a violation
+# Pi and Claude Code both read the same agentskills.io SKILL.md format,
+# and both silently DROP a skill whose frontmatter breaks the shared
+# limits. The Pi export copies skills verbatim, so a violation
 # in ~/.claude/skills/ reaches the target unchanged: the export reports success
 # while the skill never loads on the other side. That is a false success, and
 # checking the SOURCE is the only place where it can be named — the copy is
@@ -24,7 +24,7 @@ _SKIP_PATTERNS = ("_", ".")
 
 # Both limits are the agentskills.io values, enforced identically by Pi
 # (MAX_NAME_LENGTH / MAX_DESCRIPTION_LENGTH in its skill loader) and Claude
-# Code. Codex reads the same format.
+# Code.
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
 
