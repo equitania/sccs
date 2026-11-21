@@ -1,4 +1,4 @@
-# Mit Agenten mehrerer Anbieter arbeiten: Schritt-für-Schritt-Einrichtung (sccs 2.76.0)
+# Mit Agenten mehrerer Anbieter arbeiten: Schritt-für-Schritt-Einrichtung (sccs 2.76.1)
 
 [Deutsch](multi-provider-agents.de.md) · [English](multi-provider-agents.en.md)
 
@@ -25,7 +25,7 @@ Diese Anleitung richtet in zwölf Schritten ein, dass **Claude Code** (Anthropic
 
 Alle Snippets sind Fish-Syntax. Mit „Annahme“ markierte Stellen konnte ich nicht gegen die echte Hilfe prüfen.
 
-### 1. sccs 2.76.0 installieren oder aktualisieren
+### 1. sccs 2.76.1 installieren oder aktualisieren
 
 Voraussetzung ist [uv](https://docs.astral.sh/uv/).
 
@@ -35,7 +35,7 @@ uv tool upgrade sccs        # vorhandene Installation
 sccs --version
 ```
 
-**Erfolg:** `sccs, version 2.76.0` (oder höher).
+**Erfolg:** `sccs, version 2.76.1` (oder höher).
 
 ### 2. Die Werkzeuge installieren und prüfen
 

@@ -2234,6 +2234,10 @@ def integrations_migrate_skills(
     to ~/.antigravity/prompts/<name>.md
 
     \b
+    The mirror is opt-in: status and sync-all ignore it while
+    ~/.antigravity/prompts does not exist. This command creates it.
+
+    \b
     Examples:
         sccs integrations migrate-skills                Migrate all
         sccs integrations migrate-skills --dry-run      Preview only
@@ -2250,7 +2254,7 @@ def integrations_migrate_skills(
         console.print_error("Antigravity is not installed (~/.antigravity/ not found)")
         sys.exit(1)
 
-    gaps = detector.get_skill_gaps()
+    gaps = detector.get_skill_gaps(include_unused=True)
     if not gaps:
         console.print_success("All skills are already available in Antigravity prompts")
         return
@@ -4552,6 +4556,9 @@ def _render_sync_all_plan(console, plans) -> None:
             continue
         if plan.error:
             console.print(f"  {label}  [red]{plan.error}[/red]", highlight=False)
+            continue
+        if plan.skip_reason:
+            console.print(f"  {label}  [dim]skipped: {plan.skip_reason}[/dim]", highlight=False)
             continue
         state = f"[yellow]{plan.summary()}[/yellow]" if plan.pending else "[green]up to date[/green]"
         # highlight=False throughout: Rich's auto-highlighter recolours path

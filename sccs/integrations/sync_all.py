@@ -32,6 +32,8 @@ class TargetPlan:
     counts: dict[str, int] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     error: str | None = None
+    # Set when the target is installed but deliberately not served (opt-in unused).
+    skip_reason: str | None = None
 
     @property
     def pending(self) -> int:
@@ -100,7 +102,7 @@ def apply_plans(
     outcomes: list[TargetOutcome] = []
     for target in targets:
         plan = by_key.get(target.key)
-        if plan is None or not plan.installed or plan.error or not plan.pending:
+        if plan is None or not plan.installed or plan.error or plan.skip_reason or not plan.pending:
             continue
         try:
             outcomes.append(target.apply(dry_run=dry_run))
@@ -123,6 +125,7 @@ def plans_to_dict(plans: list[TargetPlan]) -> list[dict]:
             "counts": plan.counts,
             "notes": plan.notes,
             "error": plan.error,
+            "skip_reason": plan.skip_reason,
         }
         for plan in plans
     ]
@@ -181,6 +184,15 @@ class AntigravityTarget:
         info = self.detector.get_info()
         if info is None:
             return TargetPlan(key=self.key, label=self.label, installed=False)
+        if not info.prompts_dir_exists:
+            # The mirror is opt-in: only `sccs integrations migrate-skills` creates it.
+            return TargetPlan(
+                key=self.key,
+                label=self.label,
+                installed=True,
+                location=str(info.prompts_dir),
+                skip_reason="skill mirror not in use (run 'sccs integrations migrate-skills' to opt in)",
+            )
         gaps = self.detector.get_skill_gaps()
         return TargetPlan(
             key=self.key,
@@ -192,6 +204,9 @@ class AntigravityTarget:
 
     def apply(self, *, dry_run: bool) -> TargetOutcome:
         from sccs.integrations.antigravity import migrate_skills_to_prompts
+
+        if not self.detector.mirror_in_use():
+            return TargetOutcome(key=self.key, label=self.label)
 
         result = migrate_skills_to_prompts(
             self.detector.get_skill_gaps(),

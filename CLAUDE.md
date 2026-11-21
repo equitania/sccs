@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sccs** (SkillsCommandsConfigsSync) is a unified YAML-configured bidirectional synchronization tool for Claude Code files and optional shell configurations.
 
-**Version**: 2.76.0
+**Version**: 2.76.1
 
 ### Key Features
 
@@ -33,7 +33,7 @@ history lives in `RELEASE_NOTES.md`.
 - **Profiles / statusline presets** (`doctor/profiles.py`, `doctor/statusline.py`): `installable_npx_tools()` is profile-aware, `effective_npx_tools()` stays blind; installers run as `bash <file>`, never `curl | bash`. → [Doctor](docs/development/maintainer-notes.md#doctor)
 - **Fish coverage / statusline sync** (`config/defaults.py`, `sync/settings.py`): every fish file in exactly one enabled category; `item_pattern` is `statusline*` without the dot; `superseded_patterns` match by pattern. → [Sync categories](docs/development/maintainer-notes.md#sync-categories)
 - **Deployment profiles** (`sccs/deploy/`): `pre_existing` is sticky, foreign targets are never written or removed, ownership is keyed on the resolved target path, `RECEIPT_VERSION` is 2. → [Deploy](docs/development/maintainer-notes.md#deploy)
-- **Pi / OpenCode** (`sccs/integrations/`, `convert/`): skill limits are checked on the source, independent of gap detection; `sync-all` overwrites by default and reuses the per-target writers; the two frontmatter parsers stay different. Codex support was removed in 2.76.0. → [Integrations](docs/development/maintainer-notes.md#integrations-pi-opencode)
+- **Pi / OpenCode** (`sccs/integrations/`, `convert/`): skill limits are checked on the source, independent of gap detection; `sync-all` overwrites by default and reuses the per-target writers; the two frontmatter parsers stay different. Codex support was removed in 2.76.1. → [Integrations](docs/development/maintainer-notes.md#integrations-pi-opencode)
 - **Capacity probe** (`sccs/capacity/`): never invent a number; `unknown` ≠ `tight`; Gemini tight → no independent reviewer, never Antigravity on Claude. → [Capacity](docs/development/maintainer-notes.md#capacity)
 - **Supervisor wrappers** (`sccs/supervisor/`): the model is the only editable token and is validated (pattern, no leading `-`, `gemini-` for Antigravity); templates are read-only only; adoption inserts marker lines textually; `set-model` refreshes the hash only when it matched; unrecognised agents are never written; auth files presence-only; the core never imports Textual. → [Supervisor wrappers](docs/development/maintainer-notes.md#supervisor-wrappers-v2730)
 - **Converter literals** (`convert/`): fish single-quoted values stay literal; escape backticks and `$(` in double-quoted targets. → [Converters](docs/development/maintainer-notes.md#converters)

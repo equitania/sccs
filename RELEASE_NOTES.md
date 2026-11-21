@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 2.76.1 (21.11.2026)
+
+### Changed
+
+- **Antigravity skill mirror is opt-in.** The copy of skills in `~/.antigravity/prompts/` counts as in use only while that directory exists. Without it, `sccs status` and `sccs integrations status` show Antigravity as installed with the neutral note "skill mirror not in use" (no "missing" count, no warning colour, no `migrate-skills` hint), and `AntigravityDetector.get_skill_gaps()` returns no gaps.
+- **`sccs integrations sync-all` skips an unused Antigravity mirror** with a short note instead of recreating the prompts directory. The `--json` plan gains a `skip_reason` field per target.
+- **`sccs integrations migrate-skills` is unchanged for the user:** called explicitly it still creates `~/.antigravity/prompts/` and mirrors the skills. That call is the opt-in.
+
 ## Version 2.76.0 (18.11.2026)
 
 ### Removed

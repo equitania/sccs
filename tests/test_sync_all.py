@@ -314,3 +314,39 @@ class TestSyncAllCli:
 
         result = CliRunner().invoke(cli, ["integrations", "sync-all", "--yes"], obj={})
         assert result.exit_code == 1
+
+
+# --- Antigravity: the prompts mirror is opt-in -------------------------------
+
+from sccs.integrations.detectors import AntigravityDetector  # noqa: E402
+from sccs.integrations.sync_all import AntigravityTarget  # noqa: E402
+
+
+def _antigravity(tmp_path, *, mirror: bool):
+    base = tmp_path / ".antigravity"
+    base.mkdir()
+    if mirror:
+        (base / "prompts").mkdir()
+    skills = tmp_path / "skills" / "demo"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("# demo", encoding="utf-8")
+    return base, AntigravityTarget(detector=AntigravityDetector(base_dir=base, skills_dir=tmp_path / "skills"))
+
+
+class TestAntigravityTarget:
+    def test_unused_mirror_is_skipped_and_not_recreated(self, tmp_path):
+        base, target = _antigravity(tmp_path, mirror=False)
+        plan = target.plan()
+        assert plan.installed and plan.pending == 0
+        assert plan.skip_reason and "not in use" in plan.skip_reason
+        assert apply_plans([target], [plan], dry_run=False) == []
+        assert target.apply(dry_run=False).changed == 0
+        assert not (base / "prompts").exists()
+
+    def test_used_mirror_is_synced(self, tmp_path):
+        base, target = _antigravity(tmp_path, mirror=True)
+        plan = target.plan()
+        assert plan.skip_reason is None and plan.pending == 1
+        outcomes = apply_plans([target], [plan], dry_run=False)
+        assert outcomes[0].created == 1
+        assert (base / "prompts" / "demo.md").is_file()

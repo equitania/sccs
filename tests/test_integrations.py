@@ -41,6 +41,32 @@ class TestAntigravityDetector:
         assert info is not None
         assert info.prompts_dir_exists is True
 
+    def test_no_prompts_dir_means_no_gaps(self, tmp_path: Path) -> None:
+        """Installed without ~/.antigravity/prompts: the mirror is not in use."""
+        ag_dir = tmp_path / ".antigravity"
+        ag_dir.mkdir()
+        skills_dir = tmp_path / "skills"
+        (skills_dir / "my-skill").mkdir(parents=True)
+        (skills_dir / "my-skill" / "SKILL.md").write_text("# My Skill", encoding="utf-8")
+
+        detector = AntigravityDetector(base_dir=ag_dir, skills_dir=skills_dir)
+        assert detector.mirror_in_use() is False
+        assert detector.get_skill_gaps() == []
+        # The explicit opt-in (migrate-skills) still sees every skill.
+        assert [g.name for g in detector.get_skill_gaps(include_unused=True)] == ["my-skill"]
+        assert not (ag_dir / "prompts").exists()
+
+    def test_prompts_dir_means_mirror_in_use(self, tmp_path: Path) -> None:
+        ag_dir = tmp_path / ".antigravity"
+        (ag_dir / "prompts").mkdir(parents=True)
+        skills_dir = tmp_path / "skills"
+        (skills_dir / "my-skill").mkdir(parents=True)
+        (skills_dir / "my-skill" / "SKILL.md").write_text("# My Skill", encoding="utf-8")
+
+        detector = AntigravityDetector(base_dir=ag_dir, skills_dir=skills_dir)
+        assert detector.mirror_in_use() is True
+        assert [g.name for g in detector.get_skill_gaps()] == ["my-skill"]
+
     def test_skill_gaps_no_skills(self, tmp_path: Path) -> None:
         ag_dir = tmp_path / ".antigravity"
         ag_dir.mkdir()
@@ -51,7 +77,7 @@ class TestAntigravityDetector:
 
     def test_skill_gaps_missing(self, tmp_path: Path) -> None:
         ag_dir = tmp_path / ".antigravity"
-        ag_dir.mkdir()
+        (ag_dir / "prompts").mkdir(parents=True)
         skills_dir = tmp_path / "skills"
         skill = skills_dir / "my-skill"
         skill.mkdir(parents=True)
@@ -98,7 +124,7 @@ class TestAntigravityDetector:
 
     def test_skill_gaps_excludes(self, tmp_path: Path) -> None:
         ag_dir = tmp_path / ".antigravity"
-        ag_dir.mkdir()
+        (ag_dir / "prompts").mkdir(parents=True)
         skills_dir = tmp_path / "skills"
 
         for name in ["good-skill", "_archive", "_deprecated", ".hidden"]:

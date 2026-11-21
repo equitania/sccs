@@ -11,7 +11,7 @@
 
 - **Invoke:** `sccs <command> [options]`  ·  `python -m sccs <command>`
 - **Install:** `uv pip install -e ".[dev]"` (from repo root, into a `uv venv`)
-- **Version:** 2.76.0  ·  **Python:** ≥3.11
+- **Version:** 2.76.1  ·  **Python:** ≥3.11
 - **Framework:** Click (group `sccs.cli:cli`)  ·  **Human docs:** `docs/usage/*.md`, `README.md`
 - **Self-serve:** `sccs capability-card` prints this card from the installed tool (live version injected)
 
@@ -81,7 +81,7 @@
 | `sccs doctor update` | Update Claude plugins and refresh npx helper tools; re-pins scope boundaries in `gsd-*` prompts after the refresh. | --yes, --json |
 | `sccs export` | Export selected items as ZIP archive. | -o/--output PATH, --all, -c/--category TEXT, --include-managed |
 | `sccs import` | Import items from an SCCS export archive. | ZIP_PATH, -n/--dry-run, --overwrite, --no-backup, --all, --include-managed |
-| `sccs integrations migrate-skills` | Migrate Claude Code skills to Antigravity prompts. | -n/--dry-run, --overwrite/--no-overwrite, -s/--skill TEXT |
+| `sccs integrations migrate-skills` | Migrate Claude Code skills to Antigravity prompts. Opt-in: creates `~/.antigravity/prompts/`; status and sync-all ignore Antigravity skills while that directory is absent. | -n/--dry-run, --overwrite/--no-overwrite, -s/--skill TEXT |
 | `sccs integrations opencode export-agents` | Convert Claude agents into OpenCode agents (~/.config/opencode/agent/). | -n/--dry-run, --overwrite/--no-overwrite, -a/--agent TEXT |
 | `sccs integrations opencode export-commands` | Convert Claude commands into OpenCode commands (~/.config/opencode/command/). | -n/--dry-run, --overwrite/--no-overwrite, -c/--command TEXT |
 | `sccs integrations opencode map-models` | Interactively assign Claude model aliases to available OpenCode models. | -n/--dry-run |

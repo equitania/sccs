@@ -417,14 +417,14 @@ class Console:
             total_gaps = len(antigravity_gaps)
 
             status_parts: list[str] = []
-            if not antigravity_info.prompts_dir_exists:
-                status_parts.append("[yellow]prompts/ missing[/yellow]")
             if missing > 0:
                 status_parts.append(f"[yellow]{missing} missing[/yellow]")
             if outdated > 0:
                 status_parts.append(f"[yellow]{outdated} outdated[/yellow]")
 
-            if total_gaps == 0 and antigravity_info.prompts_dir_exists:
+            if not antigravity_info.prompts_dir_exists:
+                self._console.print("  [green]●[/green] Antigravity — installed, skill mirror not in use")
+            elif total_gaps == 0:
                 self._console.print("  [green]●[/green] Antigravity — all skills synced")
             else:
                 detail = ", ".join(status_parts) if status_parts else "no gaps"

@@ -58,17 +58,31 @@ class AntigravityDetector:
             prompts_dir_exists=prompts_dir.is_dir(),
         )
 
-    def get_skill_gaps(self, exclude: list[str] | None = None) -> list[AntigravitySkillGap]:
+    def mirror_in_use(self) -> bool:
+        """The skill mirror counts as in use only while ~/.antigravity/prompts exists."""
+        return (self._base_dir / "prompts").is_dir()
+
+    def get_skill_gaps(
+        self,
+        exclude: list[str] | None = None,
+        *,
+        include_unused: bool = False,
+    ) -> list[AntigravitySkillGap]:
         """
         Find Claude Code skills missing or outdated in Antigravity prompts.
 
         Args:
             exclude: Directory names to skip (defaults to _archive, _deprecated).
+            include_unused: Also report gaps when the prompts directory does not
+                exist. Only the explicit `migrate-skills` command sets this; it is
+                the opt-in that creates the mirror.
 
         Returns:
             List of skill gaps sorted by name.
         """
         if not self.is_installed():
+            return []
+        if not include_unused and not self.mirror_in_use():
             return []
 
         excludes = exclude if exclude is not None else self._DEFAULT_EXCLUDES
