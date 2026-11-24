@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 2.77.0 (24.11.2026)
+
+### Added
+
+- **`paste-lens` 1.1.0 marks text with the keyboard.** The bundled mod adds a selection to the prompt box of the terminal: `Shift+Left`/`Shift+Right` mark a character, `Shift+Option+Left`/`Shift+Option+Right` a word (`Shift+Alt` on Windows and Linux), `Shift+Home`/`Shift+End` to the edge of the row. `Backspace` or `Delete` then removes the marked block at once, typing or pasting replaces it, a plain move drops the mark. `Shift+Up` and `Shift+Down` are not handed to a mod, so a block of several rows is marked a word or a row at a time. `sccs doctor update` brings an installed `paste-lens` to 1.1.0; it takes effect in the next Claude Code session.
+
 ## Version 2.76.1 (21.11.2026)
 
 ### Changed

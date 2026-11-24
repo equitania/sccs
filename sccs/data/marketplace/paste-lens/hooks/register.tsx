@@ -7,14 +7,27 @@
 // above the prompt with an `Unfold` button instead.
 //
 // Where the text comes from: the engine folds the paste by itself and hands a
-// mod only the placeholder (`prompt.change`, origin `engine`), and no key but
-// the editing ones reaches a mod (not Tab, not the arrows). So the clipboard
-// is asked (`pbpaste`, `wl-paste`, `xclip`) and its answer is taken only when
-// its line count fits the placeholder's: an unrelated clipboard is never put
-// into the prompt as the paste.
+// mod only the placeholder (`prompt.change`, origin `engine`). So the
+// clipboard is asked (`pbpaste`, `wl-paste`, `xclip`) and its answer is taken
+// only when its line count fits the placeholder's: an unrelated clipboard is
+// never put into the prompt as the paste.
+//
+// Marking with the keyboard: the terminal's prompt box has no selection of its
+// own (the engine deletes only what the mouse marked). Shift with a move key
+// (Left, Right, Home, End; with Option or Alt a word at a time) marks from
+// where the caret stood to where it lands. Backspace or Delete then removes
+// the marked block at once, typing or pasting replaces it, a plain move drops
+// the mark. Shift+Up and Shift+Down never reach a mod, so a block of several
+// rows is marked a word or a row end at a time.
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type {
+  EngineInterface,
+  PromptDecoration,
+  PromptEditInput,
+  PromptEditResult,
+  Register,
+} from 'claude-code'
 
 import type { Paste } from '../types'
 
@@ -223,9 +236,86 @@ const track = async ($: EngineInterface, draft: string, carried: string): Promis
   }
 }
 
+/** What the keyboard marked: from `anchor` to `focus`, in the draft `draft`. */
+type Mark = { anchor: number; focus: number; draft: string }
+
+const MOVES: ReadonlySet<string> = new Set(['left', 'right', 'up', 'down', 'home', 'end'])
+
+// Kept here and not in the atom: it is read on every key, and it means nothing
+// once the draft reads otherwise.
+let mark: Mark | null = null
+
+const painted = (m: Mark): PromptDecoration => ({
+  start: Math.min(m.anchor, m.focus),
+  end: Math.max(m.anchor, m.focus),
+  backgroundColor: 'suggestion',
+  color: 'inverseText',
+})
+
+/**
+ * Answers one edit with the keyboard's mark in mind: a shifted move sets or
+ * stretches it, an edit made while it stands takes the marked block's place,
+ * and anything else drops it.
+ */
+export const marking = async (
+  e: PromptEditInput,
+  next: (e: PromptEditInput) => Promise<PromptEditResult>,
+): Promise<PromptEditResult> => {
+  // A mark over another draft is stale: a recall, a fill or an undo came between.
+  const held = mark !== null && mark.draft === e.text ? mark : null
+  mark = null
+
+  const isMove = e.inputText === '' && e.start === e.end
+
+  if (isMove && e.key?.shift === true && MOVES.has(e.key.key)) {
+    const box = await next(e)
+    const anchor = held?.anchor ?? e.cursor
+
+    if (box.text !== e.text || box.cursor === anchor) {
+      return box
+    }
+
+    if (box.cursor === 0) {
+      // A key that changes nothing never reaches a mod, and Backspace at the
+      // start of the text is one. So the caret is stood at the block's other
+      // end, where Backspace is an edit: the block is the same, marked from
+      // the start of the text instead.
+      mark = { anchor: 0, focus: anchor, draft: box.text }
+
+      return { ...box, cursor: anchor, decorations: [...(box.decorations ?? []), painted(mark)] }
+    }
+
+    mark = { anchor, focus: box.cursor, draft: box.text }
+
+    return { ...box, decorations: [...(box.decorations ?? []), painted(mark)] }
+  }
+
+  if (held === null) {
+    return next(e)
+  }
+
+  const from = Math.min(held.anchor, held.focus)
+  const to = Math.max(held.anchor, held.focus)
+
+  if (!isMove) {
+    // A deletion removes the block, whatever span its key would have taken;
+    // typed or pasted text goes in its place.
+    return next({ ...e, start: from, end: to })
+  }
+
+  // A plain Left or Right lands on the block's edge, as in other editors.
+  if (e.key?.key === 'left' || e.key?.key === 'right') {
+    const cursor = e.key.key === 'left' ? from : to
+
+    return next({ ...e, start: cursor, end: cursor })
+  }
+
+  return next(e)
+}
+
 export const register: Register = on => {
   on('prompt.edit', async ($, e, next) => {
-    const box = await next(e)
+    const box = await marking(e, next)
     await track($, box.text, e.inputText)
 
     return box
@@ -235,6 +325,8 @@ export const register: Register = on => {
   // itself arrives here (origin `engine`), as do a submit, a clear, an undo, a
   // recalled entry and a fill. The text is not carried: the clipboard is asked.
   on('prompt.change', async ($, e, next) => {
+    mark = null
+
     if (e.origin.kind === 'plugin' && e.origin.name === 'paste-lens') {
       // This mod's own fill: never answered with another, whatever the engine
       // made of it. Only what left the box is dropped.

@@ -238,6 +238,7 @@ doctor:
 ```
 
 - **`paste-lens`**: Claude Code faltet eine lange Einfügung zu `[Pasted text #1 +42 lines]` zusammen; lesen oder ändern kannst du sie dann nicht mehr. Mit `paste-lens` steht der volle Text einen Moment später wieder im Eingabefeld. Ab 400 Zeilen bleibt der Platzhalter stehen und über dem Eingabefeld erscheint ein Schalter „Unfold“. Der Text kommt aus der Zwischenablage und wird nur übernommen, wenn seine Zeilenzahl zum Platzhalter passt.
+  Seit sccs 2.77.0 markiert `paste-lens` außerdem Text per Tastatur: Umschalt+Links/Rechts zeichenweise, Umschalt+Option+Links/Rechts wortweise (Umschalt+Alt unter Windows und Linux), Umschalt+Pos1/Ende bis zum Zeilenrand. Rücktaste oder Entf löscht den markierten Block auf einmal, Tippen oder Einfügen ersetzt ihn.
 - `sccs doctor install` richtet die Mods ein, `sccs doctor update` hebt sie auf den Stand der installierten sccs-Version. `sccs doctor check` zeigt je Mod eine Zeile.
 - Die Dateien kommen ausschließlich aus dem sccs-Paket; sie werden nach `~/.local/share/sccs/mods` kopiert und von dort bei Claude Code als Marktplatz `sccs-mods` angemeldet.
 - Eine Änderung wirkt ab der nächsten Claude-Code-Sitzung. Mods sind bei Claude Code noch im Vorabzugang; ein Claude-Code-Update kann ihr Verhalten ändern.
